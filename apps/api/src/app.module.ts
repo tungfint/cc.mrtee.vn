@@ -10,6 +10,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { CodeforcesAccountsModule } from './codeforces-accounts/codeforces-accounts.module';
 import { SyncModule } from './sync/sync.module';
+import { ScoringModule } from './scoring/scoring.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { SyncModule } from './sync/sync.module';
     OrganizationsModule,
     CodeforcesAccountsModule,
     SyncModule,
+    ScoringModule,
   ],
   controllers: [HealthController],
 })

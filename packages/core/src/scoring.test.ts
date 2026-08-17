@@ -26,6 +26,13 @@ describe('CC level', () => {
     expect(calculateCcLevel(solves, policy).level).toBeCloseTo(expected, 2);
   });
 
+  it('does not decrease when another normally qualifying solve is added', () => {
+    const solves = [{ problemKey: 'a', rating: 1200 }];
+    const before = calculateCcLevel(solves, policy).level;
+    const after = calculateCcLevel([...solves, { problemKey: 'b', rating: 1000 }], policy).level;
+    expect(after).toBeGreaterThanOrEqual(before);
+  });
+
   it('matches the documented simulations', () => {
     const beginner = [800, 900, 1000, 1100, 1200, 1300].flatMap((rating) =>
       Array.from({ length: 15 }, (_, index) => ({

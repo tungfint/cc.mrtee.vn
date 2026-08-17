@@ -6,6 +6,7 @@ import { RedisService } from '../redis/redis.service';
 import { SubmissionIngestionService } from '../ingestion/submission-ingestion.service';
 import { DatabaseService } from '../database/database.service';
 import { FirstSolveService } from '../first-solve/first-solve.service';
+import { LevelService } from '../level/level.service';
 
 @Injectable()
 export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
@@ -17,6 +18,7 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
     private readonly codeforces: CodeforcesClient,
     private readonly ingestion: SubmissionIngestionService,
     private readonly firstSolves: FirstSolveService,
+    private readonly level: LevelService,
     private readonly database: DatabaseService,
   ) {}
 
@@ -25,7 +27,7 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
       CF_SYNC_QUEUE,
       async (job: Job<SyncJobData>) => {
         const startedAt = Date.now();
-        const [account] = await this.database.sql<{ reward_eligible_from: Date | null }[]>`
+        const [account] = await this.database.sql<{ reward_eligible_from: Date | string | null }[]>`
           UPDATE codeforces_accounts
           SET sync_status = 'SYNCING', last_sync_error = NULL, updated_at = now()
           WHERE id = ${job.data.accountId}
@@ -37,9 +39,10 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
         await this.firstSolves.recordBatch(
           job.data.userId,
           ingested,
-          account.reward_eligible_from,
+          account.reward_eligible_from ? new Date(account.reward_eligible_from) : null,
           job.data.mode === 'BACKFILL',
         );
+        await this.level.recompute(job.data.userId);
         const maxSubmissionId = submissions.reduce(
           (maximum, submission) => Math.max(maximum, submission.id),
           0,

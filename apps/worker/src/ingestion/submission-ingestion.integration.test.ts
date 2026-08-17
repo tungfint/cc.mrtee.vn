@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../database/database.service';
 import { SubmissionIngestionService } from './submission-ingestion.service';
 import { FirstSolveService } from '../first-solve/first-solve.service';
+import { LevelService } from '../level/level.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -15,6 +16,7 @@ if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required');
 let client: DatabaseClient;
 let service: SubmissionIngestionService;
 let firstSolves: FirstSolveService;
+let level: LevelService;
 
 const makeSubmission = (overrides: Partial<CodeforcesSubmission> = {}): CodeforcesSubmission => ({
   id: 123456,
@@ -39,6 +41,7 @@ describe('submission ingestion', () => {
     client = createDatabaseClient(databaseUrl, 4);
     service = new SubmissionIngestionService({ sql: client.connection } as DatabaseService);
     firstSolves = new FirstSolveService({ sql: client.connection } as DatabaseService);
+    level = new LevelService({ sql: client.connection } as DatabaseService);
   });
   beforeEach(async () => {
     await client.connection`
@@ -140,5 +143,28 @@ describe('submission ingestion', () => {
     await expect(firstSolves.record(user.id, team, new Date(0))).resolves.toMatchObject({
       created: false,
     });
+  });
+
+  it('persists the versioned CC level while respecting the default base', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
+    `;
+    if (!user) throw new Error('Missing fixture user');
+    const ingested = await service.ingestBatch(user.id, [
+      makeSubmission({ id: 300, problem: { ...makeSubmission().problem, rating: 1200 } }),
+      makeSubmission({
+        id: 301,
+        problem: { ...makeSubmission().problem, contestId: 1001, rating: 1400 },
+      }),
+    ]);
+    await firstSolves.recordBatch(user.id, ingested, new Date(0), false);
+    const result = await level.recompute(user.id);
+    expect(result.version).toBe('v2.0');
+    expect(result.level).toBe(800);
+    const [state] = await client.connection<{ cc_base: string; cc_level: string }[]>`
+      SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${user.id}
+    `;
+    expect(Number(state?.cc_base)).toBe(800);
+    expect(Number(state?.cc_level)).toBe(800);
   });
 });
