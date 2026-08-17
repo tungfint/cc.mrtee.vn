@@ -14,6 +14,7 @@ import type { EnvironmentService } from '../config/environment';
 import { RewardEngineService } from '../reward/reward-engine.service';
 import { AdaptiveSchedulerService, type SchedulerQueue } from '../sync/adaptive-scheduler.service';
 import type { RedisService } from '../redis/redis.service';
+import { ReconciliationService } from '../reconciliation/reconciliation.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -24,6 +25,7 @@ let service: SubmissionIngestionService;
 let firstSolves: FirstSolveService;
 let level: LevelService;
 let rewards: RewardEngineService;
+let reconciliation: ReconciliationService;
 
 const makeSubmission = (overrides: Partial<CodeforcesSubmission> = {}): CodeforcesSubmission => ({
   id: 123456,
@@ -50,6 +52,7 @@ describe('submission ingestion', () => {
     firstSolves = new FirstSolveService({ sql: client.connection } as DatabaseService);
     level = new LevelService({ sql: client.connection } as DatabaseService);
     rewards = new RewardEngineService({ sql: client.connection } as DatabaseService);
+    reconciliation = new ReconciliationService({ sql: client.connection } as DatabaseService);
   });
   beforeEach(async () => {
     await client.connection`
@@ -221,6 +224,7 @@ describe('submission ingestion', () => {
       firstSolves,
       level,
       rewards,
+      reconciliation,
       { sql: client.connection } as DatabaseService,
       environment,
     );
@@ -240,6 +244,7 @@ describe('submission ingestion', () => {
       firstSolves,
       level,
       rewards,
+      reconciliation,
       { sql: client.connection } as DatabaseService,
       environment,
     );
@@ -379,5 +384,125 @@ describe('submission ingestion', () => {
     const recovered = await makeScheduler().runOnce(queue);
     expect(recovered.enqueued).toBe(1);
     expect(queue.addCalls).toBe(2);
+  });
+
+  it('reverses an invalidated reward and promotes the next valid first solve', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Rejudge', 'Rejudge') RETURNING id
+    `;
+    if (!user) throw new Error('Missing rejudge user fixture');
+    const [season] = await client.connection<{ id: string }[]>`
+      INSERT INTO seasons (name, start_at, end_at, status, scoring_policy_version)
+      VALUES (
+        'Rejudge season', '2023-11-01T00:00:00Z', '2023-12-01T00:00:00Z',
+        'ACTIVE', 'v2.0'
+      ) RETURNING id
+    `;
+    if (!season) throw new Error('Missing rejudge season fixture');
+    const first = await service.ingest(
+      user.id,
+      makeSubmission({ id: 700, creationTimeSeconds: 1_700_000_000 }),
+    );
+    const later = await service.ingest(
+      user.id,
+      makeSubmission({ id: 701, creationTimeSeconds: 1_700_000_100 }),
+    );
+    await rewards.process(user.id, first, new Date(0));
+    await rewards.process(user.id, later, new Date(0));
+    const [original] = await client.connection<{ id: string; amount: string }[]>`
+      SELECT id, amount FROM point_transactions WHERE type = 'EARN' AND source_submission_id = 700
+    `;
+    if (!original) throw new Error('Missing original EARN fixture');
+    await service.ingest(
+      user.id,
+      makeSubmission({ id: 700, creationTimeSeconds: 1_700_000_000, verdict: 'WRONG_ANSWER' }),
+    );
+
+    await expect(reconciliation.reconcileUser(user.id, new Date(0))).resolves.toEqual({
+      corrected: 1,
+    });
+    const [result] = await client.connection<
+      {
+        canonical: string;
+        original_amount: string;
+        reversals: number;
+        replacement_earns: number;
+        wallet: string;
+        ledger: string;
+        season_score: string;
+        season_ledger: string;
+      }[]
+    >`
+      SELECT
+        (SELECT first_ok_submission_id::text FROM user_problem_solves
+          WHERE user_id = ${user.id}) AS canonical,
+        (SELECT amount::text FROM point_transactions WHERE id = ${original.id}) AS original_amount,
+        (SELECT count(*)::int FROM point_transactions
+          WHERE type = 'REVERSAL' AND related_transaction_id = ${original.id}) AS reversals,
+        (SELECT count(*)::int FROM point_transactions
+          WHERE type = 'EARN' AND source_submission_id = 701) AS replacement_earns,
+        (SELECT balance::text FROM user_wallets WHERE user_id = ${user.id}) AS wallet,
+        (SELECT sum(amount)::text FROM point_transactions
+          WHERE user_id = ${user.id} AND affects_wallet) AS ledger,
+        (SELECT score::text FROM season_user_totals
+          WHERE season_id = ${season.id} AND user_id = ${user.id}) AS season_score,
+        (SELECT sum(amount)::text FROM point_transactions
+          WHERE season_id = ${season.id} AND user_id = ${user.id} AND affects_season) AS season_ledger
+    `;
+    expect(result).toMatchObject({
+      canonical: '701',
+      original_amount: original.amount,
+      reversals: 1,
+      replacement_earns: 1,
+    });
+    expect(result?.wallet).toBe(result?.ledger);
+    expect(result?.season_score).toBe(result?.season_ledger);
+  });
+
+  it('records an explicit closed-season correction while retaining immutable history', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Closed', 'Closed') RETURNING id
+    `;
+    if (!user) throw new Error('Missing closed-season user fixture');
+    const [season] = await client.connection<{ id: string }[]>`
+      INSERT INTO seasons (name, start_at, end_at, status, scoring_policy_version)
+      VALUES (
+        'Closed correction', '2023-11-01T00:00:00Z', '2023-12-01T00:00:00Z',
+        'ACTIVE', 'v2.0'
+      ) RETURNING id
+    `;
+    if (!season) throw new Error('Missing closed season fixture');
+    const submission = await service.ingest(
+      user.id,
+      makeSubmission({ id: 800, creationTimeSeconds: 1_700_000_000 }),
+    );
+    await rewards.process(user.id, submission, new Date(0));
+    const [earn] = await client.connection<{ id: string; amount: string }[]>`
+      SELECT id, amount FROM point_transactions WHERE type = 'EARN' AND source_submission_id = 800
+    `;
+    if (!earn) throw new Error('Missing closed-season EARN fixture');
+    await client.connection`UPDATE seasons SET status = 'CLOSED' WHERE id = ${season.id}`;
+    await service.ingest(
+      user.id,
+      makeSubmission({ id: 800, creationTimeSeconds: 1_700_000_000, verdict: 'SKIPPED' }),
+    );
+    await reconciliation.reconcileUser(user.id, new Date(0));
+    const [result] = await client.connection<
+      { earn_amount: string; reversals: number; solves: number; workflow_audits: number }[]
+    >`
+      SELECT
+        (SELECT amount::text FROM point_transactions WHERE id = ${earn.id}) AS earn_amount,
+        (SELECT count(*)::int FROM point_transactions
+          WHERE type = 'REVERSAL' AND related_transaction_id = ${earn.id}) AS reversals,
+        (SELECT count(*)::int FROM user_problem_solves WHERE user_id = ${user.id}) AS solves,
+        (SELECT count(*)::int FROM audit_logs
+          WHERE action = 'CLOSED_SEASON_CORRECTION_RECORDED' AND entity_id = ${season.id}) AS workflow_audits
+    `;
+    expect(result).toEqual({
+      earn_amount: earn.amount,
+      reversals: 1,
+      solves: 0,
+      workflow_audits: 1,
+    });
   });
 });

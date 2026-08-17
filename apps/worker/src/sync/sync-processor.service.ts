@@ -7,6 +7,7 @@ import { FirstSolveService } from '../first-solve/first-solve.service';
 import { SubmissionIngestionService } from '../ingestion/submission-ingestion.service';
 import { LevelService } from '../level/level.service';
 import { RewardEngineService } from '../reward/reward-engine.service';
+import { ReconciliationService } from '../reconciliation/reconciliation.service';
 
 interface AccountState {
   reward_eligible_from: Date | string | null;
@@ -21,6 +22,7 @@ export class SyncProcessorService {
     private readonly firstSolves: FirstSolveService,
     private readonly level: LevelService,
     private readonly rewards: RewardEngineService,
+    private readonly reconciliation: ReconciliationService,
     private readonly database: DatabaseService,
     private readonly environment: EnvironmentService,
   ) {}
@@ -47,6 +49,7 @@ export class SyncProcessorService {
     const eligibleFrom = account.reward_eligible_from
       ? new Date(account.reward_eligible_from)
       : null;
+    await this.reconciliation.reconcileUser(data.userId, eligibleFrom);
     const results = [];
     for (const submission of ingested) {
       results.push(await this.rewards.process(data.userId, submission, eligibleFrom));

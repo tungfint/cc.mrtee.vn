@@ -7,9 +7,17 @@ import { LevelModule } from '../level/level.module';
 import { SyncProcessorService } from './sync-processor.service';
 import { RewardModule } from '../reward/reward.module';
 import { AdaptiveSchedulerService } from './adaptive-scheduler.service';
+import { ReconciliationModule } from '../reconciliation/reconciliation.module';
 
 @Module({
-  imports: [CodeforcesModule, IngestionModule, FirstSolveModule, LevelModule, RewardModule],
+  imports: [
+    CodeforcesModule,
+    IngestionModule,
+    FirstSolveModule,
+    LevelModule,
+    RewardModule,
+    ReconciliationModule,
+  ],
   providers: [SyncProcessorService, SyncWorkerService, AdaptiveSchedulerService],
 })
 export class SyncModule {}
