@@ -9,6 +9,7 @@ import { AuthService } from '../auth/auth.service';
 import type { EnvironmentService } from '../config/environment';
 import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
 import { SeasonClosureService } from '../seasons/season-closure.service';
+import { RewardsService } from '../rewards/rewards.service';
 import { AuthorizationService } from './authorization.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
@@ -16,6 +17,7 @@ config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 if (!testDatabaseUrl) throw new Error('TEST_DATABASE_URL is required');
 const connection = postgres(testDatabaseUrl, { max: 1 });
+const concurrentConnection = postgres(testDatabaseUrl, { max: 1 });
 const service = new AuthorizationService({ sql: connection } as DatabaseService);
 const authService = new AuthService(
   { sql: connection } as DatabaseService,
@@ -29,6 +31,8 @@ const codeforcesAccounts = new CodeforcesAccountsService(
   } as unknown as import('../sync/sync-queue.service').SyncQueueService,
 );
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
+const rewards = new RewardsService({ sql: connection } as DatabaseService);
+const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
   sessionId: 'test-session',
@@ -88,7 +92,10 @@ describe('authorization matrix', () => {
         (${ids.privateOrg!}, ${ids.orgAdmin!}, 'ORG_ADMIN')
     `;
   });
-  afterAll(async () => connection.end({ timeout: 5 }));
+  afterAll(async () => {
+    await concurrentConnection.end({ timeout: 5 });
+    await connection.end({ timeout: 5 });
+  });
 
   it('allows guest only for PUBLIC organizations', async () => {
     const publicAccess = await service.organizationAccess(ids.publicOrg!);
@@ -224,5 +231,66 @@ describe('authorization matrix', () => {
       SELECT count(*)::text AS count FROM season_user_snapshots WHERE season_id = ${season.id}
     `;
     expect(Number(snapshotCount)).toBe(2);
+  });
+
+  it('allows at most one concurrent redeem and refunds without mutating the ledger', async () => {
+    await connection`
+      INSERT INTO user_wallets (user_id, balance) VALUES (${ids.member!}, 100)
+    `;
+    const [reward] = await connection<{ id: string }[]>`
+      INSERT INTO rewards (name, description, cost, stock)
+      VALUES ('Mentor session', 'One mentoring session', 80, 1)
+      RETURNING id
+    `;
+    if (!reward) throw new Error('Failed to create reward fixture');
+
+    const attempts = await Promise.allSettled([
+      rewards.redeem(ids.member!, reward.id, 'concurrent-request-a'),
+      concurrentRewards.redeem(ids.member!, reward.id, 'concurrent-request-b'),
+    ]);
+    expect(attempts.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    const [state] = await connection<
+      { balance: string; stock: number; orders: string; redeems: string }[]
+    >`
+      SELECT wallets.balance, rewards.stock,
+        (SELECT count(*)::text FROM reward_orders WHERE user_id = ${ids.member!}) AS orders,
+        (SELECT count(*)::text FROM point_transactions WHERE user_id = ${ids.member!}
+          AND type = 'REDEEM') AS redeems
+      FROM user_wallets AS wallets CROSS JOIN rewards
+      WHERE wallets.user_id = ${ids.member!} AND rewards.id = ${reward.id}
+    `;
+    expect(state).toMatchObject({ balance: '20.00', stock: 0, orders: '1', redeems: '1' });
+
+    const [order] = await connection<{ id: string; idempotency_key: string }[]>`
+      SELECT id, idempotency_key FROM reward_orders WHERE user_id = ${ids.member!}
+    `;
+    if (!order) throw new Error('Reward order fixture is unavailable');
+    const clientKey = order.idempotency_key.split(':').at(-1)!;
+    const replay = await rewards.redeem(ids.member!, reward.id, clientKey);
+    expect(replay.replayed).toBe(true);
+
+    await rewards.transitionOrder(
+      order.id,
+      'REJECTED',
+      authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      'Reward unavailable',
+    );
+    const [refunded] = await connection<
+      { balance: string; stock: number; refunds: string; ledger_sum: string }[]
+    >`
+      SELECT wallets.balance, rewards.stock,
+        (SELECT count(*)::text FROM point_transactions WHERE user_id = ${ids.member!}
+          AND type = 'REFUND') AS refunds,
+        (SELECT sum(amount)::text FROM point_transactions WHERE user_id = ${ids.member!}) AS ledger_sum
+      FROM user_wallets AS wallets CROSS JOIN rewards
+      WHERE wallets.user_id = ${ids.member!} AND rewards.id = ${reward.id}
+    `;
+    expect(refunded).toMatchObject({
+      balance: '100.00',
+      stock: 1,
+      refunds: '1',
+      ledger_sum: '0.00',
+    });
   });
 });
