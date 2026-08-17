@@ -11,6 +11,7 @@ import { UsersModule } from './users/users.module';
 import { CodeforcesAccountsModule } from './codeforces-accounts/codeforces-accounts.module';
 import { SyncModule } from './sync/sync.module';
 import { ScoringModule } from './scoring/scoring.module';
+import { SeasonsModule } from './seasons/seasons.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { ScoringModule } from './scoring/scoring.module';
     CodeforcesAccountsModule,
     SyncModule,
     ScoringModule,
+    SeasonsModule,
   ],
   controllers: [HealthController],
 })

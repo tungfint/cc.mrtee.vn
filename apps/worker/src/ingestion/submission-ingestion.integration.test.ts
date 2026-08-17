@@ -264,23 +264,33 @@ describe('submission ingestion', () => {
       INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
     `;
     if (!user) throw new Error('Missing fixture user');
+    await client.connection`
+      INSERT INTO seasons (
+        name, start_at, end_at, status, scoring_policy_version
+      ) VALUES (
+        'Active season', '2023-11-01T00:00:00Z', '2023-12-01T00:00:00Z',
+        'ACTIVE', 'v2.0'
+      )
+    `;
     const ingested = await service.ingest(user.id, makeSubmission({ id: 500 }));
     const results = await Promise.all(
       Array.from({ length: 10 }, () => rewards.process(user.id, ingested, new Date(0))),
     );
     expect(results.filter((result) => result.awarded)).toHaveLength(1);
     const [totals] = await client.connection<
-      { solves: number; earns: number; ledger: string; wallet: string }[]
+      { solves: number; earns: number; ledger: string; wallet: string; season_score: string }[]
     >`
       SELECT
         (SELECT count(*)::int FROM user_problem_solves) AS solves,
         (SELECT count(*)::int FROM point_transactions WHERE type = 'EARN') AS earns,
         (SELECT COALESCE(sum(amount), 0)::text FROM point_transactions WHERE affects_wallet) AS ledger,
-        (SELECT balance::text FROM user_wallets WHERE user_id = ${user.id}) AS wallet
+        (SELECT balance::text FROM user_wallets WHERE user_id = ${user.id}) AS wallet,
+        (SELECT score::text FROM season_user_totals WHERE user_id = ${user.id}) AS season_score
     `;
     expect(totals?.solves).toBe(1);
     expect(totals?.earns).toBe(1);
     expect(totals?.wallet).toBe(totals?.ledger);
+    expect(totals?.season_score).toBe(totals?.ledger);
 
     await expect(
       client.connection`UPDATE point_transactions SET amount = amount + 1 WHERE type = 'EARN'`,

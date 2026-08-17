@@ -112,15 +112,32 @@ export class RewardEngineService {
             scale: Number(policy.reward_scale),
           },
         );
+        const [season] = await transaction<{ id: string }[]>`
+          SELECT seasons.id
+          FROM seasons
+          WHERE seasons.status IN ('ACTIVE', 'CLOSING')
+            AND seasons.start_at <= ${solvedAt.toISOString()}
+            AND seasons.end_at > ${solvedAt.toISOString()}
+            AND (
+              seasons.organization_id IS NULL OR EXISTS (
+                SELECT 1 FROM organization_memberships AS memberships
+                WHERE memberships.organization_id = seasons.organization_id
+                  AND memberships.user_id = ${userId}
+                  AND memberships.status = 'ACTIVE'
+              )
+            )
+          ORDER BY (seasons.organization_id IS NULL), seasons.start_at DESC
+          LIMIT 1
+        `;
         await transaction`
           INSERT INTO point_transactions (
-            user_id, type, amount, source_submission_id, idempotency_key,
+            user_id, type, amount, season_id, source_submission_id, idempotency_key,
             cc_level_before, problem_rating_snapshot, scoring_policy_version,
             affects_wallet, affects_season, event_at
           ) VALUES (
-            ${userId}, 'EARN', ${amount}, ${canonical.cf_submission_id},
+            ${userId}, 'EARN', ${amount}, ${season?.id ?? null}, ${canonical.cf_submission_id},
             ${`earn:submission:${canonical.cf_submission_id}`}, ${state.cc_level},
-            ${canonical.problem_rating_observed}, ${policy.version}, true, false,
+            ${canonical.problem_rating_observed}, ${policy.version}, true, ${Boolean(season)},
             ${solvedAt.toISOString()}
           )
         `;
@@ -131,6 +148,19 @@ export class RewardEngineService {
             balance = user_wallets.balance + EXCLUDED.balance,
             updated_at = now()
         `;
+        if (season) {
+          await transaction`
+            INSERT INTO season_user_totals (
+              season_id, user_id, earned, score, qualifying_solves, reached_score_at
+            ) VALUES (${season.id}, ${userId}, ${amount}, ${amount}, 1, ${solvedAt.toISOString()})
+            ON CONFLICT (season_id, user_id) DO UPDATE SET
+              earned = season_user_totals.earned + EXCLUDED.earned,
+              score = season_user_totals.score + EXCLUDED.score,
+              qualifying_solves = season_user_totals.qualifying_solves + 1,
+              reached_score_at = EXCLUDED.reached_score_at,
+              updated_at = now()
+          `;
+        }
       }
 
       const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
