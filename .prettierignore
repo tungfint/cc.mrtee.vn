@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+package-lock.json
+codeforces-gamification-prd-v2.md
+CODEX_IMPLEMENTATION_BRIEF.md
+OWNER_CODEX_PLAYBOOK.md
