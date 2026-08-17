@@ -8,6 +8,7 @@ import { AuthorizationModule } from './authorization/authorization.module';
 import { AuditModule } from './audit/audit.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
+import { CodeforcesAccountsModule } from './codeforces-accounts/codeforces-accounts.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     UsersModule,
     OrganizationsModule,
+    CodeforcesAccountsModule,
   ],
   controllers: [HealthController],
 })

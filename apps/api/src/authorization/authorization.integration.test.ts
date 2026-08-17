@@ -7,6 +7,7 @@ import type { DatabaseService } from '../database/database.service';
 import type { AuthUser } from '../auth/auth.types';
 import { AuthService } from '../auth/auth.service';
 import type { EnvironmentService } from '../config/environment';
+import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
 import { AuthorizationService } from './authorization.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
@@ -18,6 +19,10 @@ const service = new AuthorizationService({ sql: connection } as DatabaseService)
 const authService = new AuthService(
   { sql: connection } as DatabaseService,
   { values: { SESSION_TTL_HOURS: 168 } } as EnvironmentService,
+);
+const codeforcesAccounts = new CodeforcesAccountsService(
+  { sql: connection } as DatabaseService,
+  service,
 );
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
@@ -135,5 +140,27 @@ describe('authorization matrix', () => {
     expect(session?.token_hash).not.toContain(login.sessionToken);
     expect(session?.csrf_token_hash).not.toContain(login.csrfToken);
     expect(session?.token_hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('keeps linked handles unverified until an authorized atomic verification', async () => {
+    const member = authUser(ids.member!);
+    const linked = await codeforcesAccounts.link(member, 'Tourist_Test');
+    expect(linked.verification_status).toBe('UNVERIFIED');
+    expect((await codeforcesAccounts.getOwn(member.userId))?.eligible).toBe(false);
+
+    await expect(
+      codeforcesAccounts.link(authUser(ids.orgAdmin!), 'tourist_test'),
+    ).rejects.toThrow();
+
+    const verified = await codeforcesAccounts.verify({
+      organizationId: ids.privateOrg!,
+      targetUserId: member.userId,
+      actor: authUser(ids.teacher!),
+      reason: 'Verified in supervised class',
+    });
+    expect(verified.verification_status).toBe('TEACHER_VERIFIED');
+    expect(verified.sync_status).toBe('INITIALIZING');
+    expect(verified.verified_at?.getTime()).toBe(verified.reward_eligible_from?.getTime());
+    expect((await codeforcesAccounts.getOwn(member.userId))?.eligible).toBe(true);
   });
 });
