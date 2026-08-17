@@ -10,8 +10,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@cc/core": "0.1.0",
+    "@cc/database": "0.1.0",
     "@nestjs/common": "^11.1.6",
     "@nestjs/core": "^11.1.6",
+    "bullmq": "^5.58.5",
     "ioredis": "^5.7.0",
     "postgres": "^3.4.7",
     "reflect-metadata": "^0.2.2",

@@ -23,6 +23,22 @@ export class CodeforcesAccountsController {
     return { account: await this.accounts.getOwn(user.userId) };
   }
 
+  @Post('me/sync')
+  async sync(@CurrentUser() user: AuthUser) {
+    return this.accounts.requestSync(user);
+  }
+
+  @Get('me/sync-status')
+  async syncStatus(@CurrentUser() user: AuthUser) {
+    const account = await this.accounts.getOwn(user.userId);
+    return {
+      status: account?.sync_status ?? 'UNLINKED',
+      lastSyncAt: account?.last_sync_at ?? null,
+      nextSyncAt: account?.next_sync_at ?? null,
+      lastError: account?.last_sync_error ?? null,
+    };
+  }
+
   @Post('organizations/:organizationId/codeforces-accounts/:userId/verify')
   async verify(
     @Param('organizationId') organizationIdInput: string,

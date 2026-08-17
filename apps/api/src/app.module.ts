@@ -9,6 +9,7 @@ import { AuditModule } from './audit/audit.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { CodeforcesAccountsModule } from './codeforces-accounts/codeforces-accounts.module';
+import { SyncModule } from './sync/sync.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CodeforcesAccountsModule } from './codeforces-accounts/codeforces-accou
     UsersModule,
     OrganizationsModule,
     CodeforcesAccountsModule,
+    SyncModule,
   ],
   controllers: [HealthController],
 })

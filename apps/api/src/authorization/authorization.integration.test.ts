@@ -23,6 +23,9 @@ const authService = new AuthService(
 const codeforcesAccounts = new CodeforcesAccountsService(
   { sql: connection } as DatabaseService,
   service,
+  {
+    enqueue: () => Promise.resolve(true),
+  } as unknown as import('../sync/sync-queue.service').SyncQueueService,
 );
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({

@@ -16,6 +16,11 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
     });
   }
 
+  get connection(): Redis {
+    if (!this.client) throw new Error('Redis client is not initialized');
+    return this.client;
+  }
+
   async ping(): Promise<void> {
     if (!this.client) {
       throw new Error('Redis client is not initialized');

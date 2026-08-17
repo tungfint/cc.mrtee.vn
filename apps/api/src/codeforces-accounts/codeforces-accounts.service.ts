@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
+import { SyncQueueService } from '../sync/sync-queue.service';
 
 const handleSchema = z
   .string()
@@ -17,7 +18,7 @@ const handleSchema = z
   .max(24)
   .regex(/^[A-Za-z0-9_.-]+$/, 'Codeforces handle không hợp lệ');
 
-interface AccountRow {
+export interface AccountRow {
   id: string;
   user_id: string;
   handle: string;
@@ -36,6 +37,7 @@ export class CodeforcesAccountsService {
   constructor(
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
+    private readonly syncQueue: SyncQueueService,
   ) {}
 
   async link(user: AuthUser, handleInput: unknown): Promise<AccountRow> {
@@ -83,6 +85,30 @@ export class CodeforcesAccountsService {
             account.verification_status !== 'UNVERIFIED' && account.reward_eligible_from !== null,
         }
       : null;
+  }
+
+  async requestSync(user: AuthUser): Promise<{ queued: boolean; status: string }> {
+    const account = await this.getOwn(user.userId);
+    if (!account || account.verification_status === 'UNVERIFIED') {
+      throw new ForbiddenException('Chỉ tài khoản Codeforces đã xác minh mới được đồng bộ');
+    }
+    const queued = await this.syncQueue.enqueue(
+      {
+        userId: user.userId,
+        accountId: account.id,
+        handle: account.handle,
+        mode: account.backfill_completed_at ? 'INCREMENTAL' : 'BACKFILL',
+      },
+      'HIGH',
+    );
+    if (queued) {
+      await this.database.sql`
+        UPDATE codeforces_accounts
+        SET sync_status = 'QUEUED', updated_at = now()
+        WHERE id = ${account.id}
+      `;
+    }
+    return { queued, status: queued ? 'QUEUED' : account.sync_status };
   }
 
   async verify(input: {
