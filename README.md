@@ -15,6 +15,7 @@ skill level, rewards, seasons, and organization leaderboards.
 cp .env.example .env
 docker compose up -d postgres redis
 npm install
+npm run db:migrate
 npm run dev:api
 npm run dev:worker
 npm run dev:web
@@ -27,6 +28,22 @@ Services:
 - API readiness: <http://localhost:3000/api/health/ready>
 - OpenAPI: <http://localhost:3000/api/docs>
 
+PostgreSQL is exposed on port `55432` by default because Windows installations
+often already use `5432`. The Compose initialization also creates the isolated
+`cc_tracker_test` database used by schema integration tests.
+
+## Database
+
+```bash
+npm run db:generate # generate a reviewed SQL migration after a schema change
+npm run db:check    # validate migration metadata
+npm run db:migrate  # apply pending migrations to DATABASE_URL
+npm test --workspace @cc/database
+```
+
+See `packages/database/README.md` for the forward-only migration and rollback
+policy.
+
 ## Validation
 
 ```bash
@@ -35,6 +52,7 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run db:check
 ```
 
 The product requirements and implementation invariants are defined in the

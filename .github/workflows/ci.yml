@@ -12,6 +12,22 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-bookworm
+        env:
+          POSTGRES_DB: cc_tracker_test
+          POSTGRES_USER: cc_app
+          POSTGRES_PASSWORD: cc_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cc_app -d cc_tracker_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://cc_app:cc_dev_password@127.0.0.1:5432/cc_tracker_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,6 +35,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run db:check
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run lint

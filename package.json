@@ -10,7 +10,8 @@
     "npm": ">=11"
   },
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev:web": "npm run dev --workspace @cc/web",
@@ -20,6 +21,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . --max-warnings=0",
     "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @cc/database",
+    "db:migrate": "npm run db:migrate --workspace @cc/database",
+    "db:check": "npm run db:check --workspace @cc/database",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
