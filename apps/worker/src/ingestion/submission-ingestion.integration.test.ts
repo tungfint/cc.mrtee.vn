@@ -12,6 +12,8 @@ import { SyncProcessorService } from '../sync/sync-processor.service';
 import type { CodeforcesClient } from '../codeforces/codeforces.client';
 import type { EnvironmentService } from '../config/environment';
 import { RewardEngineService } from '../reward/reward-engine.service';
+import { AdaptiveSchedulerService, type SchedulerQueue } from '../sync/adaptive-scheduler.service';
+import type { RedisService } from '../redis/redis.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -298,5 +300,84 @@ describe('submission ingestion', () => {
     await expect(
       client.connection`DELETE FROM point_transactions WHERE type = 'EARN'`,
     ).rejects.toThrow('append-only');
+  });
+
+  it('coordinates multiple schedulers and recovers due state after queue loss', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Scheduled', 'Scheduled') RETURNING id
+    `;
+    if (!user) throw new Error('Missing scheduler user fixture');
+    await client.connection`
+      INSERT INTO codeforces_accounts (
+        user_id, handle, verification_status, verified_at, reward_eligible_from,
+        sync_status, next_sync_at, backfill_completed_at
+      ) VALUES (
+        ${user.id}, 'scheduled_user', 'TEACHER_VERIFIED', now(), now(),
+        'READY', now() - interval '1 minute', now()
+      )
+    `;
+
+    class MemoryQueue implements SchedulerQueue {
+      readonly jobs = new Set<string>();
+      addCalls = 0;
+
+      getJobCounts() {
+        return Promise.resolve({ waiting: this.jobs.size, active: 0, delayed: 0, prioritized: 0 });
+      }
+
+      getJob(id: string) {
+        if (!this.jobs.has(id)) return Promise.resolve(undefined);
+        return Promise.resolve({
+          getState: () => Promise.resolve('waiting'),
+          remove: () => {
+            this.jobs.delete(id);
+            return Promise.resolve();
+          },
+        });
+      }
+
+      add(_name: string, _data: unknown, options: Record<string, unknown>) {
+        this.jobs.add(String(options.jobId));
+        this.addCalls += 1;
+        return Promise.resolve({});
+      }
+    }
+
+    const queue = new MemoryQueue();
+    const environment = {
+      values: {
+        CF_REQUEST_INTERVAL_MS: 2200,
+        SYNC_CAPACITY_RESERVE_PERCENT: 0.25,
+        SCHEDULER_BATCH_SIZE: 25,
+        SYNC_HOT_TARGET_HOURS: 2,
+        SYNC_WARM_TARGET_HOURS: 6,
+        SYNC_COLD_TARGET_HOURS: 24,
+      },
+    } as EnvironmentService;
+    const makeScheduler = () =>
+      new AdaptiveSchedulerService(
+        { sql: client.connection } as DatabaseService,
+        {} as RedisService,
+        environment,
+      );
+    const results = await Promise.all([
+      makeScheduler().runOnce(queue),
+      makeScheduler().runOnce(queue),
+    ]);
+    expect(results.reduce((sum, result) => sum + result.enqueued, 0)).toBe(1);
+    expect(queue.addCalls).toBe(1);
+    const [scheduled] = await client.connection<{ next_sync_at: Date }[]>`
+      SELECT next_sync_at FROM codeforces_accounts WHERE user_id = ${user.id}
+    `;
+    expect(new Date(scheduled!.next_sync_at).getTime()).toBeGreaterThan(Date.now());
+
+    queue.jobs.clear();
+    await client.connection`
+      UPDATE codeforces_accounts SET next_sync_at = now() - interval '1 minute'
+      WHERE user_id = ${user.id}
+    `;
+    const recovered = await makeScheduler().runOnce(queue);
+    expect(recovered.enqueued).toBe(1);
+    expect(queue.addCalls).toBe(2);
   });
 });

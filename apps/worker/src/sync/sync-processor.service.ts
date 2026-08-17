@@ -106,12 +106,27 @@ export class SyncProcessorService {
 
   private async finish(accountId: string, submissionIds: number[]): Promise<void> {
     const maximum = submissionIds.length > 0 ? Math.max(...submissionIds) : 0;
+    const SYNC_HOT_TARGET_HOURS = this.environment.values.SYNC_HOT_TARGET_HOURS ?? 2;
+    const SYNC_WARM_TARGET_HOURS = this.environment.values.SYNC_WARM_TARGET_HOURS ?? 6;
+    const SYNC_COLD_TARGET_HOURS = this.environment.values.SYNC_COLD_TARGET_HOURS ?? 24;
     await this.database.sql`
       UPDATE codeforces_accounts
       SET
         sync_status = 'READY',
         last_sync_at = now(),
-        next_sync_at = now() + interval '2 hours',
+        next_sync_at = now() + (
+          CASE
+            WHEN (
+              SELECT max(creation_time) FROM cf_submissions
+              WHERE user_id = codeforces_accounts.user_id
+            ) >= now() - interval '7 days' THEN (${SYNC_HOT_TARGET_HOURS})::double precision
+            WHEN (
+              SELECT max(creation_time) FROM cf_submissions
+              WHERE user_id = codeforces_accounts.user_id
+            ) >= now() - interval '30 days' THEN (${SYNC_WARM_TARGET_HOURS})::double precision
+            ELSE (${SYNC_COLD_TARGET_HOURS})::double precision
+          END * interval '1 hour'
+        ),
         last_seen_submission_id = GREATEST(COALESCE(last_seen_submission_id, 0), ${String(maximum)}),
         updated_at = now()
       WHERE id = ${accountId}
