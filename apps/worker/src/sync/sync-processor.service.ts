@@ -6,6 +6,7 @@ import { DatabaseService } from '../database/database.service';
 import { FirstSolveService } from '../first-solve/first-solve.service';
 import { SubmissionIngestionService } from '../ingestion/submission-ingestion.service';
 import { LevelService } from '../level/level.service';
+import { RewardEngineService } from '../reward/reward-engine.service';
 
 interface AccountState {
   reward_eligible_from: Date | string | null;
@@ -19,6 +20,7 @@ export class SyncProcessorService {
     private readonly ingestion: SubmissionIngestionService,
     private readonly firstSolves: FirstSolveService,
     private readonly level: LevelService,
+    private readonly rewards: RewardEngineService,
     private readonly database: DatabaseService,
     private readonly environment: EnvironmentService,
   ) {}
@@ -42,20 +44,20 @@ export class SyncProcessorService {
   ): Promise<{ upstreamRows: number; newFirstSolves: number }> {
     const submissions = await this.codeforces.userStatus(data.handle, 1, 100);
     const ingested = await this.ingestion.ingestBatch(data.userId, submissions);
-    const firstSolves = await this.firstSolves.recordBatch(
-      data.userId,
-      ingested,
-      account.reward_eligible_from ? new Date(account.reward_eligible_from) : null,
-      false,
-    );
-    await this.level.recompute(data.userId);
+    const eligibleFrom = account.reward_eligible_from
+      ? new Date(account.reward_eligible_from)
+      : null;
+    const results = [];
+    for (const submission of ingested) {
+      results.push(await this.rewards.process(data.userId, submission, eligibleFrom));
+    }
     await this.finish(
       data.accountId,
       submissions.map((submission) => submission.id),
     );
     return {
       upstreamRows: submissions.length,
-      newFirstSolves: firstSolves.filter((solve) => solve.created).length,
+      newFirstSolves: results.filter((result) => result.firstSolveCreated).length,
     };
   }
 

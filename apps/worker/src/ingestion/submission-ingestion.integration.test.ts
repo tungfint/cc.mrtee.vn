@@ -11,6 +11,7 @@ import { LevelService } from '../level/level.service';
 import { SyncProcessorService } from '../sync/sync-processor.service';
 import type { CodeforcesClient } from '../codeforces/codeforces.client';
 import type { EnvironmentService } from '../config/environment';
+import { RewardEngineService } from '../reward/reward-engine.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -20,6 +21,7 @@ let client: DatabaseClient;
 let service: SubmissionIngestionService;
 let firstSolves: FirstSolveService;
 let level: LevelService;
+let rewards: RewardEngineService;
 
 const makeSubmission = (overrides: Partial<CodeforcesSubmission> = {}): CodeforcesSubmission => ({
   id: 123456,
@@ -45,6 +47,7 @@ describe('submission ingestion', () => {
     service = new SubmissionIngestionService({ sql: client.connection } as DatabaseService);
     firstSolves = new FirstSolveService({ sql: client.connection } as DatabaseService);
     level = new LevelService({ sql: client.connection } as DatabaseService);
+    rewards = new RewardEngineService({ sql: client.connection } as DatabaseService);
   });
   beforeEach(async () => {
     await client.connection`
@@ -215,6 +218,7 @@ describe('submission ingestion', () => {
       service,
       firstSolves,
       level,
+      rewards,
       { sql: client.connection } as DatabaseService,
       environment,
     );
@@ -233,6 +237,7 @@ describe('submission ingestion', () => {
       service,
       firstSolves,
       level,
+      rewards,
       { sql: client.connection } as DatabaseService,
       environment,
     );
@@ -252,5 +257,36 @@ describe('submission ingestion', () => {
     `;
     expect(completed?.backfill_completed_at).not.toBeNull();
     expect(completed?.backfill_next_from).toBeNull();
+  });
+
+  it('awards one immutable EARN and one wallet increment across ten retries', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
+    `;
+    if (!user) throw new Error('Missing fixture user');
+    const ingested = await service.ingest(user.id, makeSubmission({ id: 500 }));
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => rewards.process(user.id, ingested, new Date(0))),
+    );
+    expect(results.filter((result) => result.awarded)).toHaveLength(1);
+    const [totals] = await client.connection<
+      { solves: number; earns: number; ledger: string; wallet: string }[]
+    >`
+      SELECT
+        (SELECT count(*)::int FROM user_problem_solves) AS solves,
+        (SELECT count(*)::int FROM point_transactions WHERE type = 'EARN') AS earns,
+        (SELECT COALESCE(sum(amount), 0)::text FROM point_transactions WHERE affects_wallet) AS ledger,
+        (SELECT balance::text FROM user_wallets WHERE user_id = ${user.id}) AS wallet
+    `;
+    expect(totals?.solves).toBe(1);
+    expect(totals?.earns).toBe(1);
+    expect(totals?.wallet).toBe(totals?.ledger);
+
+    await expect(
+      client.connection`UPDATE point_transactions SET amount = amount + 1 WHERE type = 'EARN'`,
+    ).rejects.toThrow('append-only');
+    await expect(
+      client.connection`DELETE FROM point_transactions WHERE type = 'EARN'`,
+    ).rejects.toThrow('append-only');
   });
 });
