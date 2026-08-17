@@ -7,6 +7,7 @@
     "start": "node --env-file-if-exists=../../.env dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "pretest": "npm run build --workspace @cc/core",
     "test": "vitest run --passWithNoTests",
     "bootstrap-admin": "tsx --env-file-if-exists=../../.env src/auth/bootstrap-admin.ts"
   },

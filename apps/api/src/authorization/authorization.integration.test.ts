@@ -8,6 +8,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { AuthService } from '../auth/auth.service';
 import type { EnvironmentService } from '../config/environment';
 import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
+import { SeasonClosureService } from '../seasons/season-closure.service';
 import { AuthorizationService } from './authorization.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
@@ -27,6 +28,7 @@ const codeforcesAccounts = new CodeforcesAccountsService(
     enqueue: () => Promise.resolve(true),
   } as unknown as import('../sync/sync-queue.service').SyncQueueService,
 );
+const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
   sessionId: 'test-session',
@@ -165,5 +167,62 @@ describe('authorization matrix', () => {
     expect(verified.sync_status).toBe('INITIALIZING');
     expect(verified.verified_at?.getTime()).toBe(verified.reward_eligible_from?.getTime());
     expect((await codeforcesAccounts.getOwn(member.userId))?.eligible).toBe(true);
+  });
+
+  it('closes a season into deterministic snapshots and awards exactly once', async () => {
+    await connection`
+      INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
+      VALUES
+        (${ids.member!}, 800, 500, 1300),
+        (${ids.teacher!}, 800, 450, 1250)
+    `;
+    const [season] = await connection<{ id: string }[]>`
+      INSERT INTO seasons (
+        name, start_at, end_at, status, scoring_policy_version
+      ) VALUES (
+        'Closure fixture', now() - interval '30 days', now(), 'CLOSING', 'v2.0'
+      ) RETURNING id
+    `;
+    if (!season) throw new Error('Failed to create season fixture');
+    await connection`
+      INSERT INTO season_user_totals (
+        season_id, user_id, earned, score, qualifying_solves, reached_score_at
+      ) VALUES
+        (${season.id}, ${ids.member!}, 100, 100, 5, now() - interval '2 days'),
+        (${season.id}, ${ids.teacher!}, 100, 100, 3, now() - interval '3 days')
+    `;
+
+    const result = await seasonClosure.close(
+      season.id,
+      authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      'Fixture closure',
+    );
+    expect(result.snapshots).toBe(2);
+    const snapshots = await connection<
+      { user_id: string; final_rank: number; season_score: string }[]
+    >`
+      SELECT user_id, final_rank, season_score
+      FROM season_user_snapshots WHERE season_id = ${season.id}
+      ORDER BY final_rank
+    `;
+    expect(snapshots.map(({ user_id, final_rank }) => ({ user_id, final_rank }))).toEqual([
+      { user_id: ids.member!, final_rank: 1 },
+      { user_id: ids.teacher!, final_rank: 2 },
+    ]);
+    const [{ count: awardCount } = { count: '0' }] = await connection<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM season_awards WHERE season_id = ${season.id}
+    `;
+    expect(Number(awardCount)).toBe(4);
+    await expect(
+      seasonClosure.close(
+        season.id,
+        authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+        'Duplicate closure',
+      ),
+    ).rejects.toThrow();
+    const [{ count: snapshotCount } = { count: '0' }] = await connection<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM season_user_snapshots WHERE season_id = ${season.id}
+    `;
+    expect(Number(snapshotCount)).toBe(2);
   });
 });

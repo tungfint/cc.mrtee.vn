@@ -4,6 +4,7 @@ import { CurrentUser } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
+import { SeasonClosureService } from './season-closure.service';
 
 const createSchema = z.object({
   organizationId: z.string().uuid().nullable().default(null),
@@ -22,6 +23,7 @@ export class SeasonsController {
   constructor(
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
+    private readonly closure: SeasonClosureService,
   ) {}
 
   @Get()
@@ -133,5 +135,13 @@ export class SeasonsController {
       `;
       return { season };
     });
+  }
+
+  @Post(':id/close')
+  async close(@Param('id') idInput: string, @Body() body: unknown, @CurrentUser() actor: AuthUser) {
+    const id = z.string().uuid().safeParse(idInput);
+    const input = z.object({ reason: z.string().trim().min(3).max(500) }).safeParse(body);
+    if (!id.success || !input.success) throw new BadRequestException('Dữ liệu không hợp lệ');
+    return this.closure.close(id.data, actor, input.data.reason);
   }
 }
