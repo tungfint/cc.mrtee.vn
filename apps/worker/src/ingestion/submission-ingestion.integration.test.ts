@@ -6,6 +6,7 @@ import { config } from 'dotenv';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../database/database.service';
 import { SubmissionIngestionService } from './submission-ingestion.service';
+import { FirstSolveService } from '../first-solve/first-solve.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -13,6 +14,7 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required');
 let client: DatabaseClient;
 let service: SubmissionIngestionService;
+let firstSolves: FirstSolveService;
 
 const makeSubmission = (overrides: Partial<CodeforcesSubmission> = {}): CodeforcesSubmission => ({
   id: 123456,
@@ -34,8 +36,9 @@ const makeSubmission = (overrides: Partial<CodeforcesSubmission> = {}): Codeforc
 describe('submission ingestion', () => {
   beforeAll(async () => {
     await migrateDatabase(databaseUrl, resolve(__dirname, '../../../../packages/database/drizzle'));
-    client = createDatabaseClient(databaseUrl, 1);
+    client = createDatabaseClient(databaseUrl, 4);
     service = new SubmissionIngestionService({ sql: client.connection } as DatabaseService);
+    firstSolves = new FirstSolveService({ sql: client.connection } as DatabaseService);
   });
   beforeEach(async () => {
     await client.connection`
@@ -96,5 +99,46 @@ describe('submission ingestion', () => {
       SELECT is_team, problem_rating_observed FROM cf_submissions
     `;
     expect(stored).toEqual({ is_team: true, problem_rating_observed: null });
+  });
+
+  it('creates one deterministic first solve under retries and concurrent submissions', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
+    `;
+    if (!user) throw new Error('Missing fixture user');
+    const first = await service.ingest(
+      user.id,
+      makeSubmission({ id: 200, creationTimeSeconds: 100 }),
+    );
+    const second = await service.ingest(
+      user.id,
+      makeSubmission({ id: 201, creationTimeSeconds: 101 }),
+    );
+    const results = await Promise.all([
+      firstSolves.record(user.id, first, new Date(0)),
+      firstSolves.record(user.id, first, new Date(0)),
+      firstSolves.record(user.id, second, new Date(0)),
+    ]);
+    expect(results.filter((result) => result.created)).toHaveLength(1);
+    const [stored] = await client.connection<
+      { first_ok_submission_id: string; first_solved_at: Date }[]
+    >`
+      SELECT first_ok_submission_id, first_solved_at FROM user_problem_solves
+    `;
+    expect(stored?.first_ok_submission_id).toBe('200');
+  });
+
+  it('does not create a personal first solve for a team submission', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
+    `;
+    if (!user) throw new Error('Missing fixture user');
+    const team = await service.ingest(
+      user.id,
+      makeSubmission({ author: { members: [{ handle: 'one' }, { handle: 'two' }] } }),
+    );
+    await expect(firstSolves.record(user.id, team, new Date(0))).resolves.toMatchObject({
+      created: false,
+    });
   });
 });

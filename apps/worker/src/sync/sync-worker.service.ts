@@ -5,6 +5,7 @@ import { CodeforcesClient } from '../codeforces/codeforces.client';
 import { RedisService } from '../redis/redis.service';
 import { SubmissionIngestionService } from '../ingestion/submission-ingestion.service';
 import { DatabaseService } from '../database/database.service';
+import { FirstSolveService } from '../first-solve/first-solve.service';
 
 @Injectable()
 export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
@@ -15,6 +16,7 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
     private readonly redis: RedisService,
     private readonly codeforces: CodeforcesClient,
     private readonly ingestion: SubmissionIngestionService,
+    private readonly firstSolves: FirstSolveService,
     private readonly database: DatabaseService,
   ) {}
 
@@ -23,13 +25,21 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
       CF_SYNC_QUEUE,
       async (job: Job<SyncJobData>) => {
         const startedAt = Date.now();
-        await this.database.sql`
+        const [account] = await this.database.sql<{ reward_eligible_from: Date | null }[]>`
           UPDATE codeforces_accounts
           SET sync_status = 'SYNCING', last_sync_error = NULL, updated_at = now()
           WHERE id = ${job.data.accountId}
+          RETURNING reward_eligible_from
         `;
+        if (!account) throw new Error('Codeforces account no longer exists');
         const submissions = await this.codeforces.userStatus(job.data.handle, 1, 100);
-        await this.ingestion.ingestBatch(job.data.userId, submissions);
+        const ingested = await this.ingestion.ingestBatch(job.data.userId, submissions);
+        await this.firstSolves.recordBatch(
+          job.data.userId,
+          ingested,
+          account.reward_eligible_from,
+          job.data.mode === 'BACKFILL',
+        );
         const maxSubmissionId = submissions.reduce(
           (maximum, submission) => Math.max(maximum, submission.id),
           0,
