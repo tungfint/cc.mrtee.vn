@@ -5,6 +5,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './app';
 import './index.css';
 
+document.documentElement.dataset.theme = localStorage.getItem('cc-theme') ?? 'dark';
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
