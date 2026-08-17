@@ -16,6 +16,7 @@ cp .env.example .env
 docker compose up -d postgres redis
 npm install
 npm run db:migrate
+npm run bootstrap-admin --workspace @cc/api
 npm run dev:api
 npm run dev:worker
 npm run dev:web
@@ -43,6 +44,12 @@ npm test --workspace @cc/database
 
 See `packages/database/README.md` for the forward-only migration and rollback
 policy.
+
+Public registration is intentionally disabled. Set the three
+`BOOTSTRAP_ADMIN_*` values in `.env` and run the bootstrap command once to
+create the first system administrator. Authentication uses an HTTP-only session
+cookie and requires the CSRF token returned by login for state-changing API
+requests.
 
 ## Validation
 

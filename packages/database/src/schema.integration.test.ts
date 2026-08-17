@@ -18,6 +18,8 @@ const connection = postgres(testDatabaseUrl, { max: 1 });
 async function resetDatabase(sql: Sql): Promise<void> {
   await sql.unsafe(`
     TRUNCATE TABLE
+      auth_sessions,
+      user_credentials,
       audit_logs,
       point_transactions,
       reward_orders,

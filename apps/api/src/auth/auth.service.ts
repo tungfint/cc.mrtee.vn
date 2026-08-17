@@ -1,0 +1,151 @@
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
+import { EnvironmentService } from '../config/environment';
+import { DatabaseService } from '../database/database.service';
+import { hashPassword, hashToken, verifyPassword } from './password';
+import type { AuthUser } from './auth.types';
+
+const emailSchema = z
+  .string()
+  .trim()
+  .email()
+  .max(320)
+  .transform((value) => value.toLowerCase());
+const passwordSchema = z.string().min(12).max(200);
+
+interface CredentialRow {
+  user_id: string;
+  display_name: string;
+  system_role: AuthUser['systemRole'];
+  status: string;
+  password_hash: string;
+  failed_login_attempts: number;
+  locked_until: Date | null;
+}
+
+export interface LoginResult {
+  sessionToken: string;
+  csrfToken: string;
+  expiresAt: Date;
+  user: Omit<AuthUser, 'sessionId' | 'csrfTokenHash'>;
+}
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly environment: EnvironmentService,
+  ) {}
+
+  async login(emailInput: unknown, passwordInput: unknown): Promise<LoginResult> {
+    const email = emailSchema.parse(emailInput);
+    const password = passwordSchema.parse(passwordInput);
+    const [credential] = await this.database.sql<CredentialRow[]>`
+      SELECT
+        credentials.user_id,
+        users.display_name,
+        users.system_role,
+        users.status,
+        credentials.password_hash,
+        credentials.failed_login_attempts,
+        credentials.locked_until
+      FROM user_credentials AS credentials
+      JOIN users ON users.id = credentials.user_id
+      WHERE credentials.email = ${email}
+    `;
+
+    if (!credential || credential.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+    }
+    if (credential.locked_until && credential.locked_until > new Date()) {
+      throw new UnauthorizedException('Tài khoản tạm khóa do đăng nhập sai nhiều lần');
+    }
+
+    const valid = await verifyPassword(password, credential.password_hash);
+    if (!valid) {
+      await this.database.sql`
+        UPDATE user_credentials
+        SET
+          failed_login_attempts = failed_login_attempts + 1,
+          locked_until = CASE
+            WHEN failed_login_attempts + 1 >= 5 THEN now() + interval '15 minutes'
+            ELSE locked_until
+          END,
+          updated_at = now()
+        WHERE user_id = ${credential.user_id}
+      `;
+      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+    }
+
+    const sessionToken = randomBytes(32).toString('base64url');
+    const csrfToken = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(
+      Date.now() + this.environment.values.SESSION_TTL_HOURS * 60 * 60 * 1000,
+    );
+
+    await this.database.sql.begin(async (transaction) => {
+      await transaction`
+        UPDATE user_credentials
+        SET failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+        WHERE user_id = ${credential.user_id}
+      `;
+      await transaction`
+        INSERT INTO auth_sessions (user_id, token_hash, csrf_token_hash, expires_at)
+        VALUES (
+          ${credential.user_id},
+          ${hashToken(sessionToken)},
+          ${hashToken(csrfToken)},
+          ${expiresAt}
+        )
+      `;
+    });
+
+    return {
+      sessionToken,
+      csrfToken,
+      expiresAt,
+      user: {
+        userId: credential.user_id,
+        displayName: credential.display_name,
+        systemRole: credential.system_role,
+      },
+    };
+  }
+
+  async revokeSession(sessionId: string): Promise<void> {
+    await this.database.sql`
+      UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, now()) WHERE id = ${sessionId}
+    `;
+  }
+
+  async createUser(input: {
+    email: unknown;
+    password: unknown;
+    fullName: string;
+    displayName: string;
+    systemRole?: AuthUser['systemRole'];
+  }): Promise<string> {
+    const email = emailSchema.parse(input.email);
+    const password = passwordSchema.parse(input.password);
+    const passwordHash = await hashPassword(password);
+    const [created] = await this.database.sql<{ id: string }[]>`
+      WITH new_user AS (
+        INSERT INTO users (full_name, display_name, system_role)
+        VALUES (
+          ${input.fullName.trim()},
+          ${input.displayName.trim()},
+          ${input.systemRole ?? 'USER'}
+        )
+        RETURNING id
+      )
+      INSERT INTO user_credentials (user_id, email, password_hash)
+      SELECT id, ${email}, ${passwordHash} FROM new_user
+      RETURNING user_id AS id
+    `;
+    if (!created) {
+      throw new Error('Failed to create user');
+    }
+    return created.id;
+  }
+}

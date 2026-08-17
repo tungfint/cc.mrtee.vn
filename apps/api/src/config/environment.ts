@@ -9,6 +9,11 @@ const environmentSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   API_DB_POOL_MAX: z.coerce.number().int().positive().max(20).default(5),
+  SESSION_TTL_HOURS: z.coerce.number().int().positive().max(720).default(168),
+  AUTH_COOKIE_SECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 export type ApiEnvironment = z.infer<typeof environmentSchema>;

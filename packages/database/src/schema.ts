@@ -91,6 +91,50 @@ export const users = pgTable(
   (table) => [index('users_status_idx').on(table.status)],
 );
 
+export const userCredentials = pgTable(
+  'user_credentials',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    email: citext('email').notNull(),
+    passwordHash: text('password_hash').notNull(),
+    failedLoginAttempts: integer('failed_login_attempts').default(0).notNull(),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('user_credentials_email_unique').on(table.email),
+    check('user_credentials_failed_login_attempts_check', sql`${table.failedLoginAttempts} >= 0`),
+  ],
+);
+
+export const authSessions = pgTable(
+  'auth_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    csrfTokenHash: varchar('csrf_token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('auth_sessions_token_hash_unique').on(table.tokenHash),
+    index('auth_sessions_user_expiry_idx').on(table.userId, table.expiresAt),
+    index('auth_sessions_expiry_idx').on(table.expiresAt),
+    check('auth_sessions_expiry_check', sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+);
+
 export const organizations = pgTable(
   'organizations',
   {

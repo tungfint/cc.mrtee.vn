@@ -1,29 +1,43 @@
 import { Injectable, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
-import postgres, { type Sql } from 'postgres';
+import { createDatabaseClient, type DatabaseClient } from '@cc/database';
+import type { Sql } from 'postgres';
 import { EnvironmentService } from '../config/environment';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
-  private client: Sql | undefined;
+  private client: DatabaseClient | undefined;
 
   constructor(private readonly environment: EnvironmentService) {}
 
   onModuleInit(): void {
-    this.client = postgres(this.environment.values.DATABASE_URL, {
-      max: this.environment.values.API_DB_POOL_MAX,
-      idle_timeout: 20,
-      connect_timeout: 10,
-    });
+    this.client = createDatabaseClient(
+      this.environment.values.DATABASE_URL,
+      this.environment.values.API_DB_POOL_MAX,
+    );
+  }
+
+  get sql(): Sql {
+    if (!this.client) {
+      throw new Error('Database client is not initialized');
+    }
+    return this.client.connection;
+  }
+
+  get db(): DatabaseClient['db'] {
+    if (!this.client) {
+      throw new Error('Database client is not initialized');
+    }
+    return this.client.db;
   }
 
   async ping(): Promise<void> {
     if (!this.client) {
       throw new Error('Database client is not initialized');
     }
-    await this.client`select 1`;
+    await this.client.connection`select 1`;
   }
 
   async onApplicationShutdown(): Promise<void> {
-    await this.client?.end({ timeout: 5 });
+    await this.client?.close();
   }
 }

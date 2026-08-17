@@ -7,13 +7,16 @@
     "start": "node --env-file-if-exists=../../.env dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "bootstrap-admin": "tsx --env-file-if-exists=../../.env src/auth/bootstrap-admin.ts"
   },
   "dependencies": {
+    "@cc/database": "0.1.0",
     "@nestjs/common": "^11.1.6",
     "@nestjs/core": "^11.1.6",
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/swagger": "^11.2.0",
+    "cookie-parser": "^1.4.7",
     "ioredis": "^5.7.0",
     "postgres": "^3.4.7",
     "reflect-metadata": "^0.2.2",
@@ -22,6 +25,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.3.1",
+    "@types/cookie-parser": "^1.4.9",
+    "dotenv": "^17.2.2",
     "tsx": "^4.20.5",
     "vitest": "^4.1.10"
   }
