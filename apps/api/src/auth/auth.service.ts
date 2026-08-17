@@ -96,7 +96,7 @@ export class AuthService {
           ${credential.user_id},
           ${hashToken(sessionToken)},
           ${hashToken(csrfToken)},
-          ${expiresAt}
+          ${expiresAt.toISOString()}
         )
       `;
     });
@@ -119,30 +119,48 @@ export class AuthService {
     `;
   }
 
-  async createUser(input: {
-    email: unknown;
-    password: unknown;
-    fullName: string;
-    displayName: string;
-    systemRole?: AuthUser['systemRole'];
-  }): Promise<string> {
+  async createUser(
+    input: {
+      email: unknown;
+      password: unknown;
+      fullName: string;
+      displayName: string;
+      systemRole?: AuthUser['systemRole'];
+    },
+    audit?: {
+      actorUserId: string;
+      after: Record<string, unknown>;
+    },
+  ): Promise<string> {
     const email = emailSchema.parse(input.email);
     const password = passwordSchema.parse(input.password);
     const passwordHash = await hashPassword(password);
-    const [created] = await this.database.sql<{ id: string }[]>`
-      WITH new_user AS (
-        INSERT INTO users (full_name, display_name, system_role)
-        VALUES (
-          ${input.fullName.trim()},
-          ${input.displayName.trim()},
-          ${input.systemRole ?? 'USER'}
+    const created = await this.database.sql.begin(async (transaction) => {
+      const [user] = await transaction<{ id: string }[]>`
+        WITH new_user AS (
+          INSERT INTO users (full_name, display_name, system_role)
+          VALUES (
+            ${input.fullName.trim()},
+            ${input.displayName.trim()},
+            ${input.systemRole ?? 'USER'}
+          )
+          RETURNING id
         )
-        RETURNING id
-      )
-      INSERT INTO user_credentials (user_id, email, password_hash)
-      SELECT id, ${email}, ${passwordHash} FROM new_user
-      RETURNING user_id AS id
-    `;
+        INSERT INTO user_credentials (user_id, email, password_hash)
+        SELECT id, ${email}, ${passwordHash} FROM new_user
+        RETURNING user_id AS id
+      `;
+      if (user && audit) {
+        await transaction`
+          INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after)
+          VALUES (
+            ${audit.actorUserId}, 'USER_CREATED', 'user', ${user.id},
+            ${JSON.stringify(audit.after)}::jsonb
+          )
+        `;
+      }
+      return user;
+    });
     if (!created) {
       throw new Error('Failed to create user');
     }

@@ -1,6 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { z } from 'zod';
-import { AuditService } from '../audit/audit.service';
 import {
   CurrentUser,
   OptionalAuth,
@@ -38,7 +37,6 @@ export class OrganizationsController {
   constructor(
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
-    private readonly audit: AuditService,
   ) {}
 
   @OptionalAuth()
@@ -58,23 +56,26 @@ export class OrganizationsController {
   @Post()
   async createOrganization(@Body() body: unknown, @CurrentUser() user: AuthUser) {
     const input = this.parse(createOrganizationSchema, body);
-    const [organization] = await this.database.sql`
-      INSERT INTO organizations (parent_organization_id, name, slug, visibility, timezone)
-      VALUES (
-        ${input.parentOrganizationId ?? null},
-        ${input.name},
-        ${input.slug},
-        ${input.visibility},
-        ${input.timezone}
-      )
-      RETURNING id, name, slug, visibility, timezone, status
-    `;
-    await this.audit.record({
-      actorUserId: user.userId,
-      action: 'ORGANIZATION_CREATED',
-      entityType: 'organization',
-      entityId: String(organization?.id),
-      after: organization as Record<string, unknown>,
+    const organization = await this.database.sql.begin(async (transaction) => {
+      const [created] = await transaction`
+        INSERT INTO organizations (parent_organization_id, name, slug, visibility, timezone)
+        VALUES (
+          ${input.parentOrganizationId ?? null},
+          ${input.name},
+          ${input.slug},
+          ${input.visibility},
+          ${input.timezone}
+        )
+        RETURNING id, name, slug, visibility, timezone, status
+      `;
+      await transaction`
+        INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after)
+        VALUES (
+          ${user.userId}, 'ORGANIZATION_CREATED', 'organization', ${String(created?.id)},
+          ${JSON.stringify(created ?? null)}::jsonb
+        )
+      `;
+      return created;
     });
     return { organization };
   }
@@ -113,17 +114,20 @@ export class OrganizationsController {
     const input = this.parse(addMemberSchema, body);
     const access = await this.authorization.organizationAccess(id, user);
     this.authorization.assertCanManage(access, user);
-    const [membership] = await this.database.sql`
-      INSERT INTO organization_memberships (organization_id, user_id, role)
-      VALUES (${id}, ${input.userId}, ${input.role})
-      RETURNING id, organization_id, user_id, role, status, joined_at
-    `;
-    await this.audit.record({
-      actorUserId: user.userId,
-      action: 'ORGANIZATION_MEMBER_ADDED',
-      entityType: 'organization_membership',
-      entityId: String(membership?.id),
-      after: membership as Record<string, unknown>,
+    const membership = await this.database.sql.begin(async (transaction) => {
+      const [created] = await transaction`
+        INSERT INTO organization_memberships (organization_id, user_id, role)
+        VALUES (${id}, ${input.userId}, ${input.role})
+        RETURNING id, organization_id, user_id, role, status, joined_at
+      `;
+      await transaction`
+        INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after)
+        VALUES (
+          ${user.userId}, 'ORGANIZATION_MEMBER_ADDED', 'organization_membership',
+          ${String(created?.id)}, ${JSON.stringify(created ?? null)}::jsonb
+        )
+      `;
+      return created;
     });
     return { membership };
   }
@@ -141,32 +145,35 @@ export class OrganizationsController {
     if (!input.role && !input.status) throw new BadRequestException('Không có thay đổi');
     const access = await this.authorization.organizationAccess(id, user);
     this.authorization.assertCanManage(access, user);
-    const [before] = await this.database.sql`
-      SELECT id, role, status, left_at
-      FROM organization_memberships
-      WHERE organization_id = ${id} AND user_id = ${memberUserId} AND status = 'ACTIVE'
-      FOR UPDATE
-    `;
-    if (!before) throw new BadRequestException('Không tìm thấy membership đang hoạt động');
-    const membershipId = String(before.id);
-    const [membership] = await this.database.sql`
-      UPDATE organization_memberships
-      SET
-        role = COALESCE(${input.role ?? null}, role),
-        status = COALESCE(${input.status ?? null}, status),
-        left_at = CASE WHEN ${input.status ?? null} = 'LEFT' THEN now() ELSE NULL END,
-        updated_at = now()
-      WHERE id = ${membershipId}
-      RETURNING id, organization_id, user_id, role, status, joined_at, left_at
-    `;
-    await this.audit.record({
-      actorUserId: user.userId,
-      action: 'ORGANIZATION_MEMBER_UPDATED',
-      entityType: 'organization_membership',
-      entityId: membershipId,
-      before,
-      after: membership as Record<string, unknown>,
-      reason: input.reason,
+    const membership = await this.database.sql.begin(async (transaction) => {
+      const [before] = await transaction`
+        SELECT id, role, status, left_at
+        FROM organization_memberships
+        WHERE organization_id = ${id} AND user_id = ${memberUserId} AND status = 'ACTIVE'
+        FOR UPDATE
+      `;
+      if (!before) throw new BadRequestException('Không tìm thấy membership đang hoạt động');
+      const membershipId = String(before.id);
+      const [updated] = await transaction`
+        UPDATE organization_memberships
+        SET
+          role = COALESCE(${input.role ?? null}, role),
+          status = COALESCE(${input.status ?? null}, status),
+          left_at = CASE WHEN ${input.status ?? null} = 'LEFT' THEN now() ELSE NULL END,
+          updated_at = now()
+        WHERE id = ${membershipId}
+        RETURNING id, organization_id, user_id, role, status, joined_at, left_at
+      `;
+      await transaction`
+        INSERT INTO audit_logs (
+          actor_user_id, action, entity_type, entity_id, before, after, reason
+        ) VALUES (
+          ${user.userId}, 'ORGANIZATION_MEMBER_UPDATED', 'organization_membership',
+          ${membershipId}, ${JSON.stringify(before)}::jsonb,
+          ${JSON.stringify(updated ?? null)}::jsonb, ${input.reason}
+        )
+      `;
+      return updated;
     });
     return { membership };
   }

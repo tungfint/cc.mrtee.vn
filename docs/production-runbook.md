@@ -9,6 +9,7 @@ POSTGRES_DB=cc_tracker
 POSTGRES_USER=cc_app
 POSTGRES_PASSWORD=<strong-random-secret>
 PUBLIC_ORIGIN=https://cc.example.edu.vn
+METRICS_TOKEN=<at-least-32-random-characters>
 HTTP_PORT=80
 ```
 
@@ -34,7 +35,7 @@ docker compose --env-file .env -f compose.production.yml exec \
 
 ## Verification and operations
 
-Check `GET /api/health/live` and `GET /api/health/ready`, then log in and verify dashboard, leaderboard, sync and a test account. Inspect logs with `docker compose ... logs api worker`.
+Check `GET /api/health/live` and `GET /api/health/ready`, then log in and verify dashboard, leaderboard, sync and a test account. Scrape `GET /api/metrics` with `Authorization: Bearer <METRICS_TOKEN>` from the private monitoring network. Inspect logs with `docker compose ... logs api worker`; see `docs/monitoring.md` for alert thresholds.
 
 Create a daily encrypted off-host backup:
 

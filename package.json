@@ -24,6 +24,8 @@
     "db:generate": "npm run db:generate --workspace @cc/database",
     "db:migrate": "npm run db:migrate --workspace @cc/database",
     "db:check": "npm run db:check --workspace @cc/database",
+    "seed:dev": "npm run seed:dev --workspace @cc/api",
+    "load:smoke": "node scripts/load-smoke.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

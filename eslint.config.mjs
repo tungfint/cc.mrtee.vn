@@ -35,6 +35,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ['scripts/**/*.mjs'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: globals.node,
+      parserOptions: { projectService: false },
+    },
+  },
+  {
     files: ['**/*.test.{ts,tsx}', '**/*.config.{ts,mts}'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',

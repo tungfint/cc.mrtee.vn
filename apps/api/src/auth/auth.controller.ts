@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Post, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { EnvironmentService } from '../config/environment';
 import { AuthService } from './auth.service';
 import { CurrentUser, Public } from './auth.decorators';
 import type { AuthUser } from './auth.types';
 import { CSRF_COOKIE, SESSION_COOKIE } from './auth.types';
+import { RateLimitService } from '../rate-limit/rate-limit.service';
 
 const loginSchema = z.object({
   email: z.string().trim().email().max(320),
@@ -17,11 +18,17 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly environment: EnvironmentService,
+    private readonly rateLimit: RateLimitService,
   ) {}
 
   @Public()
   @Post('login')
-  async login(@Body() body: unknown, @Res({ passthrough: true }) response: Response) {
+  async login(
+    @Body() body: unknown,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.rateLimit.consume(`login:${request.ip ?? 'unknown'}`, 10, 15 * 60);
     const input = loginSchema.parse(body);
     const result = await this.auth.login(input.email, input.password);
     const cookieBase = {

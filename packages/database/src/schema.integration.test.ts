@@ -405,6 +405,24 @@ describe('Phase 1 database invariants', () => {
 
     await insertSnapshot();
     await expectPostgresError(insertSnapshot, '23505');
+
+    await expectPostgresError(
+      async () =>
+        connection`
+          UPDATE season_user_snapshots
+          SET final_rank = 2
+          WHERE season_id = ${seasonId} AND user_id = ${userId}
+        `,
+      'P0001',
+    );
+    await expectPostgresError(
+      async () =>
+        connection`
+          DELETE FROM season_user_snapshots
+          WHERE season_id = ${seasonId} AND user_id = ${userId}
+        `,
+      'P0001',
+    );
   });
 
   it('uses case-insensitive Codeforces handles and requires atomic verification timestamps', async () => {

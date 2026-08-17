@@ -1,14 +1,18 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { EnvironmentService } from './config/environment';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const environment = app.get(EnvironmentService).values;
 
+  app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cookieParser());
+  app.set('trust proxy', 1);
 
   app.enableCors({
     origin: environment.CORS_ORIGIN,
@@ -17,13 +21,15 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   app.setGlobalPrefix('api');
 
-  const openApiConfig = new DocumentBuilder()
-    .setTitle('Codeforces Gamification Tracker API')
-    .setDescription('Internal API for the Codeforces Gamification Tracker')
-    .setVersion('0.1.0')
-    .build();
-  const document = SwaggerModule.createDocument(app, openApiConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  if (environment.NODE_ENV !== 'production') {
+    const openApiConfig = new DocumentBuilder()
+      .setTitle('Codeforces Gamification Tracker API')
+      .setDescription('Internal API for the Codeforces Gamification Tracker')
+      .setVersion('0.1.0')
+      .build();
+    const document = SwaggerModule.createDocument(app, openApiConfig);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   await app.listen(environment.API_PORT, environment.API_HOST);
 }

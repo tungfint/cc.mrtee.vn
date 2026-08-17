@@ -59,6 +59,7 @@ services:
       CORS_ORIGIN: ${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN}
       AUTH_COOKIE_SECURE: 'true'
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
     depends_on:
       migrate:
         condition: service_completed_successfully

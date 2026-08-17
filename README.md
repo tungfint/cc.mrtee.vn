@@ -62,5 +62,15 @@ npm run build
 npm run db:check
 ```
 
+For a reproducible seven-scenario simulation dataset, run `npm run seed:dev` and
+use the credentials printed by the command. This seed refuses production mode;
+details and expected outputs are in `docs/dev-simulation.md`.
+
+Production deployment, monitoring, and the completed readiness audit are in:
+
+- `docs/production-runbook.md`
+- `docs/monitoring.md`
+- `docs/production-readiness.md`
+
 The product requirements and implementation invariants are defined in the
 three root documents. Accepted clarifications are recorded under `docs/adr`.

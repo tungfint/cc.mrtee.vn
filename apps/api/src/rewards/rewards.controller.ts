@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CurrentUser, OptionalAuth } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { RewardsService } from './rewards.service';
+import { RateLimitService } from '../rate-limit/rate-limit.service';
 
 const redeemSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(120),
@@ -14,7 +15,10 @@ const transitionSchema = z.object({
 
 @Controller()
 export class RewardsController {
-  constructor(private readonly rewards: RewardsService) {}
+  constructor(
+    private readonly rewards: RewardsService,
+    private readonly rateLimit: RateLimitService,
+  ) {}
 
   @OptionalAuth()
   @Get('rewards')
@@ -23,10 +27,11 @@ export class RewardsController {
   }
 
   @Post('rewards/:id/redeem')
-  redeem(@Param('id') idInput: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+  async redeem(@Param('id') idInput: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
     const id = z.string().uuid().safeParse(idInput);
     const input = redeemSchema.safeParse(body);
     if (!id.success || !input.success) throw new BadRequestException('Dữ liệu không hợp lệ');
+    await this.rateLimit.consume(`redeem:${user.userId}`, 5, 60);
     return this.rewards.redeem(user.userId, id.data, input.data.idempotencyKey);
   }
 

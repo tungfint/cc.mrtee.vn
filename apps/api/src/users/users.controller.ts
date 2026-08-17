@@ -1,6 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
-import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -19,7 +18,6 @@ export class UsersController {
   constructor(
     private readonly database: DatabaseService,
     private readonly auth: AuthService,
-    private readonly audit: AuditService,
   ) {}
 
   @Get('me')
@@ -47,12 +45,8 @@ export class UsersController {
   async createUser(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
     const parsed = createUserSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
-    const userId = await this.auth.createUser(parsed.data);
-    await this.audit.record({
+    const userId = await this.auth.createUser(parsed.data, {
       actorUserId: actor.userId,
-      action: 'USER_CREATED',
-      entityType: 'user',
-      entityId: userId,
       after: {
         email: parsed.data.email.toLowerCase(),
         fullName: parsed.data.fullName,

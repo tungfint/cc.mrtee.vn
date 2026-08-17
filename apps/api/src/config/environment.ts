@@ -14,6 +14,7 @@ const environmentSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  METRICS_TOKEN: z.string().min(32).optional(),
 });
 
 export type ApiEnvironment = z.infer<typeof environmentSchema>;

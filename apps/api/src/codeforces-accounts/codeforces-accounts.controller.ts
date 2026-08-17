@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { CurrentUser } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { CodeforcesAccountsService } from './codeforces-accounts.service';
+import { RateLimitService } from '../rate-limit/rate-limit.service';
 
 const linkSchema = z.object({ handle: z.string() });
 const verifySchema = z.object({ reason: z.string().trim().min(3).max(500) });
@@ -10,7 +11,10 @@ const uuidSchema = z.string().uuid();
 
 @Controller()
 export class CodeforcesAccountsController {
-  constructor(private readonly accounts: CodeforcesAccountsService) {}
+  constructor(
+    private readonly accounts: CodeforcesAccountsService,
+    private readonly rateLimit: RateLimitService,
+  ) {}
 
   @Post('me/codeforces-account')
   async link(@Body() body: unknown, @CurrentUser() user: AuthUser) {
@@ -25,6 +29,7 @@ export class CodeforcesAccountsController {
 
   @Post('me/sync')
   async sync(@CurrentUser() user: AuthUser) {
+    await this.rateLimit.consume(`sync:${user.userId}`, 1, 120);
     return this.accounts.requestSync(user);
   }
 
