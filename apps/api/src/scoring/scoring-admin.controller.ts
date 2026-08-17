@@ -1,14 +1,23 @@
-import { BadRequestException, Body, Controller, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { CurrentUser } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
+import { ScoringAdjustmentsService } from './scoring-adjustments.service';
 
 const schema = z.object({
   organizationId: z.string().uuid(),
   ccBase: z.coerce.number().min(0).max(10_000),
   reason: z.string().trim().min(3).max(500),
+});
+const pointSchema = z.object({
+  organizationId: z.string().uuid(),
+  type: z.enum(['BONUS', 'PENALTY', 'ADJUSTMENT']),
+  amount: z.coerce.number().min(-1_000_000).max(1_000_000),
+  affectsSeason: z.boolean().default(true),
+  reason: z.string().trim().min(3).max(500),
+  idempotencyKey: z.string().trim().min(8).max(120),
 });
 
 @Controller('admin/users')
@@ -16,6 +25,7 @@ export class ScoringAdminController {
   constructor(
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
+    private readonly adjustments: ScoringAdjustmentsService,
   ) {}
 
   @Post(':id/recalibrate-base')
@@ -64,5 +74,49 @@ export class ScoringAdminController {
       `;
       return { state };
     });
+  }
+
+  @Post(':id/points')
+  adjustPoints(
+    @Param('id') userIdInput: string,
+    @Body() body: unknown,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    const userId = z.string().uuid().safeParse(userIdInput);
+    const input = pointSchema.safeParse(body);
+    if (!userId.success || !input.success) throw new BadRequestException('Dữ liệu không hợp lệ');
+    return this.adjustments.apply({ targetUserId: userId.data, actor, ...input.data });
+  }
+
+  @Get('organization/:organizationId/audit-logs')
+  async auditLogs(
+    @Param('organizationId') organizationIdInput: string,
+    @Query('limit') limitInput: string | undefined,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    const organizationId = z.string().uuid().safeParse(organizationIdInput);
+    const limit = z.coerce.number().int().min(1).max(100).default(50).safeParse(limitInput);
+    if (!organizationId.success || !limit.success) {
+      throw new BadRequestException('Dữ liệu không hợp lệ');
+    }
+    const access = await this.authorization.organizationAccess(organizationId.data, actor);
+    this.authorization.assertCanTeach(access, actor);
+    const logs = await this.database.sql`
+      SELECT logs.id, logs.actor_user_id, actors.display_name AS actor_name, logs.action,
+        logs.entity_type, logs.entity_id, logs.before, logs.after, logs.reason, logs.created_at
+      FROM audit_logs AS logs
+      LEFT JOIN users AS actors ON actors.id = logs.actor_user_id
+      WHERE logs.entity_id = ${organizationId.data}
+        OR logs.after->>'organizationId' = ${organizationId.data}
+        OR logs.after->>'organization_id' = ${organizationId.data}
+        OR logs.before->>'organization_id' = ${organizationId.data}
+        OR EXISTS (
+          SELECT 1 FROM organization_memberships AS memberships
+          WHERE memberships.organization_id = ${organizationId.data}
+            AND (memberships.id::text = logs.entity_id OR memberships.user_id::text = logs.entity_id)
+        )
+      ORDER BY logs.created_at DESC LIMIT ${limit.data}
+    `;
+    return { logs };
   }
 }

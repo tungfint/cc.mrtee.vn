@@ -23,6 +23,19 @@ export class RewardsAdminController {
     return { rewards: await this.database.sql`SELECT * FROM rewards ORDER BY created_at DESC` };
   }
 
+  @Get('orders')
+  async orders() {
+    return {
+      orders: await this.database.sql`
+        SELECT orders.*, users.display_name, rewards.name AS reward_name
+        FROM reward_orders AS orders
+        JOIN users ON users.id = orders.user_id
+        JOIN rewards ON rewards.id = orders.reward_id
+        ORDER BY orders.created_at DESC LIMIT 200
+      `,
+    };
+  }
+
   @Post()
   create(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
     const parsed = rewardSchema.safeParse(body);

@@ -1,0 +1,105 @@
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import type { AuthUser } from '../auth/auth.types';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { DatabaseService } from '../database/database.service';
+
+export type ManualPointType = 'BONUS' | 'PENALTY' | 'ADJUSTMENT';
+
+@Injectable()
+export class ScoringAdjustmentsService {
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly authorization: AuthorizationService,
+  ) {}
+
+  async apply(input: {
+    organizationId: string;
+    targetUserId: string;
+    type: ManualPointType;
+    amount: number;
+    affectsSeason: boolean;
+    reason: string;
+    idempotencyKey: string;
+    actor: AuthUser;
+  }) {
+    const access = await this.authorization.organizationAccess(input.organizationId, input.actor);
+    this.authorization.assertCanTeach(access, input.actor);
+    const [membership] = await this.database.sql`
+      SELECT id FROM organization_memberships
+      WHERE organization_id = ${input.organizationId} AND user_id = ${input.targetUserId}
+        AND status = 'ACTIVE'
+    `;
+    if (!membership) throw new BadRequestException('Người dùng không thuộc tổ chức');
+    if (input.type === 'BONUS' && input.amount <= 0) {
+      throw new BadRequestException('BONUS phải là số dương');
+    }
+    if (input.type === 'PENALTY' && input.amount >= 0) {
+      throw new BadRequestException('PENALTY phải là số âm');
+    }
+    if (input.amount === 0) throw new BadRequestException('Số điểm thay đổi phải khác 0');
+
+    const key = `manual:${input.organizationId}:${input.targetUserId}:${input.idempotencyKey}`;
+    return this.database.sql.begin(async (transaction) => {
+      await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      const [existing] = await transaction`
+        SELECT * FROM point_transactions WHERE idempotency_key = ${key}
+      `;
+      if (existing) {
+        if (existing.type !== input.type || Number(existing.amount) !== input.amount) {
+          throw new ConflictException('Khóa idempotency đã được dùng với nội dung khác');
+        }
+        return { transaction: existing, replayed: true };
+      }
+      const [season] = input.affectsSeason
+        ? await transaction<{ id: string }[]>`
+            SELECT id FROM seasons
+            WHERE organization_id = ${input.organizationId}
+              AND status IN ('ACTIVE', 'CLOSING')
+              AND start_at <= now() AND end_at > now()
+            ORDER BY start_at DESC LIMIT 1
+          `
+        : [];
+      const [pointTransaction] = await transaction`
+        INSERT INTO point_transactions (
+          user_id, type, amount, season_id, idempotency_key, affects_wallet,
+          affects_season, description, metadata, event_at
+        ) VALUES (
+          ${input.targetUserId}, ${input.type}, ${input.amount}, ${season?.id ?? null},
+          ${key}, true, ${Boolean(season)}, ${input.reason},
+          ${JSON.stringify({ organizationId: input.organizationId, actorUserId: input.actor.userId })}::jsonb,
+          now()
+        ) RETURNING *
+      `;
+      await transaction`
+        INSERT INTO user_wallets (user_id, balance)
+        VALUES (${input.targetUserId}, ${input.amount})
+        ON CONFLICT (user_id) DO UPDATE SET
+          balance = user_wallets.balance + EXCLUDED.balance, updated_at = now()
+      `;
+      if (season) {
+        const bonus = input.type === 'BONUS' ? input.amount : 0;
+        const penalty = input.type === 'PENALTY' ? input.amount : 0;
+        await transaction`
+          INSERT INTO season_user_totals (
+            season_id, user_id, bonus, penalty, score, reached_score_at
+          ) VALUES (
+            ${season.id}, ${input.targetUserId}, ${bonus}, ${penalty}, ${input.amount}, now()
+          ) ON CONFLICT (season_id, user_id) DO UPDATE SET
+            bonus = season_user_totals.bonus + EXCLUDED.bonus,
+            penalty = season_user_totals.penalty + EXCLUDED.penalty,
+            score = season_user_totals.score + EXCLUDED.score,
+            reached_score_at = now(), updated_at = now()
+        `;
+      }
+      await transaction`
+        INSERT INTO audit_logs (
+          actor_user_id, action, entity_type, entity_id, after, reason
+        ) VALUES (
+          ${input.actor.userId}, ${`POINT_${input.type}`}, 'point_transaction',
+          ${String(pointTransaction?.id)}, ${JSON.stringify(pointTransaction)}::jsonb, ${input.reason}
+        )
+      `;
+      return { transaction: pointTransaction, replayed: false };
+    });
+  }
+}

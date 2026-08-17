@@ -10,6 +10,8 @@ import type { EnvironmentService } from '../config/environment';
 import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
 import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
+import { InsightsController } from '../insights/insights.controller';
+import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
 import { AuthorizationService } from './authorization.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
@@ -33,6 +35,8 @@ const codeforcesAccounts = new CodeforcesAccountsService(
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
 const rewards = new RewardsService({ sql: connection } as DatabaseService);
 const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
+const insights = new InsightsController({ sql: connection } as DatabaseService, service);
+const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
   sessionId: 'test-session',
@@ -292,5 +296,54 @@ describe('authorization matrix', () => {
       refunds: '1',
       ledger_sum: '0.00',
     });
+  });
+
+  it('returns bounded dashboard analytics and privacy-safe leaderboard rows', async () => {
+    const dashboard = await insights.dashboard(authUser(ids.member!));
+    expect(dashboard.profile).toMatchObject({ id: ids.member!, display_name: 'member' });
+    expect(dashboard.streak).toEqual({ longest_streak: 0, current_streak: 0 });
+    const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
+    expect(leaderboard.entries).toHaveLength(2);
+    expect(leaderboard.entries[0]).toHaveProperty('displayName');
+    expect(leaderboard.entries[0]).not.toHaveProperty('email');
+    expect(leaderboard.total).toBe(4);
+  });
+
+  it('enforces organization-scoped teacher adjustments with atomic audit and idempotency', async () => {
+    await connection`
+      INSERT INTO seasons (
+        organization_id, name, start_at, end_at, status, scoring_policy_version
+      ) VALUES (
+        ${ids.privateOrg!}, 'Class season', now() - interval '1 day',
+        now() + interval '1 day', 'ACTIVE', 'v2.0'
+      )
+    `;
+    const command = {
+      organizationId: ids.privateOrg!,
+      targetUserId: ids.member!,
+      type: 'BONUS' as const,
+      amount: 15,
+      affectsSeason: true,
+      reason: 'Weekly challenge',
+      idempotencyKey: 'weekly-challenge-1',
+      actor: authUser(ids.teacher!),
+    };
+    const first = await adjustments.apply(command);
+    const replay = await adjustments.apply(command);
+    expect(first.replayed).toBe(false);
+    expect(replay.replayed).toBe(true);
+    const [result] = await connection<
+      { wallet: string; score: string; transactions: number; audits: number }[]
+    >`
+      SELECT
+        (SELECT balance::text FROM user_wallets WHERE user_id = ${ids.member!}) AS wallet,
+        (SELECT score::text FROM season_user_totals WHERE user_id = ${ids.member!}) AS score,
+        (SELECT count(*)::int FROM point_transactions WHERE user_id = ${ids.member!}) AS transactions,
+        (SELECT count(*)::int FROM audit_logs WHERE action = 'POINT_BONUS') AS audits
+    `;
+    expect(result).toEqual({ wallet: '15.00', score: '15.00', transactions: 1, audits: 1 });
+    await expect(
+      adjustments.apply({ ...command, organizationId: ids.otherPrivateOrg! }),
+    ).rejects.toThrow();
   });
 });

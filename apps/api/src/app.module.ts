@@ -13,6 +13,7 @@ import { SyncModule } from './sync/sync.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { SeasonsModule } from './seasons/seasons.module';
 import { RewardsModule } from './rewards/rewards.module';
+import { InsightsModule } from './insights/insights.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { RewardsModule } from './rewards/rewards.module';
     ScoringModule,
     SeasonsModule,
     RewardsModule,
+    InsightsModule,
   ],
   controllers: [HealthController],
 })
