@@ -3,6 +3,8 @@ import { CF_SYNC_QUEUE, type SyncJobData } from '@cc/core';
 import { Job, Worker } from 'bullmq';
 import { CodeforcesClient } from '../codeforces/codeforces.client';
 import { RedisService } from '../redis/redis.service';
+import { SubmissionIngestionService } from '../ingestion/submission-ingestion.service';
+import { DatabaseService } from '../database/database.service';
 
 @Injectable()
 export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
@@ -12,6 +14,8 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
   constructor(
     private readonly redis: RedisService,
     private readonly codeforces: CodeforcesClient,
+    private readonly ingestion: SubmissionIngestionService,
+    private readonly database: DatabaseService,
   ) {}
 
   onModuleInit(): void {
@@ -19,10 +23,33 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
       CF_SYNC_QUEUE,
       async (job: Job<SyncJobData>) => {
         const startedAt = Date.now();
-        const submissions = await this.codeforces.userStatus(job.data.handle, 1, 1);
+        await this.database.sql`
+          UPDATE codeforces_accounts
+          SET sync_status = 'SYNCING', last_sync_error = NULL, updated_at = now()
+          WHERE id = ${job.data.accountId}
+        `;
+        const submissions = await this.codeforces.userStatus(job.data.handle, 1, 100);
+        await this.ingestion.ingestBatch(job.data.userId, submissions);
+        const maxSubmissionId = submissions.reduce(
+          (maximum, submission) => Math.max(maximum, submission.id),
+          0,
+        );
+        await this.database.sql`
+          UPDATE codeforces_accounts
+          SET
+            sync_status = 'READY',
+            last_sync_at = now(),
+            next_sync_at = now() + interval '2 hours',
+            last_seen_submission_id = GREATEST(
+              COALESCE(last_seen_submission_id, 0),
+              ${String(maxSubmissionId)}
+            ),
+            updated_at = now()
+          WHERE id = ${job.data.accountId}
+        `;
         this.logger.log(
           JSON.stringify({
-            event: 'sync_probe_completed',
+            event: 'sync_ingestion_completed',
             jobId: job.id,
             userId: job.data.userId,
             mode: job.data.mode,
@@ -38,10 +65,19 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
       this.logger.error(
         JSON.stringify({ event: 'sync_job_failed', jobId: job?.id, message: error.message }),
       );
+      if (job) void this.markFailed(job.data.accountId, error.message);
     });
   }
 
   async onApplicationShutdown(): Promise<void> {
     await this.worker?.close();
+  }
+
+  private async markFailed(accountId: string, message: string): Promise<void> {
+    await this.database.sql`
+      UPDATE codeforces_accounts
+      SET sync_status = 'ERROR', last_sync_error = ${message.slice(0, 2000)}, updated_at = now()
+      WHERE id = ${accountId}
+    `;
   }
 }
