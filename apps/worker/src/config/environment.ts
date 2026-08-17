@@ -10,6 +10,7 @@ const environmentSchema = z.object({
   CF_REQUEST_INTERVAL_MS: z.coerce.number().int().positive().default(2200),
   CF_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   CF_REQUEST_MAX_ATTEMPTS: z.coerce.number().int().positive().max(10).default(4),
+  BACKFILL_PAGE_SIZE: z.coerce.number().int().positive().max(10_000).default(1000),
 });
 
 export type WorkerEnvironment = z.infer<typeof environmentSchema>;

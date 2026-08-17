@@ -204,6 +204,7 @@ export const codeforcesAccounts = pgTable(
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
     nextSyncAt: timestamp('next_sync_at', { withTimezone: true }),
     backfillCompletedAt: timestamp('backfill_completed_at', { withTimezone: true }),
+    backfillNextFrom: integer('backfill_next_from').default(1),
     syncStatus: accountSyncStatus('sync_status').default('UNVERIFIED').notNull(),
     lastSyncError: text('last_sync_error'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -218,6 +219,10 @@ export const codeforcesAccounts = pgTable(
     check(
       'codeforces_accounts_verification_timestamps_check',
       sql`(${table.verificationStatus} = 'UNVERIFIED' AND ${table.verifiedAt} IS NULL AND ${table.rewardEligibleFrom} IS NULL) OR (${table.verificationStatus} <> 'UNVERIFIED' AND ${table.verifiedAt} IS NOT NULL AND ${table.rewardEligibleFrom} IS NOT NULL)`,
+    ),
+    check(
+      'codeforces_accounts_backfill_cursor_check',
+      sql`${table.backfillNextFrom} IS NULL OR ${table.backfillNextFrom} > 0`,
     ),
   ],
 );

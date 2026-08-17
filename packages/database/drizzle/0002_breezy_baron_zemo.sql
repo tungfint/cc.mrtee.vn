@@ -1,0 +1,2 @@
+ALTER TABLE "codeforces_accounts" ADD COLUMN "backfill_next_from" integer DEFAULT 1;--> statement-breakpoint
+ALTER TABLE "codeforces_accounts" ADD CONSTRAINT "codeforces_accounts_backfill_cursor_check" CHECK ("codeforces_accounts"."backfill_next_from" IS NULL OR "codeforces_accounts"."backfill_next_from" > 0);

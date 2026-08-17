@@ -1,12 +1,9 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { CF_SYNC_QUEUE, type SyncJobData } from '@cc/core';
 import { Job, Worker } from 'bullmq';
-import { CodeforcesClient } from '../codeforces/codeforces.client';
 import { RedisService } from '../redis/redis.service';
-import { SubmissionIngestionService } from '../ingestion/submission-ingestion.service';
 import { DatabaseService } from '../database/database.service';
-import { FirstSolveService } from '../first-solve/first-solve.service';
-import { LevelService } from '../level/level.service';
+import { SyncProcessorService } from './sync-processor.service';
 
 @Injectable()
 export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
@@ -15,10 +12,7 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
 
   constructor(
     private readonly redis: RedisService,
-    private readonly codeforces: CodeforcesClient,
-    private readonly ingestion: SubmissionIngestionService,
-    private readonly firstSolves: FirstSolveService,
-    private readonly level: LevelService,
+    private readonly processor: SyncProcessorService,
     private readonly database: DatabaseService,
   ) {}
 
@@ -27,50 +21,19 @@ export class SyncWorkerService implements OnModuleInit, OnApplicationShutdown {
       CF_SYNC_QUEUE,
       async (job: Job<SyncJobData>) => {
         const startedAt = Date.now();
-        const [account] = await this.database.sql<{ reward_eligible_from: Date | string | null }[]>`
-          UPDATE codeforces_accounts
-          SET sync_status = 'SYNCING', last_sync_error = NULL, updated_at = now()
-          WHERE id = ${job.data.accountId}
-          RETURNING reward_eligible_from
-        `;
-        if (!account) throw new Error('Codeforces account no longer exists');
-        const submissions = await this.codeforces.userStatus(job.data.handle, 1, 100);
-        const ingested = await this.ingestion.ingestBatch(job.data.userId, submissions);
-        await this.firstSolves.recordBatch(
-          job.data.userId,
-          ingested,
-          account.reward_eligible_from ? new Date(account.reward_eligible_from) : null,
-          job.data.mode === 'BACKFILL',
-        );
-        await this.level.recompute(job.data.userId);
-        const maxSubmissionId = submissions.reduce(
-          (maximum, submission) => Math.max(maximum, submission.id),
-          0,
-        );
-        await this.database.sql`
-          UPDATE codeforces_accounts
-          SET
-            sync_status = 'READY',
-            last_sync_at = now(),
-            next_sync_at = now() + interval '2 hours',
-            last_seen_submission_id = GREATEST(
-              COALESCE(last_seen_submission_id, 0),
-              ${String(maxSubmissionId)}
-            ),
-            updated_at = now()
-          WHERE id = ${job.data.accountId}
-        `;
+        const result = await this.processor.process(job.data);
         this.logger.log(
           JSON.stringify({
             event: 'sync_ingestion_completed',
             jobId: job.id,
             userId: job.data.userId,
             mode: job.data.mode,
-            upstreamRows: submissions.length,
+            upstreamRows: result.upstreamRows,
+            newFirstSolves: result.newFirstSolves,
             durationMs: Date.now() - startedAt,
           }),
         );
-        return { upstreamRows: submissions.length };
+        return result;
       },
       { connection: this.redis.connection, concurrency: 2 },
     );

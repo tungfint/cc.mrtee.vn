@@ -4,9 +4,10 @@ import { SyncWorkerService } from './sync-worker.service';
 import { IngestionModule } from '../ingestion/ingestion.module';
 import { FirstSolveModule } from '../first-solve/first-solve.module';
 import { LevelModule } from '../level/level.module';
+import { SyncProcessorService } from './sync-processor.service';
 
 @Module({
   imports: [CodeforcesModule, IngestionModule, FirstSolveModule, LevelModule],
-  providers: [SyncWorkerService],
+  providers: [SyncProcessorService, SyncWorkerService],
 })
 export class SyncModule {}

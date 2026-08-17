@@ -8,6 +8,9 @@ import type { DatabaseService } from '../database/database.service';
 import { SubmissionIngestionService } from './submission-ingestion.service';
 import { FirstSolveService } from '../first-solve/first-solve.service';
 import { LevelService } from '../level/level.service';
+import { SyncProcessorService } from '../sync/sync-processor.service';
+import type { CodeforcesClient } from '../codeforces/codeforces.client';
+import type { EnvironmentService } from '../config/environment';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -166,5 +169,88 @@ describe('submission ingestion', () => {
     `;
     expect(Number(state?.cc_base)).toBe(800);
     expect(Number(state?.cc_level)).toBe(800);
+  });
+
+  it('resumes a crashed backfill from its persisted cursor without creating EARN', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
+    `;
+    if (!user) throw new Error('Missing fixture user');
+    const [account] = await client.connection<{ id: string }[]>`
+      INSERT INTO codeforces_accounts (
+        user_id, handle, verification_status, verified_at,
+        reward_eligible_from, sync_status
+      ) VALUES (
+        ${user.id}, 'student', 'TEACHER_VERIFIED', now(), now(), 'INITIALIZING'
+      ) RETURNING id
+    `;
+    if (!account) throw new Error('Missing fixture account');
+    const pages = [
+      makeSubmission({
+        id: 401,
+        problem: { ...makeSubmission().problem, contestId: 2000 },
+      }),
+      makeSubmission({
+        id: 402,
+        problem: { ...makeSubmission().problem, contestId: 2001 },
+      }),
+      makeSubmission({
+        id: 403,
+        problem: { ...makeSubmission().problem, contestId: 2002 },
+      }),
+    ];
+    const environment = { values: { BACKFILL_PAGE_SIZE: 2 } } as EnvironmentService;
+    const failingClient = {
+      userStatus: (_handle: string, from: number) =>
+        from === 1 ? Promise.resolve(pages.slice(0, 2)) : Promise.reject(new Error('crash')),
+    } as CodeforcesClient;
+    const job = {
+      userId: user.id,
+      accountId: account.id,
+      handle: 'student',
+      mode: 'BACKFILL' as const,
+    };
+    const firstProcessor = new SyncProcessorService(
+      failingClient,
+      service,
+      firstSolves,
+      level,
+      { sql: client.connection } as DatabaseService,
+      environment,
+    );
+    await expect(firstProcessor.process(job)).rejects.toThrow('crash');
+    const [checkpoint] = await client.connection<{ backfill_next_from: number }[]>`
+      SELECT backfill_next_from FROM codeforces_accounts WHERE id = ${account.id}
+    `;
+    expect(checkpoint?.backfill_next_from).toBe(3);
+
+    const resumeClient = {
+      userStatus: (_handle: string, from: number) =>
+        Promise.resolve(from === 3 ? pages.slice(2) : []),
+    } as CodeforcesClient;
+    const resumedProcessor = new SyncProcessorService(
+      resumeClient,
+      service,
+      firstSolves,
+      level,
+      { sql: client.connection } as DatabaseService,
+      environment,
+    );
+    await expect(resumedProcessor.process(job)).resolves.toMatchObject({ upstreamRows: 1 });
+    const [counts] = await client.connection<{ solves: number; earns: number; eligible: number }[]>`
+      SELECT
+        (SELECT count(*)::int FROM user_problem_solves) AS solves,
+        (SELECT count(*)::int FROM point_transactions WHERE type = 'EARN') AS earns,
+        (SELECT count(*)::int FROM user_problem_solves WHERE reward_eligible) AS eligible
+    `;
+    expect(counts).toEqual({ solves: 3, earns: 0, eligible: 0 });
+    const [completed] = await client.connection<
+      { backfill_completed_at: string | null; backfill_next_from: number | null }[]
+    >`
+      SELECT backfill_completed_at, backfill_next_from
+      FROM codeforces_accounts WHERE id = ${account.id}
+    `;
+    expect(completed?.backfill_completed_at).not.toBeNull();
+    expect(completed?.backfill_next_from).toBeNull();
   });
 });
