@@ -1,10 +1,6 @@
-import { resolve } from 'node:path';
-import { config } from 'dotenv';
 import postgres from 'postgres';
 import { z } from 'zod';
 import { hashPassword } from './password';
-
-config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
 const input = z
   .object({
