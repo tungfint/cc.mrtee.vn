@@ -17,6 +17,6 @@ FROM caddy:2.10-alpine AS runner
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY --from=builder /app/apps/web/dist /srv
 RUN addgroup -S app && adduser -S -G app app \
-  && chown -R app:app /srv /config /data
+  && chown -R app:app /srv /config /data /etc/caddy/Caddyfile
 USER app
 EXPOSE 8080
