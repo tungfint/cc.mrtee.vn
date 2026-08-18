@@ -49,6 +49,8 @@ interface UserAccount {
   verification_status: string | null;
   current_rating: number | null;
   rank: string | null;
+  cc_point: string;
+  cc_balance: string;
   memberships: { organizationId: string; organizationName: string; role: string }[];
 }
 interface Organization {
@@ -103,6 +105,8 @@ export default function AdminPage() {
   const [pointImportFile, setPointImportFile] = useState<File | null>(null);
   const [syncScope, setSyncScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>('USER');
   const [syncUserId, setSyncUserId] = useState('');
+  const [studentClassFilter, setStudentClassFilter] = useState('ALL');
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => api<{ memberships: Membership[] }>('/me'),
@@ -128,9 +132,13 @@ export default function AdminPage() {
     members.data?.members.filter(
       (member) => member.verification_status && member.verification_status !== 'UNVERIFIED',
     ) ?? [];
+  const verifiableMembers =
+    members.data?.members.filter(
+      (member) => member.codeforces_handle && member.verification_status === 'UNVERIFIED',
+    ) ?? [];
   const users = useQuery({
     queryKey: ['admin-users'],
-    queryFn: () => api<{ users: UserAccount[]; total: number }>('/admin/users?pageSize=50'),
+    queryFn: () => api<{ users: UserAccount[]; total: number }>('/admin/users?pageSize=500'),
     enabled: Boolean(isSystemAdmin),
   });
   const rewards = useQuery({
@@ -246,6 +254,27 @@ export default function AdminPage() {
       ),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
   });
+  const verifyStudents = useMutation({
+    mutationFn: (userIds: string[]) =>
+      api<{ requested: number; verified: number; skipped: number }>(
+        '/admin/codeforces-accounts/verify',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            userIds,
+            reason: reason || 'Admin xác minh Codeforces hàng loạt',
+            ...(!isSystemAdmin && organizationId ? { organizationId } : {}),
+          }),
+        },
+      ),
+    onSuccess: async () => {
+      setSelectedStudentIds([]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
+      ]);
+    },
+  });
   if (me.isPending) return <LoadingState label="Đang kiểm tra quyền quản trị…" />;
   if (me.error) return <ErrorState error={me.error} />;
   const memberships =
@@ -262,7 +291,24 @@ export default function AdminPage() {
   );
   const canApproveHandle = isSystemAdmin || selectedOrganization?.role === 'ORG_ADMIN';
   const noOrganizationSelected =
-    !organizationId && ['members', 'points', 'sync', 'audit'].includes(tab);
+    !organizationId &&
+    (['points', 'sync', 'audit'].includes(tab) || (!isSystemAdmin && tab === 'members'));
+  const globalStudents =
+    users.data?.users.filter((item) => {
+      if (item.system_role !== 'USER') return false;
+      if (item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))) {
+        return false;
+      }
+      const memberClasses = item.memberships.filter(({ role }) => role === 'MEMBER');
+      if (studentClassFilter === 'UNASSIGNED') return memberClasses.length === 0;
+      if (studentClassFilter !== 'ALL') {
+        return memberClasses.some(({ organizationId: id }) => id === studentClassFilter);
+      }
+      return true;
+    }) ?? [];
+  const verifiableStudents = globalStudents.filter(
+    (item) => item.codeforces_handle && item.verification_status === 'UNVERIFIED',
+  );
   const selectTarget = targetId || members.data?.members[0]?.user_id || '';
   const selectSyncTarget = syncUserId || syncEligibleMembers[0]?.user_id || '';
   const submitPoints = (event: FormEvent) => {
@@ -772,8 +818,247 @@ export default function AdminPage() {
               </div>
             </section>
           )}
-          {tab === 'members' && !noOrganizationSelected && (
+          {tab === 'members' && isSystemAdmin && (
             <section className="space-y-4">
+              <div className="panel student-command-bar p-4">
+                <label className="field">
+                  <span>Phạm vi học sinh</span>
+                  <select
+                    onChange={(event) => {
+                      setStudentClassFilter(event.target.value);
+                      setSelectedStudentIds([]);
+                    }}
+                    value={studentClassFilter}
+                  >
+                    <option value="ALL">Tất cả học sinh</option>
+                    <option value="UNASSIGNED">Chưa xếp lớp</option>
+                    {organizations.data?.organizations.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="student-selection-summary">
+                  <strong>{globalStudents.length} học sinh</strong>
+                  <span>{selectedStudentIds.length} tài khoản đang chọn</span>
+                </div>
+                <button
+                  className="button-secondary"
+                  disabled={verifiableStudents.length === 0}
+                  onClick={() =>
+                    setSelectedStudentIds(verifiableStudents.map((student) => student.id))
+                  }
+                  type="button"
+                >
+                  Chọn tất cả chưa xác minh
+                </button>
+                <button
+                  className="button-primary"
+                  disabled={selectedStudentIds.length === 0 || verifyStudents.isPending}
+                  onClick={() => verifyStudents.mutate(selectedStudentIds)}
+                  type="button"
+                >
+                  {verifyStudents.isPending
+                    ? 'Đang xác minh…'
+                    : `Xác minh CF (${selectedStudentIds.length})`}
+                </button>
+              </div>
+              {verifyStudents.error && (
+                <p className="notice error">{verifyStudents.error.message}</p>
+              )}
+              {verifyStudents.data && (
+                <p className="notice success">
+                  Đã xác minh {verifyStudents.data.verified}/{verifyStudents.data.requested} tài
+                  khoản; bỏ qua {verifyStudents.data.skipped}.
+                </p>
+              )}
+              {organizationId && (
+                <form
+                  className="panel import-panel p-5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    importStudents.mutate();
+                  }}
+                >
+                  <div>
+                    <p className="eyebrow">BULK IMPORT</p>
+                    <h2 className="mt-2 text-lg font-black">Import học sinh vào lớp đang chọn</h2>
+                    <a
+                      className="template-link"
+                      download
+                      href="/templates/danh-sach-hoc-sinh-mau.csv"
+                    >
+                      ⇩ Tải file mẫu CSV
+                    </a>
+                  </div>
+                  <label className="field">
+                    <span>File CSV/XLSX</span>
+                    <input
+                      accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+                      required
+                      type="file"
+                    />
+                  </label>
+                  <button className="button-secondary" disabled={importStudents.isPending}>
+                    {importStudents.isPending ? 'Đang import…' : 'Import'}
+                  </button>
+                </form>
+              )}
+              <div className="panel overflow-hidden">
+                <div className="management-header">
+                  <strong>Danh sách học sinh</strong>
+                  <span>Học sinh có thể chưa thuộc lớp nào</span>
+                </div>
+                {users.isPending ? (
+                  <LoadingState label="Đang tải học sinh…" />
+                ) : globalStudents.length === 0 ? (
+                  <EmptyState
+                    title="Chưa có học sinh"
+                    detail="Tạo tài khoản học sinh mới hoặc thay đổi bộ lọc lớp."
+                  />
+                ) : (
+                  globalStudents.map((student) => {
+                    const canVerify =
+                      Boolean(student.codeforces_handle) &&
+                      student.verification_status === 'UNVERIFIED';
+                    const checked = selectedStudentIds.includes(student.id);
+                    const classes = student.memberships
+                      .filter(({ role }) => role === 'MEMBER')
+                      .map(({ organizationName }) => organizationName);
+                    return (
+                      <div className="global-student-row" key={student.id}>
+                        <input
+                          aria-label={`Chọn ${student.display_name}`}
+                          checked={checked}
+                          className="student-checkbox"
+                          disabled={!canVerify}
+                          onChange={() =>
+                            setSelectedStudentIds((current) =>
+                              checked
+                                ? current.filter((id) => id !== student.id)
+                                : [...current, student.id],
+                            )
+                          }
+                          type="checkbox"
+                        />
+                        <div className="member">
+                          <Avatar
+                            name={student.display_name}
+                            rating={student.current_rating}
+                            size="sm"
+                            url={student.avatar_url}
+                          />
+                          <div>
+                            <strong>{student.display_name}</strong>
+                            <p>
+                              {student.full_name} · {student.email}
+                            </p>
+                            <p>{classes.length ? classes.join(', ') : 'Chưa xếp lớp'}</p>
+                            {student.codeforces_handle && (
+                              <CodeforcesHandle
+                                handle={student.codeforces_handle}
+                                rating={student.current_rating}
+                              />
+                            )}
+                            {student.pending_handle && (
+                              <p className="pending-copy">Yêu cầu đổi: @{student.pending_handle}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="student-metrics">
+                          <span>⚡ {formatNumber(student.cc_level, 2)}</span>
+                          <span>◆ {formatNumber(student.cc_point, 2)}</span>
+                          <span>◈ {formatNumber(student.cc_balance, 2)}</span>
+                        </div>
+                        <div className="student-actions">
+                          {student.pending_handle ? (
+                            <>
+                              <button
+                                className="button-primary"
+                                onClick={() =>
+                                  mutation.mutate({
+                                    path: `/admin/codeforces-accounts/${student.id}/approve-change`,
+                                    body: { reason: reason || 'Admin duyệt đổi Codeforces handle' },
+                                  })
+                                }
+                                type="button"
+                              >
+                                Duyệt đổi CF
+                              </button>
+                              <button
+                                className="button-secondary"
+                                onClick={() =>
+                                  mutation.mutate({
+                                    path: `/admin/codeforces-accounts/${student.id}/reject-change`,
+                                    body: {
+                                      reason: reason || 'Admin từ chối đổi Codeforces handle',
+                                    },
+                                  })
+                                }
+                                type="button"
+                              >
+                                Từ chối
+                              </button>
+                            </>
+                          ) : canVerify ? (
+                            <button
+                              className="button-secondary"
+                              onClick={() => verifyStudents.mutate([student.id])}
+                              type="button"
+                            >
+                              Xác minh CF
+                            </button>
+                          ) : student.verification_status ? (
+                            <StatusPill value={student.verification_status} />
+                          ) : (
+                            <span className="text-xs text-[var(--muted)]">Chưa có CF</span>
+                          )}
+                          <button
+                            className="button-secondary"
+                            onClick={() => {
+                              setEditingUser(student);
+                              setTab('accounts');
+                            }}
+                            type="button"
+                          >
+                            Sửa
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          )}
+          {tab === 'members' && !isSystemAdmin && !noOrganizationSelected && (
+            <section className="space-y-4">
+              <div className="panel student-command-bar p-4">
+                <div className="student-selection-summary">
+                  <strong>{members.data?.members.length ?? 0} học sinh trong lớp</strong>
+                  <span>{selectedStudentIds.length} tài khoản đang chọn</span>
+                </div>
+                <button
+                  className="button-secondary"
+                  disabled={verifiableMembers.length === 0}
+                  onClick={() =>
+                    setSelectedStudentIds(verifiableMembers.map((student) => student.user_id))
+                  }
+                  type="button"
+                >
+                  Chọn tất cả chưa xác minh
+                </button>
+                <button
+                  className="button-primary"
+                  disabled={selectedStudentIds.length === 0 || verifyStudents.isPending}
+                  onClick={() => verifyStudents.mutate(selectedStudentIds)}
+                  type="button"
+                >
+                  Xác minh CF ({selectedStudentIds.length})
+                </button>
+              </div>
               <form
                 className="panel import-panel p-5"
                 onSubmit={(event) => {
@@ -888,6 +1173,22 @@ export default function AdminPage() {
                 ) : (
                   members.data.members.map((member) => (
                     <div className="admin-row student-row" key={member.user_id}>
+                      <input
+                        aria-label={`Chọn ${member.display_name}`}
+                        checked={selectedStudentIds.includes(member.user_id)}
+                        className="student-checkbox"
+                        disabled={
+                          !member.codeforces_handle || member.verification_status !== 'UNVERIFIED'
+                        }
+                        onChange={() =>
+                          setSelectedStudentIds((current) =>
+                            current.includes(member.user_id)
+                              ? current.filter((id) => id !== member.user_id)
+                              : [...current, member.user_id],
+                          )
+                        }
+                        type="checkbox"
+                      />
                       <div className="member">
                         <Avatar
                           name={member.display_name}
@@ -994,8 +1295,8 @@ export default function AdminPage() {
                   <p className="eyebrow">CC POINT COMMAND</p>
                   <h2 className="mt-2 text-xl font-black">Cộng / trừ một tài khoản</h2>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    Ghi trực tiếp vào ví CC Point và điểm mùa hiện tại. Mỗi lệnh có khóa chống ghi
-                    trùng và được lưu trong nhật ký.
+                    Điều chỉnh đồng thời CC Point và CC Balance. Mỗi lệnh có khóa chống ghi trùng và
+                    được lưu trong nhật ký.
                   </p>
                   <label className="field mt-5">
                     <span>Học sinh</span>
@@ -1334,7 +1635,7 @@ export default function AdminPage() {
                   />
                 </label>
                 <label className="field mt-4">
-                  <span>Chi phí CC Point</span>
+                  <span>Chi phí CC Balance</span>
                   <input
                     min="0.01"
                     onChange={(e) => setRewardCost(e.target.value)}
@@ -1356,7 +1657,7 @@ export default function AdminPage() {
                     <div>
                       <strong>{reward.name}</strong>
                       <p className="m-0 text-xs text-[var(--muted)]">
-                        {formatNumber(reward.cost, 2)} CC Point · {reward.stock ?? '∞'} suất
+                        {formatNumber(reward.cost, 2)} CC Balance · {reward.stock ?? '∞'} suất
                       </p>
                     </div>
                     <StatusPill value={reward.active ? 'ACTIVE' : 'INACTIVE'} />

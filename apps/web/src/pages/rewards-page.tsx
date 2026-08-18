@@ -34,7 +34,7 @@ export default function RewardsPage() {
       <PageTitle
         eyebrow="REWARD STORE"
         title="Đổi nỗ lực thành trải nghiệm"
-        detail="Đổi quà chỉ trừ CC Point. CC Current và thứ hạng của bạn được giữ nguyên."
+        detail="Đổi quà chỉ trừ CC Balance; CC Point, CC Level và thành tích của bạn được giữ nguyên."
       />
       {redeem.isSuccess && (
         <p className="notice success">
@@ -68,7 +68,7 @@ export default function RewardsPage() {
                 </p>
                 <div className="mt-5 flex items-center justify-between">
                   <strong className="text-xl text-[var(--accent)]">
-                    {formatNumber(reward.cost, 2)} <small className="text-xs">điểm</small>
+                    {formatNumber(reward.cost, 2)} <small className="text-xs">CC Balance</small>
                   </strong>
                   <button
                     className="button-primary"
@@ -76,7 +76,7 @@ export default function RewardsPage() {
                     onClick={() => {
                       if (
                         window.confirm(
-                          `Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} điểm?`,
+                          `Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} CC Balance?`,
                         )
                       )
                         redeem.mutate(reward.id);

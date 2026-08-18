@@ -110,7 +110,7 @@ export class CodeforcesAccountsService {
   }
 
   async approveHandleChange(input: {
-    organizationId: string;
+    organizationId?: string;
     targetUserId: string;
     actor: AuthUser;
     reason: string;
@@ -162,7 +162,7 @@ export class CodeforcesAccountsService {
   }
 
   async rejectHandleChange(input: {
-    organizationId: string;
+    organizationId?: string;
     targetUserId: string;
     actor: AuthUser;
     reason: string;
@@ -288,14 +288,19 @@ export class CodeforcesAccountsService {
   }
 
   async verify(input: {
-    organizationId: string;
+    organizationId?: string;
     targetUserId: string;
     actor: AuthUser;
     reason: string;
   }): Promise<AccountRow> {
-    const access = await this.authorization.organizationAccess(input.organizationId, input.actor);
-    this.authorization.assertCanTeach(access, input.actor);
+    const access = input.organizationId
+      ? await this.authorization.organizationAccess(input.organizationId, input.actor)
+      : null;
     if (input.actor.systemRole !== 'SYSTEM_ADMIN') {
+      if (!input.organizationId || !access) {
+        throw new ForbiddenException('Giáo viên chỉ được xác minh học sinh trong lớp của mình');
+      }
+      this.authorization.assertCanTeach(access, input.actor);
       const [targetMembership] = await this.database.sql`
         SELECT id FROM organization_memberships
         WHERE organization_id = ${input.organizationId}
@@ -308,7 +313,7 @@ export class CodeforcesAccountsService {
     }
 
     const verificationStatus =
-      input.actor.systemRole === 'SYSTEM_ADMIN' || access.membershipRole === 'ORG_ADMIN'
+      input.actor.systemRole === 'SYSTEM_ADMIN' || access?.membershipRole === 'ORG_ADMIN'
         ? 'ADMIN_VERIFIED'
         : 'TEACHER_VERIFIED';
     return this.database.sql.begin(async (transaction) => {
@@ -356,23 +361,71 @@ export class CodeforcesAccountsService {
     });
   }
 
+  async verifyBatch(input: {
+    organizationId?: string;
+    targetUserIds: string[];
+    actor: AuthUser;
+    reason: string;
+  }): Promise<{ requested: number; verified: number; skipped: number; results: object[] }> {
+    if (input.actor.systemRole !== 'SYSTEM_ADMIN' && !input.organizationId) {
+      throw new ForbiddenException('Giáo viên phải chọn lớp cần xác minh');
+    }
+    const targetUserIds = [...new Set(input.targetUserIds)];
+    const results: object[] = [];
+    let verified = 0;
+    for (const targetUserId of targetUserIds) {
+      try {
+        const account = await this.verify({
+          actor: input.actor,
+          targetUserId,
+          reason: input.reason,
+          ...(input.organizationId ? { organizationId: input.organizationId } : {}),
+        });
+        verified += 1;
+        results.push({ userId: targetUserId, success: true, status: account.verification_status });
+      } catch (error) {
+        if (
+          error instanceof NotFoundException ||
+          error instanceof ConflictException ||
+          error instanceof ForbiddenException
+        ) {
+          results.push({
+            userId: targetUserId,
+            success: false,
+            message: error.message,
+          });
+          continue;
+        }
+        throw error;
+      }
+    }
+    return {
+      requested: targetUserIds.length,
+      verified,
+      skipped: targetUserIds.length - verified,
+      results,
+    };
+  }
+
   private async assertCanApproveChange(
-    organizationId: string,
+    organizationId: string | undefined,
     targetUserId: string,
     actor: AuthUser,
   ): Promise<void> {
+    if (actor.systemRole === 'SYSTEM_ADMIN') return;
+    if (!organizationId) {
+      throw new ForbiddenException('Admin lớp phải chọn lớp của học sinh');
+    }
     const access = await this.authorization.organizationAccess(organizationId, actor);
-    if (actor.systemRole !== 'SYSTEM_ADMIN' && access.membershipRole !== 'ORG_ADMIN') {
+    if (access.membershipRole !== 'ORG_ADMIN') {
       throw new ForbiddenException('Chỉ Admin được duyệt thay đổi Codeforces handle');
     }
-    if (actor.systemRole !== 'SYSTEM_ADMIN') {
-      const [membership] = await this.database.sql`
-        SELECT id FROM organization_memberships
-        WHERE organization_id = ${organizationId} AND user_id = ${targetUserId}
-          AND status = 'ACTIVE'
-      `;
-      if (!membership) throw new ForbiddenException('Học sinh không thuộc lớp của Admin');
-    }
+    const [membership] = await this.database.sql`
+      SELECT id FROM organization_memberships
+      WHERE organization_id = ${organizationId} AND user_id = ${targetUserId}
+        AND status = 'ACTIVE'
+    `;
+    if (!membership) throw new ForbiddenException('Học sinh không thuộc lớp của Admin');
   }
 
   private async enqueueAccount(account: AccountRow, priority: 'HIGH' | 'LOW'): Promise<boolean> {

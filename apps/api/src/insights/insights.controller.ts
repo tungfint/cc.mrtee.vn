@@ -1,5 +1,4 @@
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
-import { currentDateStreak, longestDateStreak } from '@cc/core';
 import { z } from 'zod';
 import { CurrentUser, OptionalAuth, OptionalUser } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -12,17 +11,16 @@ interface LeaderboardRow {
   avatar_url: string | null;
   current_rating: number | null;
   cc_level: string;
-  season_score: string;
-  qualifying_solves: number;
-  final_rank: number | null;
-  timezone: string;
-  today_key: string;
-  date_keys: string[] | null;
+  cc_point: string;
+  cc_balance: string;
+  current_streak: number;
+  longest_streak: number;
 }
 
 const leaderboardQuery = z.object({
   organizationId: z.string().uuid().optional(),
   seasonId: z.string().uuid().optional(),
+  sort: z.enum(['CC_LEVEL', 'CC_POINT', 'STREAK']).default('CC_LEVEL'),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
 });
@@ -45,11 +43,16 @@ export class InsightsController {
           accounts.sync_status, accounts.last_sync_at, accounts.next_sync_at,
           COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(wallet.balance, 0)::text AS wallet_balance,
+          COALESCE(points.cc_point, 0)::text AS cc_point,
           (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves
         FROM users
         LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
         LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
         LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
+        LEFT JOIN LATERAL (
+          SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+          FROM point_transactions WHERE user_id = users.id
+        ) AS points ON true
         WHERE users.id = ${user.userId}
       `,
         this.database.sql`
@@ -157,38 +160,62 @@ export class InsightsController {
     }
     const offset = (input.page - 1) * input.pageSize;
     const rows = await this.database.sql<LeaderboardRow[]>`
-      SELECT users.id AS user_id, users.display_name, users.avatar_url, users.timezone,
+      SELECT users.id AS user_id, users.display_name, users.avatar_url,
         accounts.current_rating,
         COALESCE(skill.cc_level, 800)::text AS cc_level,
-        COALESCE(totals.score, 0)::text AS season_score,
-        COALESCE(totals.qualifying_solves, 0)::int AS qualifying_solves,
-        snapshots.final_rank,
-        to_char(now() AT TIME ZONE users.timezone, 'YYYY-MM-DD') AS today_key,
-        streak.date_keys
+        COALESCE(points.cc_point, 0)::text AS cc_point,
+        COALESCE(wallet.balance, 0)::text AS cc_balance,
+        COALESCE(streak.current_streak, 0)::int AS current_streak,
+        COALESCE(streak.longest_streak, 0)::int AS longest_streak
       FROM users
-      ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE'` : this.database.sql``}
+      ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE' AND memberships.role = 'MEMBER'` : this.database.sql``}
       LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
       LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
-      LEFT JOIN season_user_totals AS totals
-        ON totals.user_id = users.id AND totals.season_id IS NOT DISTINCT FROM ${seasonId}
-      LEFT JOIN season_user_snapshots AS snapshots
-        ON snapshots.user_id = users.id AND snapshots.season_id IS NOT DISTINCT FROM ${seasonId}
+      LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
       LEFT JOIN LATERAL (
-        SELECT array_agg(DISTINCT to_char(
-          first_solved_at AT TIME ZONE users.timezone, 'YYYY-MM-DD'
-        )) AS date_keys
-        FROM user_problem_solves WHERE user_id = users.id
+        SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+        FROM point_transactions WHERE user_id = users.id
+      ) AS points ON true
+      LEFT JOIN LATERAL (
+        WITH days AS (
+          SELECT DISTINCT (first_solved_at AT TIME ZONE users.timezone)::date AS day,
+            (now() AT TIME ZONE users.timezone)::date AS today
+          FROM user_problem_solves WHERE user_id = users.id
+        ), grouped AS (
+          SELECT day, today, day - row_number() OVER (ORDER BY day)::int AS island FROM days
+        ), runs AS (
+          SELECT count(*)::int AS length, max(day) AS end_day, max(today) AS today
+          FROM grouped GROUP BY island
+        )
+        SELECT COALESCE(max(length), 0)::int AS longest_streak,
+          COALESCE(max(length) FILTER (WHERE end_day IN (today, today - 1)), 0)::int
+            AS current_streak
+        FROM runs
       ) AS streak ON true
-      WHERE users.status = 'ACTIVE'
-      ORDER BY COALESCE(snapshots.final_rank, 2147483647), COALESCE(totals.score, 0) DESC,
-        COALESCE(totals.qualifying_solves, 0) DESC, COALESCE(skill.cc_level, 800) DESC,
-        totals.reached_score_at, users.id
+      WHERE users.status = 'ACTIVE' AND users.system_role = 'USER'
+        AND NOT EXISTS (
+          SELECT 1 FROM organization_memberships AS staff_memberships
+          WHERE staff_memberships.user_id = users.id
+            AND staff_memberships.status = 'ACTIVE'
+            AND staff_memberships.role IN ('TEACHER', 'ORG_ADMIN')
+        )
+      ORDER BY
+        CASE WHEN ${input.sort} = 'CC_LEVEL' THEN COALESCE(skill.cc_level, 800) END DESC,
+        CASE WHEN ${input.sort} = 'CC_POINT' THEN COALESCE(points.cc_point, 0) END DESC,
+        CASE WHEN ${input.sort} = 'STREAK' THEN COALESCE(streak.current_streak, 0) END DESC,
+        COALESCE(skill.cc_level, 800) DESC, users.id
       LIMIT ${input.pageSize} OFFSET ${offset}
     `;
     const [{ count } = { count: '0' }] = await this.database.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM users
-      ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE'` : this.database.sql``}
-      WHERE users.status = 'ACTIVE'
+      ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE' AND memberships.role = 'MEMBER'` : this.database.sql``}
+      WHERE users.status = 'ACTIVE' AND users.system_role = 'USER'
+        AND NOT EXISTS (
+          SELECT 1 FROM organization_memberships AS staff_memberships
+          WHERE staff_memberships.user_id = users.id
+            AND staff_memberships.status = 'ACTIVE'
+            AND staff_memberships.role IN ('TEACHER', 'ORG_ADMIN')
+        )
     `;
     return {
       seasonId,
@@ -197,16 +224,16 @@ export class InsightsController {
       pageSize: input.pageSize,
       total: Number(count),
       entries: rows.map((row, index) => ({
-        rank: row.final_rank ?? offset + index + 1,
+        rank: offset + index + 1,
         userId: row.user_id,
         displayName: row.display_name,
         avatarUrl: row.avatar_url,
         currentRating: row.current_rating,
         ccLevel: row.cc_level,
-        seasonScore: row.season_score,
-        solved: row.qualifying_solves,
-        streak: currentDateStreak(row.date_keys ?? [], row.today_key),
-        longestStreak: longestDateStreak(row.date_keys ?? []),
+        ccPoint: row.cc_point,
+        ccBalance: row.cc_balance,
+        streak: row.current_streak,
+        longestStreak: row.longest_streak,
       })),
     };
   }

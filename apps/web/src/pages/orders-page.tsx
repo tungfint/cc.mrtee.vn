@@ -62,7 +62,7 @@ export default function OrdersPage() {
                 </p>
               </div>
               <div className="flex items-center gap-4">
-                <strong>{formatNumber(order.cost_snapshot, 2)} điểm</strong>
+                <strong>{formatNumber(order.cost_snapshot, 2)} CC Balance</strong>
                 {['REQUESTED', 'APPROVED'].includes(order.status) && (
                   <button
                     className="button-secondary"

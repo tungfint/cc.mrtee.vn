@@ -268,6 +268,23 @@ describe('authorization matrix', () => {
     expect(approved.verification_status).toBe('ADMIN_VERIFIED');
   });
 
+  it('lets system admins verify unassigned students in one batch', async () => {
+    const [student] = await connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('No Class', 'No Class') RETURNING id
+    `;
+    if (!student) throw new Error('Failed to create unassigned student');
+    await codeforcesAccounts.link(authUser(student.id), 'no_class_cf');
+    const result = await codeforcesAccounts.verifyBatch({
+      targetUserIds: [student.id],
+      actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      reason: 'System admin verified an unassigned student',
+    });
+    expect(result).toMatchObject({ requested: 1, verified: 1, skipped: 0 });
+    expect((await codeforcesAccounts.getOwn(student.id))?.verification_status).toBe(
+      'ADMIN_VERIFIED',
+    );
+  });
+
   it('allows teachers to import students with class, handle, and initial level', async () => {
     const csv = [
       'tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau',
@@ -502,10 +519,10 @@ describe('authorization matrix', () => {
     expect(dashboard.profile).toMatchObject({ id: ids.member!, display_name: 'member' });
     expect(dashboard.streak).toEqual({ longest_streak: 0, current_streak: 0 });
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
-    expect(leaderboard.entries).toHaveLength(2);
+    expect(leaderboard.entries).toHaveLength(1);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
-    expect(leaderboard.total).toBe(4);
+    expect(leaderboard.total).toBe(1);
   });
 
   it('enforces organization-scoped teacher adjustments with atomic audit and idempotency', async () => {

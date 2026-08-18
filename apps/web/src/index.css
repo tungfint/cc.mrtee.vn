@@ -301,6 +301,10 @@ button:disabled {
     transparent 25%
   );
 }
+.main-content > * {
+  width: min(100%, 1480px);
+  margin-inline: auto;
+}
 
 .eyebrow {
   margin: 0;
@@ -709,6 +713,35 @@ textarea:focus {
 .leader-table.top-1 {
   background: linear-gradient(90deg, #fbbf240d, transparent);
 }
+.leader-table-compact {
+  grid-template-columns: 70px minmax(220px, 1.7fr) repeat(3, minmax(110px, 0.75fr));
+}
+.ranking-toolbar {
+  display: inline-flex;
+  gap: 5px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 5px;
+}
+.ranking-toolbar button {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 0 15px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+.ranking-toolbar button.active {
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface-2));
+  color: var(--accent);
+}
 .member {
   display: flex;
   min-width: 0;
@@ -890,7 +923,58 @@ textarea:focus {
   padding-left: 18px;
 }
 .student-row {
-  grid-template-columns: minmax(300px, 1fr) 110px 145px minmax(140px, auto);
+  grid-template-columns: 24px minmax(300px, 1fr) 110px 145px minmax(140px, auto);
+}
+.student-command-bar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+.student-command-bar .field {
+  min-width: 220px;
+}
+.student-selection-summary {
+  display: grid;
+  min-width: 160px;
+  gap: 3px;
+  margin-right: auto;
+}
+.student-selection-summary strong {
+  font-size: 13px;
+}
+.student-selection-summary span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.student-checkbox {
+  width: 17px;
+  min-height: 17px;
+  accent-color: var(--accent);
+}
+.global-student-row {
+  display: grid;
+  grid-template-columns: 24px minmax(300px, 1fr) minmax(250px, 0.65fr) minmax(190px, auto);
+  align-items: center;
+  gap: 15px;
+  border-top: 1px solid var(--line);
+  padding: 14px 18px;
+}
+.global-student-row:first-of-type {
+  border-top: 0;
+}
+.student-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.student-metrics span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  padding: 5px 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
 }
 .student-actions {
   display: flex;
@@ -1189,6 +1273,79 @@ textarea:focus {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
+.dashboard-leaderboards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.mini-leaderboard {
+  overflow: hidden;
+}
+.mini-leaderboard-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 15px 16px;
+}
+.mini-leaderboard-title > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 11px;
+  color: var(--accent);
+}
+.mini-leaderboard-title p,
+.mini-leaderboard-title h3 {
+  margin: 0;
+}
+.mini-leaderboard-title p {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+.mini-leaderboard-title h3 {
+  margin-top: 2px;
+  font-size: 14px;
+}
+.mini-rank-row {
+  display: grid;
+  grid-template-columns: 28px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+}
+.mini-rank-row:first-child {
+  border-top: 0;
+}
+.mini-rank-row > strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-rank-row > b {
+  color: var(--accent);
+  font-size: 11px;
+}
+.mini-rank-number {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+}
+.mini-leaderboard-empty {
+  margin: 0;
+  padding: 28px 16px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
 
 @media (max-width: 1050px) {
   .stats-grid {
@@ -1202,6 +1359,9 @@ textarea:focus {
   }
   .achievement-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dashboard-leaderboards {
+    grid-template-columns: 1fr;
   }
   .profile-layout {
     grid-template-columns: 1fr;
@@ -1296,8 +1456,19 @@ textarea:focus {
     grid-template-columns: 1fr auto;
   }
   .account-row,
-  .organization-row {
+  .organization-row,
+  .global-student-row {
     grid-template-columns: 1fr;
+  }
+  .student-command-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .student-command-bar .field {
+    min-width: 0;
+  }
+  .student-row {
+    grid-template-columns: 24px 1fr;
   }
   .member-add-form {
     grid-template-columns: 1fr;

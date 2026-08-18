@@ -59,7 +59,7 @@ const listUsersSchema = z.object({
   search: z.string().trim().max(200).default(''),
   status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
   page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  pageSize: z.coerce.number().int().min(1).max(500).default(20),
 });
 const updateUserSchema = z
   .object({
@@ -187,6 +187,8 @@ export class UsersController {
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank,
+        COALESCE(wallet.balance, 0)::text AS cc_balance,
+        COALESCE(points.cc_point, 0)::text AS cc_point,
         COALESCE(jsonb_agg(jsonb_build_object(
           'organizationId', organizations.id, 'organizationName', organizations.name,
           'role', memberships.role
@@ -198,12 +200,18 @@ export class UsersController {
       LEFT JOIN organizations ON organizations.id = memberships.organization_id
       LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
       LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
+      LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
+      LEFT JOIN LATERAL (
+        SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+        FROM point_transactions WHERE user_id = users.id
+      ) AS points ON true
       WHERE (${input.search} = '' OR users.display_name ILIKE ${search}
         OR users.full_name ILIKE ${search} OR credentials.email ILIKE ${search}
         OR accounts.handle ILIKE ${search})
         AND (${input.status ?? null}::user_status IS NULL OR users.status = ${input.status ?? null})
       GROUP BY users.id, credentials.email, skill.cc_base, skill.cc_level, accounts.handle,
-        accounts.pending_handle, accounts.verification_status, accounts.current_rating, accounts.rank
+        accounts.pending_handle, accounts.verification_status, accounts.current_rating, accounts.rank,
+        wallet.balance, points.cc_point
       ORDER BY users.created_at DESC
       LIMIT ${input.pageSize} OFFSET ${offset}
     `;
