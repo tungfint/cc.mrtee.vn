@@ -70,6 +70,7 @@ interface Reward {
   cost: string;
   stock: number | null;
   active: boolean;
+  image_url: string | null;
 }
 
 export default function AdminPage() {
@@ -87,6 +88,11 @@ export default function AdminPage() {
   const [pointType, setPointType] = useState('BONUS');
   const [rewardName, setRewardName] = useState('');
   const [rewardCost, setRewardCost] = useState('100');
+  const [rewardDescription, setRewardDescription] = useState('');
+  const [rewardStock, setRewardStock] = useState('');
+  const [rewardImageUrl, setRewardImageUrl] = useState('');
+  const [rewardActive, setRewardActive] = useState(true);
+  const [editingReward, setEditingReward] = useState<Reward | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -119,7 +125,9 @@ export default function AdminPage() {
   useEffect(() => {
     if (organizationId) return;
     const firstMembership = me.data?.memberships[0]?.organization_id;
-    const firstOrganization = organizations.data?.organizations[0]?.id;
+    const firstOrganization = organizations.data?.organizations.find(
+      ({ status }) => status === 'ACTIVE',
+    )?.id;
     if (firstMembership || firstOrganization)
       setOrganizationId(firstMembership ?? firstOrganization ?? '');
   }, [me.data, organizationId, organizations.data]);
@@ -280,11 +288,13 @@ export default function AdminPage() {
   const memberships =
     me.data?.memberships.filter(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role)) ?? [];
   const organizationOptions = isSystemAdmin
-    ? (organizations.data?.organizations.map((item) => ({
-        organization_id: item.id,
-        organization_name: item.name,
-        role: 'SYSTEM_ADMIN',
-      })) ?? [])
+    ? (organizations.data?.organizations
+        .filter(({ status }) => status === 'ACTIVE')
+        .map((item) => ({
+          organization_id: item.id,
+          organization_name: item.name,
+          role: 'SYSTEM_ADMIN',
+        })) ?? [])
     : memberships;
   const selectedOrganization = organizationOptions.find(
     (item) => item.organization_id === organizationId,
@@ -472,11 +482,13 @@ export default function AdminPage() {
                       <span>Lớp của học sinh</span>
                       <select onChange={(e) => setClassId(e.target.value)} value={classId}>
                         <option value="">Chưa xếp lớp</option>
-                        {organizations.data?.organizations.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
+                        {organizations.data?.organizations
+                          .filter(({ status }) => status === 'ACTIVE')
+                          .map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
                       </select>
                     </label>
                   </div>
@@ -613,11 +625,13 @@ export default function AdminPage() {
                         name="classId"
                       >
                         <option value="">Chưa xếp lớp</option>
-                        {organizations.data?.organizations.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
+                        {organizations.data?.organizations
+                          .filter(({ status }) => status === 'ACTIVE')
+                          .map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
                       </select>
                     </label>
                     <label className="field form-span-2">
@@ -813,6 +827,21 @@ export default function AdminPage() {
                       <option>ACTIVE</option>
                       <option>INACTIVE</option>
                     </select>
+                    <button
+                      className="button-danger"
+                      disabled={item.status === 'INACTIVE'}
+                      onClick={() => {
+                        if (!window.confirm(`Lưu trữ lớp “${item.name}”?`)) return;
+                        mutation.mutate({
+                          path: `/admin/organizations/${item.id}`,
+                          method: 'DELETE',
+                          body: null,
+                        });
+                      }}
+                      type="button"
+                    >
+                      {item.status === 'INACTIVE' ? 'Đã lưu trữ' : 'Xoá'}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -832,11 +861,13 @@ export default function AdminPage() {
                   >
                     <option value="ALL">Tất cả học sinh</option>
                     <option value="UNASSIGNED">Chưa xếp lớp</option>
-                    {organizations.data?.organizations.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
+                    {organizations.data?.organizations
+                      .filter(({ status }) => status === 'ACTIVE')
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
                   </select>
                 </label>
                 <div className="student-selection-summary">
@@ -1612,20 +1643,42 @@ export default function AdminPage() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   mutation.mutate({
-                    path: '/admin/rewards',
+                    path: editingReward ? `/admin/rewards/${editingReward.id}` : '/admin/rewards',
+                    method: editingReward ? 'PATCH' : 'POST',
                     body: {
                       name: rewardName,
-                      description: reason || 'Phần thưởng từ Cầy Code MrTee.vn',
+                      description: rewardDescription,
                       cost: Number(rewardCost),
-                      stock: null,
-                      active: true,
-                      imageUrl: null,
+                      stock: rewardStock === '' ? null : Number(rewardStock),
+                      active: rewardActive,
+                      imageUrl: rewardImageUrl || null,
                     },
                   });
                 }}
               >
                 <p className="eyebrow">CATALOG</p>
-                <h2 className="mt-2 text-xl font-black">Tạo phần thưởng</h2>
+                <div className="section-heading mt-2">
+                  <h2 className="m-0 text-xl font-black">
+                    {editingReward ? 'Sửa phần thưởng' : 'Tạo phần thưởng'}
+                  </h2>
+                  {editingReward && (
+                    <button
+                      className="button-secondary"
+                      onClick={() => {
+                        setEditingReward(null);
+                        setRewardName('');
+                        setRewardDescription('');
+                        setRewardCost('100');
+                        setRewardStock('');
+                        setRewardImageUrl('');
+                        setRewardActive(true);
+                      }}
+                      type="button"
+                    >
+                      Huỷ sửa
+                    </button>
+                  )}
+                </div>
                 <label className="field mt-5">
                   <span>Tên</span>
                   <input
@@ -1645,15 +1698,48 @@ export default function AdminPage() {
                 </label>
                 <label className="field mt-4">
                   <span>Mô tả</span>
-                  <textarea onChange={(e) => setReason(e.target.value)} required value={reason} />
+                  <textarea
+                    onChange={(e) => setRewardDescription(e.target.value)}
+                    required
+                    value={rewardDescription}
+                  />
+                </label>
+                <div className="form-grid mt-4">
+                  <label className="field">
+                    <span>Số lượng (trống = không giới hạn)</span>
+                    <input
+                      min="0"
+                      onChange={(e) => setRewardStock(e.target.value)}
+                      type="number"
+                      value={rewardStock}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Trạng thái</span>
+                    <select
+                      onChange={(e) => setRewardActive(e.target.value === 'ACTIVE')}
+                      value={rewardActive ? 'ACTIVE' : 'INACTIVE'}
+                    >
+                      <option value="ACTIVE">Đang mở</option>
+                      <option value="INACTIVE">Tạm ẩn</option>
+                    </select>
+                  </label>
+                </div>
+                <label className="field mt-4">
+                  <span>URL hình ảnh (không bắt buộc)</span>
+                  <input
+                    onChange={(e) => setRewardImageUrl(e.target.value)}
+                    type="url"
+                    value={rewardImageUrl}
+                  />
                 </label>
                 <button className="button-primary mt-5" type="submit">
-                  Tạo phần thưởng
+                  {editingReward ? 'Lưu phần thưởng' : 'Tạo phần thưởng'}
                 </button>
               </form>
               <div className="panel overflow-hidden">
                 {rewards.data?.rewards.map((reward) => (
-                  <div className="admin-row" key={reward.id}>
+                  <div className="admin-row reward-admin-row" key={reward.id}>
                     <div>
                       <strong>{reward.name}</strong>
                       <p className="m-0 text-xs text-[var(--muted)]">
@@ -1661,6 +1747,38 @@ export default function AdminPage() {
                       </p>
                     </div>
                     <StatusPill value={reward.active ? 'ACTIVE' : 'INACTIVE'} />
+                    <div className="student-actions">
+                      <button
+                        className="button-secondary"
+                        onClick={() => {
+                          setEditingReward(reward);
+                          setRewardName(reward.name);
+                          setRewardDescription(reward.description);
+                          setRewardCost(reward.cost);
+                          setRewardStock(reward.stock === null ? '' : String(reward.stock));
+                          setRewardImageUrl(reward.image_url ?? '');
+                          setRewardActive(reward.active);
+                        }}
+                        type="button"
+                      >
+                        Sửa
+                      </button>
+                      <button
+                        className="button-danger"
+                        disabled={!reward.active}
+                        onClick={() => {
+                          if (!window.confirm(`Lưu trữ phần thưởng “${reward.name}”?`)) return;
+                          mutation.mutate({
+                            path: `/admin/rewards/${reward.id}`,
+                            method: 'DELETE',
+                            body: null,
+                          });
+                        }}
+                        type="button"
+                      >
+                        {reward.active ? 'Xoá' : 'Đã lưu trữ'}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

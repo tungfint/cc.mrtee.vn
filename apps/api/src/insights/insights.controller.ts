@@ -1,6 +1,11 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
 import { z } from 'zod';
-import { CurrentUser, OptionalAuth, OptionalUser } from '../auth/auth.decorators';
+import {
+  CurrentUser,
+  OptionalAuth,
+  OptionalUser,
+  RequireSystemRole,
+} from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
@@ -44,7 +49,14 @@ export class InsightsController {
           COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(wallet.balance, 0)::text AS wallet_balance,
           COALESCE(points.cc_point, 0)::text AS cc_point,
-          (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves
+          (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves,
+          (SELECT max(rating_snapshot)::int FROM user_problem_solves WHERE user_id = users.id)
+            AS highest_problem_rating,
+          (SELECT problems.name FROM user_problem_solves AS solves
+            JOIN cf_problems AS problems ON problems.problem_key = solves.problem_key
+            WHERE solves.user_id = users.id
+            ORDER BY solves.rating_snapshot DESC NULLS LAST, solves.first_solved_at DESC LIMIT 1)
+            AS highest_problem_name
         FROM users
         LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
         LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
@@ -124,6 +136,19 @@ export class InsightsController {
       awards,
       fulfilledRewards,
     };
+  }
+
+  @Get('me/recognition')
+  async ownRecognition(@CurrentUser() user: AuthUser) {
+    return this.recognition(user.userId);
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Get('admin/users/:userId/recognition')
+  async adminRecognition(@Param('userId') userIdInput: string) {
+    const userId = z.string().uuid().safeParse(userIdInput);
+    if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
+    return this.recognition(userId.data);
   }
 
   @OptionalAuth()
@@ -299,5 +324,59 @@ export class InsightsController {
       FROM streaks
     `;
     return result;
+  }
+
+  private async recognition(userId: string) {
+    const [profiles, streak, awards, rewards] = await Promise.all([
+      this.database.sql`
+        SELECT users.id, users.full_name, users.display_name, users.avatar_url,
+          accounts.handle AS codeforces_handle, accounts.current_rating,
+          accounts.rank AS codeforces_rank,
+          COALESCE(skill.cc_level, 800)::text AS cc_level,
+          COALESCE(wallet.balance, 0)::text AS cc_balance,
+          COALESCE(points.cc_point, 0)::text AS cc_point,
+          (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves,
+          (SELECT max(rating_snapshot)::int FROM user_problem_solves WHERE user_id = users.id)
+            AS highest_problem_rating,
+          (SELECT problems.name FROM user_problem_solves AS solves
+            JOIN cf_problems AS problems ON problems.problem_key = solves.problem_key
+            WHERE solves.user_id = users.id
+            ORDER BY solves.rating_snapshot DESC NULLS LAST, solves.first_solved_at DESC LIMIT 1)
+            AS highest_problem_name
+        FROM users
+        LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
+        LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
+        LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
+        LEFT JOIN LATERAL (
+          SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+          FROM point_transactions WHERE user_id = users.id
+        ) AS points ON true
+        WHERE users.id = ${userId} AND users.status = 'ACTIVE'
+      `,
+      this.streak(userId),
+      this.database.sql`
+        SELECT awards.award_type, awards.title, awards.awarded_at, seasons.name AS season_name
+        FROM season_awards AS awards
+        JOIN seasons ON seasons.id = awards.season_id
+        WHERE awards.user_id = ${userId}
+        ORDER BY awards.awarded_at DESC LIMIT 12
+      `,
+      this.database.sql`
+        SELECT rewards.name, rewards.description, rewards.image_url, orders.reviewed_at AS earned_at
+        FROM reward_orders AS orders
+        JOIN rewards ON rewards.id = orders.reward_id
+        WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
+        ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 12
+      `,
+    ]);
+    const profile = profiles[0];
+    if (!profile) throw new BadRequestException('Không tìm thấy học sinh');
+    return {
+      profile,
+      streak: streak ?? { current_streak: 0, longest_streak: 0 },
+      awards,
+      rewards,
+      generatedAt: new Date().toISOString(),
+    };
   }
 }

@@ -1,4 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { z } from 'zod';
 import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -49,6 +58,28 @@ export class RewardsAdminController {
     const parsed = rewardSchema.safeParse(body);
     if (!id.success || !parsed.success) throw new BadRequestException('Dữ liệu không hợp lệ');
     return this.persist(id.data, parsed.data, actor);
+  }
+
+  @Delete(':id')
+  async archive(@Param('id') idInput: string, @CurrentUser() actor: AuthUser) {
+    const id = z.string().uuid().safeParse(idInput);
+    if (!id.success) throw new BadRequestException('ID phần thưởng không hợp lệ');
+    const reward = await this.database.sql.begin(async (transaction) => {
+      const [before] = await transaction`SELECT * FROM rewards WHERE id = ${id.data} FOR UPDATE`;
+      if (!before) throw new BadRequestException('Không tìm thấy phần thưởng');
+      const [updated] = await transaction`
+        UPDATE rewards SET active = false, updated_at = now()
+        WHERE id = ${id.data} RETURNING *
+      `;
+      await transaction`
+        INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
+        VALUES (${actor.userId}, 'REWARD_ARCHIVED', 'reward', ${id.data},
+          ${JSON.stringify(before)}::jsonb, ${JSON.stringify(updated ?? null)}::jsonb,
+          'Lưu trữ phần thưởng khỏi danh mục')
+      `;
+      return updated;
+    });
+    return { reward };
   }
 
   private persist(id: string | null, input: z.infer<typeof rewardSchema>, actor: AuthUser) {

@@ -13,6 +13,7 @@ import type { EnvironmentService } from '../config/environment';
 import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
 import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
+import { RewardsAdminController } from '../rewards/rewards-admin.controller';
 import { InsightsController } from '../insights/insights.controller';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
 import { BulkPointImportService } from '../scoring/bulk-point-import.service';
@@ -48,6 +49,7 @@ const codeforcesAccounts = new CodeforcesAccountsService(
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
 const rewards = new RewardsService({ sql: connection } as DatabaseService);
 const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
+const rewardsAdmin = new RewardsAdminController({ sql: connection } as DatabaseService);
 const insights = new InsightsController({ sql: connection } as DatabaseService, service);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 const bulkPointImport = new BulkPointImportService(service, adjustments, {
@@ -523,6 +525,39 @@ describe('authorization matrix', () => {
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
     expect(leaderboard.total).toBe(1);
+    const recognition = await insights.ownRecognition(authUser(ids.member!));
+    expect(recognition.profile).toMatchObject({
+      id: ids.member!,
+      total_solves: 0,
+      highest_problem_rating: null,
+    });
+    expect(recognition).toHaveProperty('awards');
+    expect(recognition).toHaveProperty('rewards');
+  });
+
+  it('archives classes and rewards without deleting historical rows', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const archivedClass = await adminOrganizations.archive(ids.publicOrg!, actor);
+    expect(archivedClass.organization).toMatchObject({ status: 'INACTIVE' });
+    const created = await rewardsAdmin.create(
+      {
+        name: 'Archive me',
+        description: 'Reward retained for history',
+        cost: 100,
+        stock: null,
+        active: true,
+        imageUrl: null,
+      },
+      actor,
+    );
+    const archivedReward = await rewardsAdmin.archive(String(created.reward.id), actor);
+    expect(archivedReward.reward).toMatchObject({ active: false });
+    const [counts] = await connection<{ organizations: string; rewards: string }[]>`
+      SELECT
+        (SELECT count(*)::text FROM organizations WHERE id = ${ids.publicOrg!}) AS organizations,
+        (SELECT count(*)::text FROM rewards WHERE id = ${String(created.reward.id)}) AS rewards
+    `;
+    expect(counts).toEqual({ organizations: '1', rewards: '1' });
   });
 
   it('enforces organization-scoped teacher adjustments with atomic audit and idempotency', async () => {

@@ -12,6 +12,7 @@ const OrdersPage = lazy(() => import('./pages/orders-page'));
 const AdminPage = lazy(() => import('./pages/admin-page'));
 const AccountPage = lazy(() => import('./pages/account-page'));
 const AboutPage = lazy(() => import('./pages/about-page'));
+const RecognitionPage = lazy(() => import('./pages/recognition-page'));
 
 function RequireAuth() {
   const session = useSession();
@@ -32,6 +33,7 @@ export function App() {
           <Route path="rewards" element={<RewardsPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="about" element={<AboutPage />} />
+          <Route path="recognition" element={<RecognitionPage />} />
           <Route path="account" element={<AccountPage />} />
           <Route path="admin" element={<AdminPage />} />
         </Route>

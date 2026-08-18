@@ -1,4 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Query,
+} from '@nestjs/common';
 import { z } from 'zod';
 import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -80,6 +89,29 @@ export class AdminOrganizationsController {
         INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
         VALUES (${actor.userId}, 'ORGANIZATION_UPDATED', 'organization', ${id},
           ${JSON.stringify(before)}::jsonb, ${JSON.stringify(updated ?? null)}::jsonb, ${input.reason})
+      `;
+      return updated;
+    });
+    return { organization };
+  }
+
+  @Delete(':id')
+  async archive(@Param('id') idInput: string, @CurrentUser() actor: AuthUser) {
+    const id = this.uuid(idInput);
+    const organization = await this.database.sql.begin(async (transaction) => {
+      const [before] = await transaction`
+        SELECT id, name, slug, visibility, status FROM organizations WHERE id = ${id} FOR UPDATE
+      `;
+      if (!before) throw new BadRequestException('Không tìm thấy lớp học');
+      const [updated] = await transaction`
+        UPDATE organizations SET status = 'INACTIVE', updated_at = now()
+        WHERE id = ${id} RETURNING id, name, slug, visibility, timezone, status, updated_at
+      `;
+      await transaction`
+        INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
+        VALUES (${actor.userId}, 'ORGANIZATION_ARCHIVED', 'organization', ${id},
+          ${JSON.stringify(before)}::jsonb, ${JSON.stringify(updated ?? null)}::jsonb,
+          'Lưu trữ lớp học và giữ lại lịch sử')
       `;
       return updated;
     });

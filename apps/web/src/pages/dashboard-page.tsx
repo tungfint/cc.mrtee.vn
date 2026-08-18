@@ -25,6 +25,8 @@ interface Dashboard {
     cc_point: string;
     wallet_balance: string;
     total_solves: number;
+    highest_problem_rating: number | null;
+    highest_problem_name: string | null;
   };
   season: { name: string; score: string; qualifying_solves: number } | null;
   streak: { current_streak: number; longest_streak: number };
@@ -104,6 +106,7 @@ export default function DashboardPage() {
     return <ErrorState error={dashboard.error} retry={() => void dashboard.refetch()} />;
   const data = dashboard.data;
   const profile = data.profile;
+  const recommendation = recommendedRange(profile.cc_level, profile.highest_problem_rating);
   const submitHandle = (event: FormEvent) => {
     event.preventDefault();
     link.mutate();
@@ -277,28 +280,39 @@ export default function DashboardPage() {
           </div>
           <span className="text-xs text-[var(--muted)]">{profile.total_solves} bài duy nhất</span>
         </div>
+        <div className="activity-summary">
+          <div>
+            <span>Đã hoàn thành</span>
+            <strong>{profile.total_solves} bài</strong>
+          </div>
+          <div>
+            <span>Bài khó nhất</span>
+            <strong>{profile.highest_problem_rating ?? 'Chưa có rating'}</strong>
+            <small>{profile.highest_problem_name ?? 'Đồng bộ bài giải để xem'}</small>
+          </div>
+          <div>
+            <span>Khuyến nghị tiếp theo</span>
+            <strong>
+              CF {recommendation.min}–{recommendation.max}
+            </strong>
+            <small>Ưu tiên bài cao hơn vùng quen thuộc một bước</small>
+          </div>
+        </div>
         {data.activity.length === 0 ? (
           <EmptyState
             title="Chưa có bài giải"
             detail="Bài AC cá nhân đầu tiên sẽ xuất hiện tại đây."
           />
         ) : (
-          <div className="timeline">
+          <div className="activity-grid">
             {data.activity.map((item) => (
-              <article className="timeline-item" key={item.problem_key}>
-                <span className="timeline-dot" />
+              <article className="activity-card" key={item.problem_key}>
+                <span className="activity-rating">{item.rating_snapshot ?? '—'}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="m-0 truncate font-bold">{item.name}</p>
-                      <p className="mt-1 text-xs text-[var(--muted)]">
-                        {item.tags.slice(0, 3).join(' · ') || 'Chưa gắn tag'}
-                      </p>
-                    </div>
-                    <strong className="font-mono text-sm text-[var(--accent)]">
-                      {item.rating_snapshot ?? '—'}
-                    </strong>
-                  </div>
+                  <p className="m-0 truncate font-bold">{item.name}</p>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {item.tags.slice(0, 3).join(' · ') || 'Chưa gắn tag'}
+                  </p>
                   <p className="mb-0 mt-2 text-xs text-[var(--muted)]">
                     {formatDate(item.first_solved_at)}
                   </p>
@@ -341,6 +355,12 @@ export default function DashboardPage() {
       </section>
     </>
   );
+}
+
+function recommendedRange(ccLevel: string, highestRating: number | null) {
+  const anchor = Math.max(800, Number(ccLevel) || 800, highestRating ?? 0);
+  const min = Math.min(3300, Math.max(800, Math.floor(anchor / 100) * 100));
+  return { min, max: Math.min(3500, min + 200) };
 }
 
 type TopEntry = TopBoard['entries'][number];

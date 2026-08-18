@@ -327,7 +327,8 @@ button:disabled {
   box-shadow: 0 16px 50px rgba(0, 0, 0, 0.08);
 }
 .button-primary,
-.button-secondary {
+.button-secondary,
+.button-danger {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
@@ -356,6 +357,15 @@ button:disabled {
 .button-secondary:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+.button-danger {
+  border: 1px solid #fb718544;
+  background: #fb718512;
+  color: #fb7185;
+}
+.button-danger:hover {
+  border-color: #fb7185;
+  background: #fb718522;
 }
 .field {
   display: flex;
@@ -608,6 +618,55 @@ textarea:focus {
   display: flex;
   gap: 17px;
   padding: 3px 0 20px;
+}
+.activity-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.activity-summary > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 14px;
+}
+.activity-summary span,
+.activity-summary small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.activity-summary strong {
+  font-size: 17px;
+}
+.activity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.activity-card {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--surface-2) 78%, transparent);
+  padding: 13px;
+}
+.activity-rating {
+  display: grid;
+  min-width: 46px;
+  min-height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  font:
+    850 12px ui-monospace,
+    monospace;
 }
 .timeline-dot {
   z-index: 1;
@@ -880,7 +939,10 @@ textarea:focus {
   padding: 14px 18px;
 }
 .organization-row {
-  grid-template-columns: minmax(250px, 1fr) 145px 130px;
+  grid-template-columns: minmax(250px, 1fr) 145px 130px auto;
+}
+.reward-admin-row {
+  grid-template-columns: minmax(230px, 1fr) 110px minmax(170px, auto);
 }
 .inline-name-input {
   min-height: 0;
@@ -1273,6 +1335,118 @@ textarea:focus {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
 }
+.recognition-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(420px, 1.1fr);
+  align-items: start;
+  gap: 22px;
+}
+.recognition-person {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 22px;
+}
+.recognition-person h2 {
+  margin: 5px 0 4px;
+  font-size: 28px;
+}
+.recognition-person p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.recognition-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+.recognition-metrics > div {
+  display: grid;
+  gap: 5px;
+  border-radius: 13px;
+  background: var(--surface-2);
+  padding: 13px;
+}
+.recognition-metrics span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.recognition-metrics strong {
+  font-size: 17px;
+}
+.recognition-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+.recognition-lists > div {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+}
+.recognition-lists h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+.recognition-lists p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.recognition-lists p strong {
+  color: var(--text);
+}
+.recognition-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.recognition-canvas-wrap {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  min-height: 620px;
+  place-items: center;
+  overflow: hidden;
+  padding: 18px;
+}
+.recognition-canvas-wrap canvas {
+  display: none;
+  width: min(100%, 600px);
+  height: auto;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+}
+.recognition-canvas-wrap.ready canvas {
+  display: block;
+}
+.recognition-placeholder {
+  display: grid;
+  max-width: 320px;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+.recognition-placeholder > span {
+  color: var(--accent);
+  font-size: 52px;
+}
+.recognition-placeholder strong {
+  margin-top: 15px;
+  color: var(--text);
+}
+.recognition-placeholder p {
+  font-size: 11px;
+  line-height: 1.6;
+}
 .dashboard-leaderboards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1366,6 +1540,12 @@ textarea:focus {
   .profile-layout {
     grid-template-columns: 1fr;
   }
+  .recognition-layout {
+    grid-template-columns: 1fr;
+  }
+  .recognition-canvas-wrap {
+    position: static;
+  }
   .about-metric-grid,
   .about-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1424,6 +1604,12 @@ textarea:focus {
   .reward-grid,
   .tag-grid,
   .achievement-grid {
+    grid-template-columns: 1fr;
+  }
+  .activity-summary,
+  .activity-grid,
+  .recognition-metrics,
+  .recognition-lists {
     grid-template-columns: 1fr;
   }
   .filters {
