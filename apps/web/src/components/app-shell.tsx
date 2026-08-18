@@ -7,7 +7,8 @@ const links = [
   { to: '/', label: 'Tổng quan', icon: '◫', end: true },
   { to: '/leaderboard', label: 'Xếp hạng', icon: '↗' },
   { to: '/rewards', label: 'Đổi thưởng', icon: '◇' },
-  { to: '/orders', label: 'Đơn của tôi', icon: '≡' },
+  { to: '/orders', label: 'Quà của tôi', icon: '≡' },
+  { to: '/about', label: 'Giới thiệu', icon: '?' },
   { to: '/account', label: 'Tài khoản', icon: '●' },
 ];
 

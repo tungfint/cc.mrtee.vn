@@ -102,6 +102,8 @@ export class OrganizationsController {
         accounts.verification_status,
         accounts.current_rating,
         accounts.rank AS codeforces_rank,
+        accounts.sync_status,
+        accounts.last_sync_at,
         memberships.role,
         memberships.status,
         memberships.joined_at,

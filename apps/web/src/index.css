@@ -1006,6 +1006,161 @@ textarea:focus {
   color: var(--muted);
   font-size: 11px;
 }
+.base-explanation {
+  display: grid;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-2));
+  padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.base-explanation p {
+  margin: 0;
+}
+.base-explanation strong {
+  color: var(--text);
+}
+.base-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.base-presets button {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-2);
+  padding: 10px;
+  color: var(--text);
+  text-align: left;
+}
+.base-presets button:hover,
+.base-presets button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+}
+.base-presets span {
+  color: var(--muted);
+  font-size: 9px;
+}
+.sync-result {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+  padding: 13px;
+}
+.sync-result p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.sync-account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding: 14px 18px;
+}
+.about-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  gap: 28px;
+  padding: 30px;
+}
+.about-hero h2 {
+  max-width: 720px;
+  margin: 10px 0 12px;
+  font-size: clamp(24px, 3vw, 38px);
+  line-height: 1.1;
+}
+.about-hero p,
+.about-metric p,
+.about-rules p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.about-callout {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-2));
+  padding: 22px;
+}
+.about-callout span {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.about-callout strong {
+  font-size: 18px;
+}
+.about-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.about-metric {
+  padding: 20px;
+}
+.about-metric > span {
+  font-size: 25px;
+}
+.about-metric h2,
+.about-rules h2 {
+  margin: 12px 0 8px;
+  font-size: 17px;
+}
+.about-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.about-steps article {
+  display: flex;
+  gap: 12px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 15px;
+}
+.about-steps article > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #06131c;
+  font-weight: 950;
+}
+.about-steps h3 {
+  margin: 1px 0 5px;
+  font-size: 13px;
+}
+.about-steps p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.about-rules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
 
 @media (max-width: 1050px) {
   .stats-grid {
@@ -1022,6 +1177,10 @@ textarea:focus {
   }
   .profile-layout {
     grid-template-columns: 1fr;
+  }
+  .about-metric-grid,
+  .about-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .leader-table {
     grid-template-columns: 60px minmax(160px, 1.4fr) repeat(4, minmax(80px, 0.7fr));
@@ -1055,10 +1214,12 @@ textarea:focus {
   .nav-list {
     width: 100%;
     flex-direction: row;
-    justify-content: space-around;
+    justify-content: flex-start;
     margin: 0;
+    overflow-x: auto;
   }
   .nav-link {
+    min-width: 64px;
     flex-direction: column;
     gap: 2px;
     padding: 6px 8px;
@@ -1122,6 +1283,13 @@ textarea:focus {
   }
   .form-span-2 {
     grid-column: auto;
+  }
+  .base-presets,
+  .about-hero,
+  .about-metric-grid,
+  .about-steps,
+  .about-rules {
+    grid-template-columns: 1fr;
   }
   .admin-row select,
   .admin-row button {

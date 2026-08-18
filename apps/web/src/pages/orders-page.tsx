@@ -33,8 +33,8 @@ export default function OrdersPage() {
     <>
       <PageTitle
         eyebrow="LỊCH SỬ ĐỔI THƯỞNG"
-        title="Đơn của tôi"
-        detail="Theo dõi trạng thái xử lý. Đơn bị từ chối hoặc hủy hợp lệ sẽ được hoàn điểm bằng giao dịch mới."
+        title="Quà của tôi"
+        detail="Theo dõi trạng thái xử lý quà. Yêu cầu bị từ chối hoặc hủy hợp lệ sẽ được hoàn điểm bằng giao dịch mới."
       />
       {orders.isPending ? (
         <LoadingState label="Đang tải đơn…" />

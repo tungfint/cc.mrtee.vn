@@ -38,7 +38,7 @@ export default function RewardsPage() {
       />
       {redeem.isSuccess && (
         <p className="notice success">
-          Đã tạo đơn đổi thưởng. Bạn có thể theo dõi tại “Đơn của tôi”.
+          Đã tạo yêu cầu đổi thưởng. Bạn có thể theo dõi tại “Quà của tôi”.
         </p>
       )}
       {redeem.error && <p className="notice error">{redeem.error.message}</p>}

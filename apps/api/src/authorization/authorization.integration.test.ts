@@ -15,6 +15,8 @@ import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
 import { InsightsController } from '../insights/insights.controller';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
+import { BulkPointImportService } from '../scoring/bulk-point-import.service';
+import type { SyncJobData } from '@cc/core';
 import { UsersController } from '../users/users.controller';
 import { AdminOrganizationsController } from '../organizations/admin-organizations.controller';
 import { StudentImportService } from '../organizations/student-import.service';
@@ -32,11 +34,15 @@ const authService = new AuthService(
   { sql: connection } as DatabaseService,
   { values: { SESSION_TTL_HOURS: 168 } } as EnvironmentService,
 );
+const syncQueueCalls: SyncJobData[] = [];
 const codeforcesAccounts = new CodeforcesAccountsService(
   { sql: connection } as DatabaseService,
   service,
   {
-    enqueue: () => Promise.resolve(true),
+    enqueue: (data: SyncJobData) => {
+      syncQueueCalls.push(data);
+      return Promise.resolve(true);
+    },
   } as unknown as import('../sync/sync-queue.service').SyncQueueService,
 );
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
@@ -44,6 +50,9 @@ const rewards = new RewardsService({ sql: connection } as DatabaseService);
 const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
 const insights = new InsightsController({ sql: connection } as DatabaseService, service);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
+const bulkPointImport = new BulkPointImportService(service, adjustments, {
+  sql: connection,
+} as DatabaseService);
 const usersController = new UsersController({ sql: connection } as DatabaseService, authService);
 const adminOrganizations = new AdminOrganizationsController({ sql: connection } as DatabaseService);
 const studentImport = new StudentImportService(service, authService, {
@@ -65,6 +74,7 @@ describe('authorization matrix', () => {
     migrateDatabase(testDatabaseUrl, resolve(__dirname, '../../../../packages/database/drizzle')),
   );
   beforeEach(async () => {
+    syncQueueCalls.length = 0;
     await connection`
       TRUNCATE auth_sessions, user_credentials, audit_logs, organization_memberships,
         organizations, scoring_policies, users RESTART IDENTITY CASCADE
@@ -231,7 +241,9 @@ describe('authorization matrix', () => {
     });
     expect(verified.verification_status).toBe('TEACHER_VERIFIED');
     expect(verified.sync_status).toBe('INITIALIZING');
-    expect(verified.verified_at?.getTime()).toBe(verified.reward_eligible_from?.getTime());
+    expect(new Date(verified.verified_at!).getTime()).toBe(
+      new Date(verified.reward_eligible_from!).getTime(),
+    );
     expect((await codeforcesAccounts.getOwn(member.userId))?.eligible).toBe(true);
 
     const requested = await codeforcesAccounts.link(member, 'Tourist_Changed');
@@ -286,6 +298,62 @@ describe('authorization matrix', () => {
       handle: 'import_cf',
       organization_id: ids.privateOrg,
     });
+  });
+
+  it('imports signed CC Point commands idempotently for students in the class', async () => {
+    await connection`
+      INSERT INTO user_credentials (user_id, email, password_hash)
+      VALUES (${ids.member!}, 'member@example.com', 'test-password-hash')
+    `;
+    const csv = [
+      'tai_khoan,thao_tac,cc_point,ly_do,anh_huong_mua',
+      'member@example.com,CỘNG,25,Thuong thu thach,KHÔNG',
+    ].join('\n');
+    const file = {
+      originalname: 'points.csv',
+      buffer: Buffer.from(csv),
+    } as Express.Multer.File;
+    const first = await bulkPointImport.import(ids.privateOrg!, file, authUser(ids.teacher!));
+    expect(first).toMatchObject({ applied: 1, replayed: 0, failed: 0, total: 1 });
+    const replay = await bulkPointImport.import(ids.privateOrg!, file, authUser(ids.teacher!));
+    expect(replay).toMatchObject({ applied: 0, replayed: 1, failed: 0, total: 1 });
+    const [wallet] = await connection<{ balance: string; transactions: number }[]>`
+      SELECT wallets.balance,
+        (SELECT count(*)::int FROM point_transactions WHERE user_id = ${ids.member!}) AS transactions
+      FROM user_wallets AS wallets WHERE wallets.user_id = ${ids.member!}
+    `;
+    expect(wallet).toEqual({ balance: '25.00', transactions: 1 });
+  });
+
+  it('queues Codeforces sync by account, class, or system scope with authorization', async () => {
+    await codeforcesAccounts.link(authUser(ids.member!), 'Sync_Student');
+    await codeforcesAccounts.verify({
+      organizationId: ids.privateOrg!,
+      targetUserId: ids.member!,
+      actor: authUser(ids.teacher!),
+      reason: 'Verify before sync',
+    });
+    const organizationResult = await codeforcesAccounts.requestAdminSync({
+      scope: 'ORGANIZATION',
+      organizationId: ids.privateOrg!,
+      actor: authUser(ids.teacher!),
+    });
+    expect(organizationResult).toEqual({
+      scope: 'ORGANIZATION',
+      matched: 1,
+      queued: 1,
+      skipped: 0,
+    });
+    expect(syncQueueCalls).toHaveLength(1);
+    await expect(
+      codeforcesAccounts.requestAdminSync({ scope: 'ALL', actor: authUser(ids.teacher!) }),
+    ).rejects.toThrow('System Admin');
+    await expect(
+      codeforcesAccounts.requestAdminSync({
+        scope: 'ALL',
+        actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      }),
+    ).resolves.toMatchObject({ matched: 1, queued: 1 });
   });
 
   it('validates, normalizes, and stores cropped avatars', async () => {

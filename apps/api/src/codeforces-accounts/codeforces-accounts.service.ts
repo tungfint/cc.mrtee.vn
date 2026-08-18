@@ -28,12 +28,12 @@ export interface AccountRow {
   rank: string | null;
   max_rank: string | null;
   verification_status: 'UNVERIFIED' | 'TEACHER_VERIFIED' | 'ADMIN_VERIFIED';
-  verified_at: Date | null;
-  reward_eligible_from: Date | null;
+  verified_at: Date | string | null;
+  reward_eligible_from: Date | string | null;
   sync_status: string;
-  last_sync_at: Date | null;
-  next_sync_at: Date | null;
-  backfill_completed_at: Date | null;
+  last_sync_at: Date | string | null;
+  next_sync_at: Date | string | null;
+  backfill_completed_at: Date | string | null;
   last_sync_error: string | null;
 }
 
@@ -212,23 +212,79 @@ export class CodeforcesAccountsService {
     if (!account || account.verification_status === 'UNVERIFIED') {
       throw new ForbiddenException('Chỉ tài khoản Codeforces đã xác minh mới được đồng bộ');
     }
-    const queued = await this.syncQueue.enqueue(
-      {
-        userId: user.userId,
-        accountId: account.id,
-        handle: account.handle,
-        mode: account.backfill_completed_at ? 'INCREMENTAL' : 'BACKFILL',
-      },
-      'HIGH',
-    );
-    if (queued) {
-      await this.database.sql`
-        UPDATE codeforces_accounts
-        SET sync_status = 'QUEUED', updated_at = now()
-        WHERE id = ${account.id}
-      `;
-    }
+    const queued = await this.enqueueAccount(account, 'HIGH');
     return { queued, status: queued ? 'QUEUED' : account.sync_status };
+  }
+
+  async requestAdminSync(input: {
+    scope: 'USER' | 'ORGANIZATION' | 'ALL';
+    organizationId?: string;
+    targetUserId?: string;
+    actor: AuthUser;
+  }): Promise<{ scope: string; matched: number; queued: number; skipped: number }> {
+    let accounts: AccountRow[];
+    if (input.scope === 'ALL') {
+      if (input.actor.systemRole !== 'SYSTEM_ADMIN') {
+        throw new ForbiddenException('Chỉ System Admin được đồng bộ toàn hệ thống');
+      }
+      accounts = await this.database.sql<AccountRow[]>`
+        SELECT accounts.* FROM codeforces_accounts AS accounts
+        JOIN users ON users.id = accounts.user_id
+        WHERE accounts.verification_status <> 'UNVERIFIED' AND users.status = 'ACTIVE'
+        ORDER BY accounts.created_at
+      `;
+    } else {
+      if (!input.organizationId) throw new BadRequestException('Chọn lớp cần đồng bộ');
+      const access = await this.authorization.organizationAccess(input.organizationId, input.actor);
+      this.authorization.assertCanTeach(access, input.actor);
+      if (input.scope === 'USER') {
+        if (!input.targetUserId) throw new BadRequestException('Chọn tài khoản cần đồng bộ');
+        accounts = await this.database.sql<AccountRow[]>`
+          SELECT accounts.* FROM codeforces_accounts AS accounts
+          JOIN users ON users.id = accounts.user_id
+          JOIN organization_memberships AS memberships
+            ON memberships.user_id = accounts.user_id
+            AND memberships.organization_id = ${input.organizationId}
+            AND memberships.status = 'ACTIVE'
+          WHERE accounts.user_id = ${input.targetUserId}
+            AND accounts.verification_status <> 'UNVERIFIED'
+            AND users.status = 'ACTIVE'
+        `;
+      } else {
+        accounts = await this.database.sql<AccountRow[]>`
+          SELECT accounts.* FROM codeforces_accounts AS accounts
+          JOIN users ON users.id = accounts.user_id
+          JOIN organization_memberships AS memberships
+            ON memberships.user_id = accounts.user_id
+            AND memberships.organization_id = ${input.organizationId}
+            AND memberships.status = 'ACTIVE'
+          WHERE accounts.verification_status <> 'UNVERIFIED' AND users.status = 'ACTIVE'
+          ORDER BY accounts.created_at
+        `;
+      }
+    }
+
+    let queued = 0;
+    for (const account of accounts) {
+      if (await this.enqueueAccount(account, 'HIGH')) queued += 1;
+    }
+    const result = {
+      scope: input.scope,
+      matched: accounts.length,
+      queued,
+      skipped: accounts.length - queued,
+    };
+    await this.database.sql`
+      INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after, reason)
+      VALUES (
+        ${input.actor.userId}, 'CODEFORCES_SYNC_BATCH_REQUESTED',
+        ${input.scope === 'ALL' ? 'system' : 'organization'},
+        ${input.scope === 'ALL' ? 'all' : input.organizationId!},
+        ${JSON.stringify({ ...result, targetUserId: input.targetUserId ?? null })}::jsonb,
+        ${`Yêu cầu đồng bộ Codeforces phạm vi ${input.scope}`}
+      )
+    `;
+    return result;
   }
 
   async verify(input: {
@@ -278,7 +334,9 @@ export class CodeforcesAccountsService {
         RETURNING *
       `;
       if (!account) throw new ConflictException('Trạng thái xác minh đã thay đổi');
-      if (account.verified_at?.getTime() !== account.reward_eligible_from?.getTime()) {
+      const verifiedAt = this.timestamp(account.verified_at);
+      const eligibleFrom = this.timestamp(account.reward_eligible_from);
+      if (verifiedAt === null || eligibleFrom === null || verifiedAt !== eligibleFrom) {
         throw new Error('Verification timestamps must be atomic');
       }
       await transaction`
@@ -315,6 +373,32 @@ export class CodeforcesAccountsService {
       `;
       if (!membership) throw new ForbiddenException('Học sinh không thuộc lớp của Admin');
     }
+  }
+
+  private async enqueueAccount(account: AccountRow, priority: 'HIGH' | 'LOW'): Promise<boolean> {
+    const queued = await this.syncQueue.enqueue(
+      {
+        userId: account.user_id,
+        accountId: account.id,
+        handle: account.handle,
+        mode: account.backfill_completed_at ? 'INCREMENTAL' : 'BACKFILL',
+      },
+      priority,
+    );
+    if (queued) {
+      await this.database.sql`
+        UPDATE codeforces_accounts
+        SET sync_status = 'QUEUED', updated_at = now()
+        WHERE id = ${account.id}
+      `;
+    }
+    return queued;
+  }
+
+  private timestamp(value: Date | string | null): number | null {
+    if (value === null) return null;
+    const timestamp = value instanceof Date ? value.getTime() : Date.parse(value);
+    return Number.isFinite(timestamp) ? timestamp : null;
   }
 
   private postgresCode(error: unknown): string | undefined {

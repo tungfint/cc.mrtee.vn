@@ -29,6 +29,8 @@ interface Member {
   verification_status: string | null;
   current_rating: number | null;
   codeforces_rank: string | null;
+  sync_status: string | null;
+  last_sync_at: string | null;
   role: string;
   status: string;
 }
@@ -76,7 +78,10 @@ export default function AdminPage() {
   const [organizationId, setOrganizationId] = useState('');
   const [targetId, setTargetId] = useState('');
   const [reason, setReason] = useState('');
-  const [amount, setAmount] = useState('10');
+  const [pointAmount, setPointAmount] = useState('10');
+  const [pointReason, setPointReason] = useState('');
+  const [baseAmount, setBaseAmount] = useState('800');
+  const [baseReason, setBaseReason] = useState('');
   const [pointType, setPointType] = useState('BONUS');
   const [rewardName, setRewardName] = useState('');
   const [rewardCost, setRewardCost] = useState('100');
@@ -95,6 +100,9 @@ export default function AdminPage() {
   const [memberRole, setMemberRole] = useState('MEMBER');
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [pointImportFile, setPointImportFile] = useState<File | null>(null);
+  const [syncScope, setSyncScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>('USER');
+  const [syncUserId, setSyncUserId] = useState('');
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => api<{ memberships: Membership[] }>('/me'),
@@ -116,6 +124,10 @@ export default function AdminPage() {
     queryFn: () => api<{ members: Member[] }>(`/organizations/${organizationId}/members`),
     enabled: Boolean(organizationId),
   });
+  const syncEligibleMembers =
+    members.data?.members.filter(
+      (member) => member.verification_status && member.verification_status !== 'UNVERIFIED',
+    ) ?? [];
   const users = useQuery({
     queryKey: ['admin-users'],
     queryFn: () => api<{ users: UserAccount[]; total: number }>('/admin/users?pageSize=50'),
@@ -186,6 +198,54 @@ export default function AdminPage() {
       ]);
     },
   });
+  const importPoints = useMutation({
+    mutationFn: async () => {
+      if (!pointImportFile) throw new Error('Chọn file CSV hoặc XLSX');
+      const form = new FormData();
+      form.append('file', pointImportFile);
+      return api<{
+        applied: number;
+        replayed: number;
+        failed: number;
+        total: number;
+        results: {
+          row: number;
+          email: string;
+          success: boolean;
+          replayed?: boolean;
+          message?: string;
+        }[];
+      }>(`/admin/organizations/${organizationId}/points/import`, {
+        method: 'POST',
+        body: form,
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
+        queryClient.invalidateQueries({ queryKey: ['audits'] }),
+      ]);
+    },
+  });
+  const synchronize = useMutation({
+    mutationFn: () =>
+      api<{ scope: string; matched: number; queued: number; skipped: number }>(
+        '/admin/codeforces-sync',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            scope: syncScope,
+            ...(syncScope !== 'ALL' ? { organizationId } : {}),
+            ...(syncScope === 'USER'
+              ? {
+                  targetUserId: syncUserId || syncEligibleMembers[0]?.user_id || '',
+                }
+              : {}),
+          }),
+        },
+      ),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
+  });
   if (me.isPending) return <LoadingState label="Đang kiểm tra quyền quản trị…" />;
   if (me.error) return <ErrorState error={me.error} />;
   const memberships =
@@ -202,6 +262,7 @@ export default function AdminPage() {
   );
   const canApproveHandle = isSystemAdmin || selectedOrganization?.role === 'ORG_ADMIN';
   const selectTarget = targetId || members.data?.members[0]?.user_id || '';
+  const selectSyncTarget = syncUserId || syncEligibleMembers[0]?.user_id || '';
   const submitPoints = (event: FormEvent) => {
     event.preventDefault();
     if (!selectTarget) return;
@@ -210,9 +271,9 @@ export default function AdminPage() {
       body: {
         organizationId,
         type: pointType,
-        amount: Math.abs(Number(amount)) * (pointType === 'PENALTY' ? -1 : 1),
+        amount: Math.abs(Number(pointAmount)) * (pointType === 'PENALTY' ? -1 : 1),
         affectsSeason: true,
-        reason,
+        reason: pointReason,
         idempotencyKey: crypto.randomUUID(),
       },
     });
@@ -226,6 +287,7 @@ export default function AdminPage() {
       : []),
     { id: 'members', label: 'Học sinh' },
     { id: 'points', label: 'Điểm & CC Base' },
+    { id: 'sync', label: 'Đồng bộ CF' },
     { id: 'audit', label: 'Nhật ký' },
     ...(isSystemAdmin ? [{ id: 'rewards', label: 'Phần thưởng' }] : []),
   ];
@@ -908,91 +970,289 @@ export default function AdminPage() {
             </section>
           )}
           {tab === 'points' && (
-            <div className="grid gap-6 lg:grid-cols-2">
-              <form className="panel p-6" onSubmit={submitPoints}>
-                <p className="eyebrow">CC POINT COMMAND</p>
-                <h2 className="mt-2 text-xl font-black">Cộng / trừ / điều chỉnh</h2>
-                <label className="field mt-5">
-                  <span>Thành viên</span>
-                  <select onChange={(e) => setTargetId(e.target.value)} value={selectTarget}>
-                    {members.data?.members.map((member) => (
-                      <option key={member.user_id} value={member.user_id}>
-                        {member.display_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="form-grid mt-4">
-                  <label className="field">
-                    <span>Loại</span>
-                    <select onChange={(e) => setPointType(e.target.value)} value={pointType}>
-                      <option>BONUS</option>
-                      <option>PENALTY</option>
-                      <option>ADJUSTMENT</option>
+            <div className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-2">
+                <form className="panel p-6" onSubmit={submitPoints}>
+                  <p className="eyebrow">CC POINT COMMAND</p>
+                  <h2 className="mt-2 text-xl font-black">Cộng / trừ một tài khoản</h2>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Ghi trực tiếp vào ví CC Point và điểm mùa hiện tại. Mỗi lệnh có khóa chống ghi
+                    trùng và được lưu trong nhật ký.
+                  </p>
+                  <label className="field mt-5">
+                    <span>Học sinh</span>
+                    <select onChange={(e) => setTargetId(e.target.value)} value={selectTarget}>
+                      {members.data?.members.map((member) => (
+                        <option key={member.user_id} value={member.user_id}>
+                          {member.display_name}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label className="field">
-                    <span>CC Point</span>
-                    <input
-                      min="0.01"
-                      onChange={(e) => setAmount(e.target.value)}
-                      step="0.01"
-                      type="number"
-                      value={amount}
+                  <div className="form-grid mt-4">
+                    <label className="field">
+                      <span>Loại</span>
+                      <select onChange={(e) => setPointType(e.target.value)} value={pointType}>
+                        <option value="BONUS">CỘNG</option>
+                        <option value="PENALTY">TRỪ</option>
+                        <option value="ADJUSTMENT">ĐIỀU CHỈNH</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>CC Point</span>
+                      <input
+                        min="0.01"
+                        onChange={(e) => setPointAmount(e.target.value)}
+                        required
+                        step="0.01"
+                        type="number"
+                        value={pointAmount}
+                      />
+                    </label>
+                  </div>
+                  <label className="field mt-4">
+                    <span>Lý do bắt buộc</span>
+                    <textarea
+                      minLength={3}
+                      onChange={(e) => setPointReason(e.target.value)}
+                      required
+                      value={pointReason}
                     />
                   </label>
+                  <button className="button-primary mt-5" disabled={!selectTarget} type="submit">
+                    Ghi giao dịch
+                  </button>
+                </form>
+
+                <form
+                  className="panel p-6"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    mutation.mutate({
+                      path: `/admin/users/${selectTarget}/recalibrate-base`,
+                      body: { organizationId, ccBase: Number(baseAmount), reason: baseReason },
+                    });
+                  }}
+                >
+                  <p className="eyebrow">SKILL CALIBRATION</p>
+                  <h2 className="mt-2 text-xl font-black">Hiệu chỉnh CC Base</h2>
+                  <div className="base-explanation mt-4">
+                    <p>
+                      <strong>CC Base</strong> là mức năng lực nền do Admin/Giáo viên xác nhận từ
+                      đầu vào, bài kiểm tra hoặc lịch sử Codeforces. Đây không phải điểm thưởng và
+                      không cộng trực tiếp vào ví.
+                    </p>
+                    <p>
+                      <strong>
+                        CC Level hiện tại = giá trị lớn hơn giữa CC Base và mức hệ thống tính từ bài
+                        đã giải.
+                      </strong>{' '}
+                      Hạ CC Base không làm mất kết quả năng lực đã đạt được.
+                    </p>
+                  </div>
+                  <div className="base-presets mt-4" aria-label="Các mốc CC Base đề xuất">
+                    {[
+                      [800, 'Mới bắt đầu'],
+                      [1000, 'Có nền tảng'],
+                      [1200, 'Khá'],
+                      [1400, 'Vững'],
+                      [1600, 'Nâng cao'],
+                      [1900, 'Chuyên sâu'],
+                    ].map(([level, label]) => (
+                      <button
+                        className={baseAmount === String(level) ? 'active' : ''}
+                        key={level}
+                        onClick={() => setBaseAmount(String(level))}
+                        type="button"
+                      >
+                        <strong>{level}</strong>
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <label className="field mt-5">
+                    <span>CC Base mới</span>
+                    <input
+                      max="10000"
+                      min="0"
+                      onChange={(e) => setBaseAmount(e.target.value)}
+                      required
+                      type="number"
+                      value={baseAmount}
+                    />
+                  </label>
+                  <label className="field mt-4">
+                    <span>Lý do và căn cứ hiệu chỉnh</span>
+                    <textarea
+                      minLength={3}
+                      onChange={(e) => setBaseReason(e.target.value)}
+                      placeholder="Ví dụ: Kết quả kiểm tra đầu vào ngày…"
+                      required
+                      value={baseReason}
+                    />
+                  </label>
+                  <button className="button-secondary mt-5" disabled={!selectTarget} type="submit">
+                    Hiệu chỉnh CC Base
+                  </button>
+                </form>
+              </div>
+
+              <form
+                className="panel import-panel p-6"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  importPoints.mutate();
+                }}
+              >
+                <div>
+                  <p className="eyebrow">BULK CC POINT</p>
+                  <h2 className="mt-2 text-xl font-black">Cộng / trừ hàng loạt</h2>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Nhận CSV hoặc XLSX, tối đa 500 tài khoản. Cột thao tác dùng CỘNG/TRỪ; CC Point
+                    luôn nhập số dương. Tải lại cùng một file sẽ không ghi trùng giao dịch đã thành
+                    công.
+                  </p>
                 </div>
-                <label className="field mt-4">
-                  <span>Lý do bắt buộc</span>
-                  <textarea
-                    minLength={3}
-                    onChange={(e) => setReason(e.target.value)}
-                    required
-                    value={reason}
-                  />
-                </label>
-                <button className="button-primary mt-5" disabled={!selectTarget} type="submit">
-                  Ghi giao dịch
-                </button>
+                <div className="import-actions">
+                  <a
+                    className="button-secondary"
+                    download
+                    href="/templates/cong-tru-cc-point-mau.csv"
+                  >
+                    ↓ Tải file mẫu
+                  </a>
+                  <label className="button-secondary avatar-file-button">
+                    Chọn CSV / XLSX
+                    <input
+                      accept=".csv,.xlsx"
+                      onChange={(event) => setPointImportFile(event.target.files?.[0] ?? null)}
+                      type="file"
+                    />
+                  </label>
+                  <span className="import-filename">
+                    {pointImportFile?.name ?? 'Chưa chọn file'}
+                  </span>
+                  <button
+                    className="button-primary"
+                    disabled={!pointImportFile || importPoints.isPending}
+                    type="submit"
+                  >
+                    {importPoints.isPending ? 'Đang xử lý…' : 'Thực hiện hàng loạt'}
+                  </button>
+                </div>
+                {importPoints.error && <p className="notice error">{importPoints.error.message}</p>}
+                {importPoints.data && (
+                  <div className="import-result">
+                    <strong>
+                      Đã ghi {importPoints.data.applied} · Bỏ qua trùng {importPoints.data.replayed}{' '}
+                      · Lỗi {importPoints.data.failed}
+                    </strong>
+                    {importPoints.data.results
+                      .filter((item) => !item.success)
+                      .slice(0, 12)
+                      .map((item) => (
+                        <p key={`${item.row}-${item.email}`}>
+                          Dòng {item.row} · {item.email || 'trống'}: {item.message}
+                        </p>
+                      ))}
+                  </div>
+                )}
               </form>
+            </div>
+          )}
+          {tab === 'sync' && (
+            <section className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
               <form
                 className="panel p-6"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  mutation.mutate({
-                    path: `/admin/users/${selectTarget}/recalibrate-base`,
-                    body: { organizationId, ccBase: Number(amount), reason },
-                  });
+                  synchronize.mutate();
                 }}
               >
-                <p className="eyebrow">SKILL CALIBRATION</p>
-                <h2 className="mt-2 text-xl font-black">Hiệu chỉnh CC Base</h2>
-                <p className="text-sm text-[var(--muted)]">
-                  CC Level vẫn là giá trị lớn hơn giữa mốc nền và kết quả tính toán.
+                <p className="eyebrow">CODEFORCES SYNC CONTROL</p>
+                <h2 className="mt-2 text-xl font-black">Chọn phạm vi đồng bộ</h2>
+                <p className="mt-2 text-sm text-[var(--muted)]">
+                  Chỉ các tài khoản Codeforces đã xác minh và đang hoạt động mới được đưa vào hàng
+                  đợi. Tài khoản đã có job chờ sẽ được bỏ qua để tránh chạy trùng.
                 </p>
                 <label className="field mt-5">
-                  <span>CC Base mới</span>
-                  <input
-                    min="0"
-                    onChange={(e) => setAmount(e.target.value)}
-                    type="number"
-                    value={amount}
-                  />
+                  <span>Phạm vi</span>
+                  <select
+                    onChange={(event) =>
+                      setSyncScope(event.target.value as 'USER' | 'ORGANIZATION' | 'ALL')
+                    }
+                    value={syncScope}
+                  >
+                    <option value="USER">Một tài khoản</option>
+                    <option value="ORGANIZATION">Cả lớp đang chọn</option>
+                    {isSystemAdmin && <option value="ALL">Toàn hệ thống</option>}
+                  </select>
                 </label>
-                <label className="field mt-4">
-                  <span>Lý do bắt buộc</span>
-                  <textarea
-                    minLength={3}
-                    onChange={(e) => setReason(e.target.value)}
-                    required
-                    value={reason}
-                  />
-                </label>
-                <button className="button-secondary mt-5" disabled={!selectTarget} type="submit">
-                  Hiệu chỉnh
+                {syncScope === 'USER' && (
+                  <label className="field mt-4">
+                    <span>Tài khoản</span>
+                    <select
+                      onChange={(event) => setSyncUserId(event.target.value)}
+                      value={selectSyncTarget}
+                    >
+                      {syncEligibleMembers.map((member) => (
+                        <option key={member.user_id} value={member.user_id}>
+                          {member.display_name} · {member.codeforces_handle ?? 'chưa có CF'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {syncScope !== 'ALL' && (
+                  <p className="notice pending mt-4">
+                    Lớp: <strong>{selectedOrganization?.organization_name}</strong>
+                  </p>
+                )}
+                <button
+                  className="button-primary mt-5"
+                  disabled={synchronize.isPending || (syncScope === 'USER' && !selectSyncTarget)}
+                  type="submit"
+                >
+                  {synchronize.isPending ? 'Đang xếp hàng…' : 'Bắt đầu đồng bộ'}
                 </button>
+                {synchronize.error && (
+                  <p className="notice error mt-4">{synchronize.error.message}</p>
+                )}
+                {synchronize.data && (
+                  <div className="sync-result mt-4">
+                    <strong>{synchronize.data.queued} tài khoản đã vào hàng đợi</strong>
+                    <p>
+                      Tìm thấy {synchronize.data.matched} · Bỏ qua {synchronize.data.skipped}
+                    </p>
+                  </div>
+                )}
               </form>
-            </div>
+              <div className="panel overflow-hidden">
+                <div className="management-header">
+                  <strong>Trạng thái lớp</strong>
+                  <span>{selectedOrganization?.organization_name}</span>
+                </div>
+                {members.data?.members.map((member) => (
+                  <div className="sync-account-row" key={member.user_id}>
+                    <div className="member">
+                      <Avatar name={member.display_name} size="sm" url={member.avatar_url} />
+                      <div>
+                        <strong>{member.display_name}</strong>
+                        <p>@{member.codeforces_handle ?? 'Chưa liên kết Codeforces'}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <StatusPill value={member.sync_status ?? 'UNLINKED'} />
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        {member.last_sync_at
+                          ? `Lần cuối ${formatDate(member.last_sync_at)}`
+                          : 'Chưa đồng bộ'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
           {tab === 'audit' && (
             <div className="panel overflow-hidden">
