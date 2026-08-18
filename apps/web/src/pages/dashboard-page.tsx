@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber } from '../lib/api';
 import {
   Avatar,
+  CodeforcesHandle,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -16,6 +17,9 @@ interface Dashboard {
     avatar_url: string | null;
     codeforces_handle: string | null;
     verification_status: string | null;
+    pending_handle: string | null;
+    current_rating: number | null;
+    codeforces_rank: string | null;
     sync_status: string | null;
     last_sync_at: string | null;
     cc_level: string;
@@ -86,21 +90,33 @@ export default function DashboardPage() {
         title={`Chào ${profile.display_name}`}
         detail="Một lát cắt gọn về năng lực, nhịp luyện tập và thành tích hiện tại của bạn."
         action={
-          <div className="flex items-center gap-3">
-            <Avatar name={profile.display_name} size="lg" url={profile.avatar_url} />
-            <span className="text-xs text-[var(--muted)]">
-              Sync gần nhất: {formatDate(profile.last_sync_at)}
-            </span>
-            {profile.codeforces_handle && (
-              <button
-                className="button-secondary"
-                disabled={sync.isPending}
-                onClick={() => sync.mutate()}
-                type="button"
-              >
-                {sync.isPending ? 'Đang xếp hàng…' : '↻ Đồng bộ'}
-              </button>
-            )}
+          <div className="dashboard-identity">
+            <Avatar name={profile.display_name} size="xl" url={profile.avatar_url} />
+            <div>
+              {profile.codeforces_handle ? (
+                <CodeforcesHandle
+                  handle={profile.codeforces_handle}
+                  large
+                  rating={profile.current_rating}
+                />
+              ) : (
+                <strong>Chưa kết nối Codeforces</strong>
+              )}
+              <p>
+                {profile.codeforces_rank ?? 'Unrated'} · Sync gần nhất:{' '}
+                {formatDate(profile.last_sync_at)}
+              </p>
+              {profile.codeforces_handle && (
+                <button
+                  className="button-secondary mt-2"
+                  disabled={sync.isPending}
+                  onClick={() => sync.mutate()}
+                  type="button"
+                >
+                  {sync.isPending ? 'Đang xếp hàng…' : '↻ Đồng bộ'}
+                </button>
+              )}
+            </div>
           </div>
         }
       />
@@ -242,13 +258,25 @@ export default function DashboardPage() {
               {profile.sync_status && <StatusPill value={profile.sync_status} />}
             </div>
             <p className="text-2xl font-black">
-              {profile.codeforces_handle ? `@${profile.codeforces_handle}` : 'Chưa kết nối'}
+              {profile.codeforces_handle ? (
+                <CodeforcesHandle
+                  handle={profile.codeforces_handle}
+                  rating={profile.current_rating}
+                />
+              ) : (
+                'Chưa kết nối'
+              )}
             </p>
             <p className="text-sm text-[var(--muted)]">
               {profile.verification_status
                 ? `Xác minh: ${profile.verification_status.replaceAll('_', ' ')}`
                 : 'Cần kết nối handle'}
             </p>
+            {profile.pending_handle && (
+              <p className="notice pending mt-3">
+                Đang chờ Admin duyệt đổi sang @{profile.pending_handle}
+              </p>
+            )}
           </div>
           <div className="panel p-5">
             <div className="section-heading">

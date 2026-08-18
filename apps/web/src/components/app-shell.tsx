@@ -81,7 +81,7 @@ export function AppShell({ user }: { user: SessionUser }) {
           <div className="min-w-0 flex-1">
             <p className="m-0 truncate text-sm font-bold">{user.displayName}</p>
             <p className="m-0 text-[11px] text-[var(--muted)]">
-              {user.systemRole === 'SYSTEM_ADMIN' ? 'System admin' : 'Học viên'}
+              {user.systemRole === 'SYSTEM_ADMIN' ? 'System admin' : 'Học sinh'}
             </p>
           </div>
           <button

@@ -32,6 +32,39 @@ export function Avatar({
   );
 }
 
+export function CodeforcesHandle({
+  handle,
+  rating,
+  large = false,
+}: {
+  handle: string;
+  rating?: number | null;
+  large?: boolean;
+}) {
+  return (
+    <a
+      className={`cf-handle ${codeforcesColor(rating)}${large ? ' cf-handle-large' : ''}`}
+      href={`https://codeforces.com/profile/${encodeURIComponent(handle)}`}
+      rel="noreferrer"
+      target="_blank"
+    >
+      @{handle}
+      {rating !== null && rating !== undefined && <small>{rating}</small>}
+    </a>
+  );
+}
+
+function codeforcesColor(rating: number | null | undefined): string {
+  if (rating === null || rating === undefined || rating < 1200) return 'cf-newbie';
+  if (rating < 1400) return 'cf-pupil';
+  if (rating < 1600) return 'cf-specialist';
+  if (rating < 1900) return 'cf-expert';
+  if (rating < 2100) return 'cf-candidate-master';
+  if (rating < 2400) return 'cf-master';
+  if (rating < 3000) return 'cf-grandmaster';
+  return 'cf-legendary';
+}
+
 export function LoadingState({ label, fullPage = false }: { label: string; fullPage?: boolean }) {
   return (
     <div

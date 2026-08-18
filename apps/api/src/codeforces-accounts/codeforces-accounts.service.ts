@@ -22,6 +22,11 @@ export interface AccountRow {
   id: string;
   user_id: string;
   handle: string;
+  pending_handle: string | null;
+  current_rating: number | null;
+  max_rating: number | null;
+  rank: string | null;
+  max_rank: string | null;
   verification_status: 'UNVERIFIED' | 'TEACHER_VERIFIED' | 'ADMIN_VERIFIED';
   verified_at: Date | null;
   reward_eligible_from: Date | null;
@@ -47,7 +52,36 @@ export class CodeforcesAccountsService {
       SELECT * FROM codeforces_accounts WHERE user_id = ${user.userId}
     `;
     if (existing && existing.verification_status !== 'UNVERIFIED') {
-      throw new ForbiddenException('Handle đã xác minh; cần quản trị viên đặt lại');
+      if (existing.handle.toLowerCase() === parsed.data.toLowerCase()) return existing;
+      try {
+        const [conflict] = await this.database.sql`
+          SELECT user_id FROM codeforces_accounts
+          WHERE user_id <> ${user.userId}
+            AND (handle = ${parsed.data} OR pending_handle = ${parsed.data})
+        `;
+        if (conflict) throw new ConflictException('Codeforces handle đã được sử dụng');
+        const [account] = await this.database.sql.begin(async (transaction) => {
+          const [updated] = await transaction<AccountRow[]>`
+            UPDATE codeforces_accounts SET pending_handle = ${parsed.data}, updated_at = now()
+            WHERE user_id = ${user.userId}
+            RETURNING *
+          `;
+          await transaction`
+            INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after)
+            VALUES (${user.userId}, 'CODEFORCES_HANDLE_CHANGE_REQUESTED', 'codeforces_account',
+              ${existing.id}, ${JSON.stringify(existing)}::jsonb,
+              ${JSON.stringify(updated ?? null)}::jsonb)
+          `;
+          return [updated];
+        });
+        if (!account) throw new Error('Failed to request Codeforces handle change');
+        return account;
+      } catch (error) {
+        if (error instanceof ConflictException || this.postgresCode(error) === '23505') {
+          throw new ConflictException('Codeforces handle đã được sử dụng');
+        }
+        throw error;
+      }
     }
     try {
       const [account] = await this.database.sql<AccountRow[]>`
@@ -55,6 +89,7 @@ export class CodeforcesAccountsService {
         VALUES (${user.userId}, ${parsed.data})
         ON CONFLICT (user_id) DO UPDATE SET
           handle = EXCLUDED.handle,
+          pending_handle = NULL,
           verification_status = 'UNVERIFIED',
           verified_at = NULL,
           verified_by = NULL,
@@ -72,6 +107,91 @@ export class CodeforcesAccountsService {
       }
       throw error;
     }
+  }
+
+  async approveHandleChange(input: {
+    organizationId: string;
+    targetUserId: string;
+    actor: AuthUser;
+    reason: string;
+  }): Promise<AccountRow> {
+    await this.assertCanApproveChange(input.organizationId, input.targetUserId, input.actor);
+    try {
+      return await this.database.sql.begin(async (transaction) => {
+        const [before] = await transaction<AccountRow[]>`
+          SELECT * FROM codeforces_accounts WHERE user_id = ${input.targetUserId} FOR UPDATE
+        `;
+        if (!before?.pending_handle) {
+          throw new BadRequestException('Không có yêu cầu đổi Codeforces handle đang chờ');
+        }
+        const [conflict] = await transaction`
+          SELECT user_id FROM codeforces_accounts
+          WHERE user_id <> ${input.targetUserId} AND handle = ${before.pending_handle}
+        `;
+        if (conflict) throw new ConflictException('Codeforces handle đã được sử dụng');
+        const [account] = await transaction<AccountRow[]>`
+          UPDATE codeforces_accounts SET
+            handle = pending_handle, pending_handle = NULL,
+            verification_status = 'ADMIN_VERIFIED', verified_at = now(),
+            verified_by = ${input.actor.userId}, reward_eligible_from = now(),
+            sync_status = 'INITIALIZING', backfill_completed_at = NULL,
+            backfill_next_from = 1, last_sync_error = NULL, next_sync_at = now(),
+            current_rating = NULL, max_rating = NULL, rank = NULL, max_rank = NULL,
+            updated_at = now()
+          WHERE user_id = ${input.targetUserId}
+          RETURNING *
+        `;
+        if (!account) throw new NotFoundException('Không tìm thấy tài khoản Codeforces');
+        await transaction`
+          INSERT INTO audit_logs (
+            actor_user_id, action, entity_type, entity_id, before, after, reason
+          ) VALUES (
+            ${input.actor.userId}, 'CODEFORCES_HANDLE_CHANGE_APPROVED', 'codeforces_account',
+            ${account.id}, ${JSON.stringify(before)}::jsonb, ${JSON.stringify(account)}::jsonb,
+            ${input.reason}
+          )
+        `;
+        return account;
+      });
+    } catch (error) {
+      if (error instanceof ConflictException || this.postgresCode(error) === '23505') {
+        throw new ConflictException('Codeforces handle đã được sử dụng');
+      }
+      throw error;
+    }
+  }
+
+  async rejectHandleChange(input: {
+    organizationId: string;
+    targetUserId: string;
+    actor: AuthUser;
+    reason: string;
+  }): Promise<AccountRow> {
+    await this.assertCanApproveChange(input.organizationId, input.targetUserId, input.actor);
+    return this.database.sql.begin(async (transaction) => {
+      const [before] = await transaction<AccountRow[]>`
+        SELECT * FROM codeforces_accounts WHERE user_id = ${input.targetUserId} FOR UPDATE
+      `;
+      if (!before?.pending_handle) {
+        throw new BadRequestException('Không có yêu cầu đổi Codeforces handle đang chờ');
+      }
+      const [account] = await transaction<AccountRow[]>`
+        UPDATE codeforces_accounts SET pending_handle = NULL, updated_at = now()
+        WHERE user_id = ${input.targetUserId}
+        RETURNING *
+      `;
+      if (!account) throw new NotFoundException('Không tìm thấy tài khoản Codeforces');
+      await transaction`
+        INSERT INTO audit_logs (
+          actor_user_id, action, entity_type, entity_id, before, after, reason
+        ) VALUES (
+          ${input.actor.userId}, 'CODEFORCES_HANDLE_CHANGE_REJECTED', 'codeforces_account',
+          ${account.id}, ${JSON.stringify(before)}::jsonb, ${JSON.stringify(account)}::jsonb,
+          ${input.reason}
+        )
+      `;
+      return account;
+    });
   }
 
   async getOwn(userId: string): Promise<(AccountRow & { eligible: boolean }) | null> {
@@ -176,6 +296,25 @@ export class CodeforcesAccountsService {
       `;
       return account;
     });
+  }
+
+  private async assertCanApproveChange(
+    organizationId: string,
+    targetUserId: string,
+    actor: AuthUser,
+  ): Promise<void> {
+    const access = await this.authorization.organizationAccess(organizationId, actor);
+    if (actor.systemRole !== 'SYSTEM_ADMIN' && access.membershipRole !== 'ORG_ADMIN') {
+      throw new ForbiddenException('Chỉ Admin được duyệt thay đổi Codeforces handle');
+    }
+    if (actor.systemRole !== 'SYSTEM_ADMIN') {
+      const [membership] = await this.database.sql`
+        SELECT id FROM organization_memberships
+        WHERE organization_id = ${organizationId} AND user_id = ${targetUserId}
+          AND status = 'ACTIVE'
+      `;
+      if (!membership) throw new ForbiddenException('Học sinh không thuộc lớp của Admin');
+    }
   }
 
   private postgresCode(error: unknown): string | undefined {

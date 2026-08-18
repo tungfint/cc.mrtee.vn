@@ -126,6 +126,9 @@ export class AuthService {
       fullName: string;
       displayName: string;
       systemRole?: AuthUser['systemRole'];
+      organizationId?: string;
+      codeforcesHandle?: string;
+      initialCcLevel?: number;
     },
     audit?: {
       actorUserId: string;
@@ -150,6 +153,25 @@ export class AuthService {
         SELECT id, ${email}, ${passwordHash} FROM new_user
         RETURNING user_id AS id
       `;
+      if (user) {
+        const initialCcLevel = input.initialCcLevel ?? 800;
+        await transaction`
+          INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
+          VALUES (${user.id}, ${initialCcLevel}, 0, ${initialCcLevel})
+        `;
+        if (input.organizationId) {
+          await transaction`
+            INSERT INTO organization_memberships (organization_id, user_id, role)
+            VALUES (${input.organizationId}, ${user.id}, 'MEMBER')
+          `;
+        }
+        if (input.codeforcesHandle) {
+          await transaction`
+            INSERT INTO codeforces_accounts (user_id, handle)
+            VALUES (${user.id}, ${input.codeforcesHandle})
+          `;
+        }
+      }
       if (user && audit) {
         await transaction`
           INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after)

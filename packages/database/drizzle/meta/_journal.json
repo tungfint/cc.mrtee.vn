@@ -43,6 +43,13 @@
       "when": 1787010000000,
       "tag": "0005_user_avatar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787030000000,
+      "tag": "0006_student_profile_management",
+      "breakpoints": true
     }
   ]
 }

@@ -64,6 +64,46 @@ export class CodeforcesAccountsController {
     };
   }
 
+  @Post('organizations/:organizationId/codeforces-accounts/:userId/approve-change')
+  async approveChange(
+    @Param('organizationId') organizationIdInput: string,
+    @Param('userId') targetUserIdInput: string,
+    @Body() body: unknown,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    const organizationId = this.uuid(organizationIdInput);
+    const targetUserId = this.uuid(targetUserIdInput);
+    const input = this.parse(verifySchema, body);
+    return {
+      account: await this.accounts.approveHandleChange({
+        organizationId,
+        targetUserId,
+        actor,
+        reason: input.reason,
+      }),
+    };
+  }
+
+  @Post('organizations/:organizationId/codeforces-accounts/:userId/reject-change')
+  async rejectChange(
+    @Param('organizationId') organizationIdInput: string,
+    @Param('userId') targetUserIdInput: string,
+    @Body() body: unknown,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    const organizationId = this.uuid(organizationIdInput);
+    const targetUserId = this.uuid(targetUserIdInput);
+    const input = this.parse(verifySchema, body);
+    return {
+      account: await this.accounts.rejectHandleChange({
+        organizationId,
+        targetUserId,
+        actor,
+        reason: input.reason,
+      }),
+    };
+  }
+
   private uuid(value: string): string {
     const parsed = uuidSchema.safeParse(value);
     if (!parsed.success) throw new BadRequestException('ID không hợp lệ');

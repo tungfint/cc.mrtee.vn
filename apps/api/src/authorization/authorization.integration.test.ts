@@ -1,6 +1,9 @@
-import { resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { config } from 'dotenv';
 import postgres from 'postgres';
+import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { migrateDatabase } from '@cc/database';
 import type { DatabaseService } from '../database/database.service';
@@ -14,6 +17,8 @@ import { InsightsController } from '../insights/insights.controller';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
 import { UsersController } from '../users/users.controller';
 import { AdminOrganizationsController } from '../organizations/admin-organizations.controller';
+import { StudentImportService } from '../organizations/student-import.service';
+import { AvatarService } from '../users/avatar.service';
 import { AuthorizationService } from './authorization.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
@@ -41,6 +46,9 @@ const insights = new InsightsController({ sql: connection } as DatabaseService, 
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 const usersController = new UsersController({ sql: connection } as DatabaseService, authService);
 const adminOrganizations = new AdminOrganizationsController({ sql: connection } as DatabaseService);
+const studentImport = new StudentImportService(service, authService, {
+  sql: connection,
+} as DatabaseService);
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
   sessionId: 'test-session',
@@ -199,6 +207,10 @@ describe('authorization matrix', () => {
     expect(session?.token_hash).not.toContain(login.sessionToken);
     expect(session?.csrf_token_hash).not.toContain(login.csrfToken);
     expect(session?.token_hash).toMatch(/^[a-f0-9]{64}$/);
+    const [skill] = await connection<{ cc_base: string; cc_level: string }[]>`
+      SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${userId}
+    `;
+    expect(skill).toMatchObject({ cc_base: '800.00', cc_level: '800.00' });
   });
 
   it('keeps linked handles unverified until an authorized atomic verification', async () => {
@@ -221,6 +233,82 @@ describe('authorization matrix', () => {
     expect(verified.sync_status).toBe('INITIALIZING');
     expect(verified.verified_at?.getTime()).toBe(verified.reward_eligible_from?.getTime());
     expect((await codeforcesAccounts.getOwn(member.userId))?.eligible).toBe(true);
+
+    const requested = await codeforcesAccounts.link(member, 'Tourist_Changed');
+    expect(requested.handle).toBe('Tourist_Test');
+    expect(requested.pending_handle).toBe('Tourist_Changed');
+    await expect(
+      codeforcesAccounts.approveHandleChange({
+        organizationId: ids.privateOrg!,
+        targetUserId: member.userId,
+        actor: authUser(ids.teacher!),
+        reason: 'Teacher cannot approve a handle change',
+      }),
+    ).rejects.toThrow('Chỉ Admin');
+    const approved = await codeforcesAccounts.approveHandleChange({
+      organizationId: ids.privateOrg!,
+      targetUserId: member.userId,
+      actor: authUser(ids.orgAdmin!),
+      reason: 'Admin confirmed ownership',
+    });
+    expect(approved.handle).toBe('Tourist_Changed');
+    expect(approved.pending_handle).toBeNull();
+    expect(approved.verification_status).toBe('ADMIN_VERIFIED');
+  });
+
+  it('allows teachers to import students with class, handle, and initial level', async () => {
+    const csv = [
+      'tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau',
+      'imported@example.com,Temporary!2026,Nguyen Van Import,Import Student,import_cf,950',
+    ].join('\n');
+    const result = await studentImport.import(
+      ids.privateOrg!,
+      {
+        originalname: 'students.csv',
+        buffer: Buffer.from(csv),
+      } as Express.Multer.File,
+      authUser(ids.teacher!),
+    );
+    expect(result).toMatchObject({ created: 1, failed: 0, total: 1 });
+    const [student] = await connection<
+      { email: string; cc_base: string; handle: string; organization_id: string }[]
+    >`
+      SELECT credentials.email, skill.cc_base, accounts.handle, memberships.organization_id
+      FROM user_credentials AS credentials
+      JOIN user_skill_state AS skill ON skill.user_id = credentials.user_id
+      JOIN codeforces_accounts AS accounts ON accounts.user_id = credentials.user_id
+      JOIN organization_memberships AS memberships ON memberships.user_id = credentials.user_id
+      WHERE credentials.email = 'imported@example.com'
+    `;
+    expect(student).toMatchObject({
+      email: 'imported@example.com',
+      cc_base: '950.00',
+      handle: 'import_cf',
+      organization_id: ids.privateOrg,
+    });
+  });
+
+  it('validates, normalizes, and stores cropped avatars', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cc-avatar-test-'));
+    try {
+      const avatars = new AvatarService(
+        { sql: connection } as DatabaseService,
+        { values: { UPLOAD_DIR: directory } } as EnvironmentService,
+      );
+      const input = await sharp({
+        create: { width: 120, height: 240, channels: 3, background: '#35d5d1' },
+      })
+        .png()
+        .toBuffer();
+      const url = await avatars.store(ids.member!, input);
+      const stored = await readFile(join(directory, 'avatars', basename(url)));
+      const metadata = await sharp(stored).metadata();
+      expect(url).toMatch(/^\/api\/uploads\/avatars\/[a-f0-9-]+\.webp$/);
+      expect(metadata).toMatchObject({ width: 512, height: 512, format: 'webp' });
+      await avatars.remove(ids.member!);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('closes a season into deterministic snapshots and awards exactly once', async () => {

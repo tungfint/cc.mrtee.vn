@@ -23,7 +23,9 @@ export class ApiError extends Error {
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
-  if (options.body) headers.set('content-type', 'application/json');
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set('content-type', 'application/json');
+  }
   if (options.method && !['GET', 'HEAD'].includes(options.method.toUpperCase())) {
     const csrf = cookie('cc_csrf');
     if (csrf) headers.set('x-csrf-token', decodeURIComponent(csrf));

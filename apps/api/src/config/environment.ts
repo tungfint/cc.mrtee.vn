@@ -15,6 +15,7 @@ const environmentSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
   METRICS_TOKEN: z.string().min(32).optional(),
+  UPLOAD_DIR: z.string().min(1).default('./data/uploads'),
 });
 
 export type ApiEnvironment = z.infer<typeof environmentSchema>;

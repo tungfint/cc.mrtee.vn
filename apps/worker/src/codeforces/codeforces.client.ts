@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { CodeforcesApiResponse, CodeforcesSubmission } from '@cc/core';
+import type { CodeforcesApiResponse, CodeforcesSubmission, CodeforcesUser } from '@cc/core';
 import { EnvironmentService } from '../config/environment';
 import { GlobalRateLimiter } from './global-rate-limiter';
 
@@ -28,6 +28,15 @@ export class CodeforcesClient {
       from: String(from),
       count: String(count),
     });
+  }
+
+  async userInfo(handle: string): Promise<CodeforcesUser> {
+    const [user] = await this.request<CodeforcesUser[]>('user.info', {
+      handles: handle,
+      checkHistoricHandles: 'false',
+    });
+    if (!user) throw new CodeforcesClientError('Codeforces user not found', false);
+    return user;
   }
 
   private async request<T>(method: string, parameters: Record<string, string>): Promise<T> {

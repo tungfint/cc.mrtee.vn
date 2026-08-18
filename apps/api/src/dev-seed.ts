@@ -43,6 +43,19 @@ function ramp(count: number, from: number, to: number): number[] {
   );
 }
 
+function codeforcesRank(rating: number): string {
+  if (rating >= 3000) return 'legendary grandmaster';
+  if (rating >= 2600) return 'international grandmaster';
+  if (rating >= 2400) return 'grandmaster';
+  if (rating >= 2300) return 'international master';
+  if (rating >= 2100) return 'master';
+  if (rating >= 1900) return 'candidate master';
+  if (rating >= 1600) return 'expert';
+  if (rating >= 1400) return 'specialist';
+  if (rating >= 1200) return 'pupil';
+  return 'newbie';
+}
+
 const profiles: Profile[] = [
   {
     id: '30000000-0000-4000-8000-000000000011',
@@ -168,6 +181,7 @@ async function main(): Promise<void> {
     `;
 
       for (const [profileIndex, profile] of profiles.entries()) {
+        const currentRating = profile.ratings.at(-1) ?? profile.base;
         await transaction`
         INSERT INTO users (id, full_name, display_name, avatar_url)
         VALUES (${profile.id}, ${`${profile.name} — simulation`}, ${profile.name},
@@ -196,10 +210,13 @@ async function main(): Promise<void> {
         await transaction`
         INSERT INTO codeforces_accounts (
           user_id, handle, verification_status, verified_at, verified_by,
-          reward_eligible_from, backfill_completed_at, sync_status, last_sync_at, next_sync_at
+          reward_eligible_from, backfill_completed_at, sync_status, last_sync_at, next_sync_at,
+          current_rating, max_rating, rank, max_rank
         ) VALUES (
           ${profile.id}, ${`demo_${profile.key}`}, 'ADMIN_VERIFIED', ${activeStart}, ${ids.admin},
-          ${activeStart}, ${activeStart}, 'READY', ${now}, '2099-01-01T00:00:00Z'
+          ${activeStart}, ${activeStart}, 'READY', ${now}, '2099-01-01T00:00:00Z',
+          ${currentRating}, ${Math.max(...profile.ratings)}, ${codeforcesRank(currentRating)},
+          ${codeforcesRank(Math.max(...profile.ratings))}
         )
         ON CONFLICT (user_id) DO UPDATE SET
           verification_status = 'ADMIN_VERIFIED',
@@ -207,6 +224,10 @@ async function main(): Promise<void> {
           verified_by = EXCLUDED.verified_by,
           reward_eligible_from = EXCLUDED.reward_eligible_from,
           sync_status = 'READY',
+          current_rating = EXCLUDED.current_rating,
+          max_rating = EXCLUDED.max_rating,
+          rank = EXCLUDED.rank,
+          max_rank = EXCLUDED.max_rank,
           last_sync_error = NULL,
           next_sync_at = EXCLUDED.next_sync_at,
           updated_at = now()

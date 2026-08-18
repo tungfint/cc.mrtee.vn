@@ -195,6 +195,11 @@ export const codeforcesAccounts = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     handle: citext('handle').notNull(),
+    pendingHandle: citext('pending_handle'),
+    currentRating: integer('current_rating'),
+    maxRating: integer('max_rating'),
+    rank: varchar('rank', { length: 50 }),
+    maxRank: varchar('max_rank', { length: 50 }),
     verificationStatus: verificationStatus('verification_status').default('UNVERIFIED').notNull(),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
     verifiedBy: uuid('verified_by').references((): AnyPgColumn => users.id, {
@@ -214,6 +219,9 @@ export const codeforcesAccounts = pgTable(
   (table) => [
     uniqueIndex('codeforces_accounts_user_unique').on(table.userId),
     uniqueIndex('codeforces_accounts_handle_unique').on(table.handle),
+    uniqueIndex('codeforces_accounts_pending_handle_unique')
+      .on(table.pendingHandle)
+      .where(sql`${table.pendingHandle} IS NOT NULL`),
     index('codeforces_accounts_next_sync_idx')
       .on(table.nextSyncAt)
       .where(sql`${table.syncStatus} NOT IN ('UNVERIFIED', 'INACTIVE')`),
@@ -224,6 +232,10 @@ export const codeforcesAccounts = pgTable(
     check(
       'codeforces_accounts_backfill_cursor_check',
       sql`${table.backfillNextFrom} IS NULL OR ${table.backfillNextFrom} > 0`,
+    ),
+    check(
+      'codeforces_accounts_rating_check',
+      sql`(${table.currentRating} IS NULL OR ${table.currentRating} >= 0) AND (${table.maxRating} IS NULL OR ${table.maxRating} >= 0)`,
     ),
   ],
 );

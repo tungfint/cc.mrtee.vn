@@ -40,6 +40,7 @@ export class InsightsController {
         this.database.sql`
         SELECT users.id, users.display_name, users.full_name, users.avatar_url, users.timezone,
           accounts.handle AS codeforces_handle, accounts.verification_status,
+          accounts.pending_handle, accounts.current_rating, accounts.rank AS codeforces_rank,
           accounts.sync_status, accounts.last_sync_at, accounts.next_sync_at,
           COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(wallet.balance, 0)::text AS wallet_balance,

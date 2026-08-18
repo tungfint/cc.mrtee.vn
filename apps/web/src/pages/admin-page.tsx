@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber, useSession } from '../lib/api';
 import {
   Avatar,
+  CodeforcesHandle,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -17,8 +18,17 @@ interface Membership {
 }
 interface Member {
   user_id: string;
+  email: string;
+  full_name: string;
   display_name: string;
   avatar_url: string | null;
+  initial_cc_level: string;
+  cc_level: string;
+  codeforces_handle: string | null;
+  pending_handle: string | null;
+  verification_status: string | null;
+  current_rating: number | null;
+  codeforces_rank: string | null;
   role: string;
   status: string;
 }
@@ -30,7 +40,14 @@ interface UserAccount {
   avatar_url: string | null;
   status: string;
   system_role: string;
-  memberships: { organizationName: string; role: string }[];
+  initial_cc_level: string;
+  cc_level: string;
+  codeforces_handle: string | null;
+  pending_handle: string | null;
+  verification_status: string | null;
+  current_rating: number | null;
+  rank: string | null;
+  memberships: { organizationId: string; organizationName: string; role: string }[];
 }
 interface Organization {
   id: string;
@@ -67,12 +84,17 @@ export default function AdminPage() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [codeforcesHandle, setCodeforcesHandle] = useState('');
+  const [initialCcLevel, setInitialCcLevel] = useState('800');
+  const [classId, setClassId] = useState('');
   const [resetUserId, setResetUserId] = useState('');
   const [resetPassword, setResetPassword] = useState('');
   const [organizationName, setOrganizationName] = useState('');
   const [organizationSlug, setOrganizationSlug] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState('MEMBER');
+  const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => api<{ memberships: Membership[] }>('/me'),
@@ -142,6 +164,28 @@ export default function AdminPage() {
       setReason('');
     },
   });
+  const importStudents = useMutation({
+    mutationFn: async () => {
+      if (!importFile) throw new Error('Chọn file CSV hoặc XLSX');
+      const form = new FormData();
+      form.append('file', importFile);
+      return api<{
+        created: number;
+        failed: number;
+        total: number;
+        results: { row: number; email: string; success: boolean; message?: string }[];
+      }>(`/organizations/${organizationId}/students/import`, {
+        method: 'POST',
+        body: form,
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+      ]);
+    },
+  });
   if (me.isPending) return <LoadingState label="Đang kiểm tra quyền quản trị…" />;
   if (me.error) return <ErrorState error={me.error} />;
   const memberships =
@@ -153,6 +197,10 @@ export default function AdminPage() {
         role: 'SYSTEM_ADMIN',
       })) ?? [])
     : memberships;
+  const selectedOrganization = organizationOptions.find(
+    (item) => item.organization_id === organizationId,
+  );
+  const canApproveHandle = isSystemAdmin || selectedOrganization?.role === 'ORG_ADMIN';
   const selectTarget = targetId || members.data?.members[0]?.user_id || '';
   const submitPoints = (event: FormEvent) => {
     event.preventDefault();
@@ -173,10 +221,10 @@ export default function AdminPage() {
     ...(isSystemAdmin
       ? [
           { id: 'accounts', label: 'Tài khoản' },
-          { id: 'organizations', label: 'Tổ chức' },
+          { id: 'organizations', label: 'Lớp học' },
         ]
       : []),
-    { id: 'members', label: 'Thành viên' },
+    { id: 'members', label: 'Học sinh' },
     { id: 'points', label: 'Điểm & CC Base' },
     { id: 'audit', label: 'Nhật ký' },
     ...(isSystemAdmin ? [{ id: 'rewards', label: 'Phần thưởng' }] : []),
@@ -186,10 +234,10 @@ export default function AdminPage() {
       <PageTitle
         eyebrow="CONTROL ROOM"
         title="Quản trị Cầy Code"
-        detail="Quản lý tài khoản, tổ chức, thành viên và nền kinh tế CC Point trong một nơi."
+        detail="Quản lý tài khoản, lớp học, học sinh và nền kinh tế CC Point trong một nơi."
         action={
           <select
-            aria-label="Tổ chức quản trị"
+            aria-label="Lớp quản trị"
             onChange={(event) => setOrganizationId(event.target.value)}
             value={organizationId}
           >
@@ -233,7 +281,16 @@ export default function AdminPage() {
                     event.preventDefault();
                     mutation.mutate({
                       path: '/admin/users',
-                      body: { email, password, fullName, displayName, systemRole: 'USER' },
+                      body: {
+                        email,
+                        password,
+                        fullName,
+                        displayName,
+                        systemRole: 'USER',
+                        initialCcLevel: Number(initialCcLevel),
+                        ...(classId ? { organizationId: classId } : {}),
+                        ...(codeforcesHandle ? { codeforcesHandle } : {}),
+                      },
                     });
                   }}
                 >
@@ -274,6 +331,37 @@ export default function AdminPage() {
                         required
                         value={displayName}
                       />
+                    </label>
+                    <label className="field">
+                      <span>Tài khoản Codeforces</span>
+                      <input
+                        onChange={(e) => setCodeforcesHandle(e.target.value)}
+                        pattern="[A-Za-z0-9_.-]{3,24}"
+                        placeholder="Có thể để trống"
+                        value={codeforcesHandle}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Mức ban đầu</span>
+                      <input
+                        max="10000"
+                        min="0"
+                        onChange={(e) => setInitialCcLevel(e.target.value)}
+                        required
+                        type="number"
+                        value={initialCcLevel}
+                      />
+                    </label>
+                    <label className="field form-span-2">
+                      <span>Lớp của học sinh</span>
+                      <select onChange={(e) => setClassId(e.target.value)} value={classId}>
+                        <option value="">Chưa xếp lớp</option>
+                        {organizations.data?.organizations.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
                   <button className="button-primary mt-5" type="submit">
@@ -326,6 +414,111 @@ export default function AdminPage() {
                   </button>
                 </form>
               </div>
+              {editingUser && (
+                <form
+                  className="panel p-6"
+                  key={editingUser.id}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    const field = (name: string) => {
+                      const value = form.get(name);
+                      return typeof value === 'string' ? value : '';
+                    };
+                    const nextHandle = field('codeforcesHandle').trim();
+                    mutation.mutate({
+                      path: `/admin/users/${editingUser.id}`,
+                      method: 'PATCH',
+                      body: {
+                        email: field('email'),
+                        fullName: field('fullName'),
+                        displayName: field('displayName'),
+                        initialCcLevel: Number(field('initialCcLevel')),
+                        classId: field('classId') || null,
+                        ...(nextHandle ? { codeforcesHandle: nextHandle } : {}),
+                        reason: field('reason'),
+                      },
+                    });
+                  }}
+                >
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">EDIT STUDENT</p>
+                      <h2>Sửa thông tin học sinh</h2>
+                    </div>
+                    <button
+                      className="button-secondary"
+                      onClick={() => setEditingUser(null)}
+                      type="button"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                  <div className="form-grid mt-5">
+                    <label className="field">
+                      <span>Email đăng nhập</span>
+                      <input defaultValue={editingUser.email} name="email" required type="email" />
+                    </label>
+                    <label className="field">
+                      <span>Họ và tên</span>
+                      <input defaultValue={editingUser.full_name} name="fullName" required />
+                    </label>
+                    <label className="field">
+                      <span>Tên hiển thị</span>
+                      <input defaultValue={editingUser.display_name} name="displayName" required />
+                    </label>
+                    <label className="field">
+                      <span>Mức ban đầu</span>
+                      <input
+                        defaultValue={editingUser.initial_cc_level ?? '800'}
+                        max="10000"
+                        min="0"
+                        name="initialCcLevel"
+                        required
+                        type="number"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Tài khoản Codeforces</span>
+                      <input
+                        defaultValue={editingUser.codeforces_handle ?? ''}
+                        name="codeforcesHandle"
+                        pattern="[A-Za-z0-9_.-]{3,24}"
+                        placeholder="Chưa liên kết"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Lớp của học sinh</span>
+                      <select
+                        defaultValue={
+                          editingUser.memberships.find(({ role }) => role === 'MEMBER')
+                            ?.organizationId ?? ''
+                        }
+                        name="classId"
+                      >
+                        <option value="">Chưa xếp lớp</option>
+                        {organizations.data?.organizations.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field form-span-2">
+                      <span>Lý do cập nhật</span>
+                      <textarea
+                        defaultValue="Admin cập nhật hồ sơ học sinh"
+                        minLength={3}
+                        name="reason"
+                        required
+                      />
+                    </label>
+                  </div>
+                  <button className="button-primary mt-5" type="submit">
+                    Lưu thông tin học sinh
+                  </button>
+                </form>
+              )}
               <div className="panel overflow-hidden">
                 <div className="management-header">
                   <strong>{users.data?.total ?? 0} tài khoản</strong>
@@ -340,7 +533,19 @@ export default function AdminPage() {
                         <Avatar name={item.display_name} size="sm" url={item.avatar_url} />
                         <div>
                           <strong>{item.display_name}</strong>
-                          <p>{item.email}</p>
+                          <p>
+                            {item.email} · CC Base {item.initial_cc_level ?? '800'} ·{' '}
+                            {item.memberships.length} lớp
+                          </p>
+                          {item.codeforces_handle && (
+                            <CodeforcesHandle
+                              handle={item.codeforces_handle}
+                              rating={item.current_rating}
+                            />
+                          )}
+                          {item.pending_handle && (
+                            <p className="pending-copy">Chờ duyệt: @{item.pending_handle}</p>
+                          )}
                         </div>
                       </div>
                       <select
@@ -378,9 +583,13 @@ export default function AdminPage() {
                         <option>USER</option>
                         <option>SYSTEM_ADMIN</option>
                       </select>
-                      <span className="text-xs text-[var(--muted)]">
-                        {item.memberships.length} tổ chức
-                      </span>
+                      <button
+                        className="button-secondary"
+                        onClick={() => setEditingUser(item)}
+                        type="button"
+                      >
+                        Sửa
+                      </button>
                     </div>
                   ))
                 )}
@@ -405,9 +614,9 @@ export default function AdminPage() {
                 }}
               >
                 <p className="eyebrow">NEW ORGANIZATION</p>
-                <h2 className="mt-2 text-xl font-black">Tạo tổ chức</h2>
+                <h2 className="mt-2 text-xl font-black">Tạo lớp học</h2>
                 <label className="field mt-5">
-                  <span>Tên tổ chức</span>
+                  <span>Tên lớp học</span>
                   <input
                     onChange={(e) => setOrganizationName(e.target.value)}
                     required
@@ -426,7 +635,7 @@ export default function AdminPage() {
                   />
                 </label>
                 <button className="button-primary mt-5" type="submit">
-                  Tạo tổ chức
+                  Tạo lớp học
                 </button>
               </form>
               <div className="panel overflow-hidden">
@@ -490,6 +699,67 @@ export default function AdminPage() {
           )}
           {tab === 'members' && (
             <section className="space-y-4">
+              <form
+                className="panel import-panel p-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  importStudents.mutate();
+                }}
+              >
+                <div>
+                  <p className="eyebrow">BULK IMPORT</p>
+                  <h2 className="mt-2 text-xl font-black">Import danh sách học sinh</h2>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Nhận CSV/XLSX, tối đa 500 học sinh. Tài khoản được thêm trực tiếp vào lớp đang
+                    chọn.
+                  </p>
+                  <a
+                    className="template-link"
+                    download
+                    href="/templates/danh-sach-hoc-sinh-mau.csv"
+                  >
+                    ⇩ Tải file mẫu CSV
+                  </a>
+                </div>
+                <label className="field">
+                  <span>File danh sách</span>
+                  <input
+                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+                    required
+                    type="file"
+                  />
+                </label>
+                <button
+                  className="button-primary"
+                  disabled={!organizationId || importStudents.isPending}
+                  type="submit"
+                >
+                  {importStudents.isPending ? 'Đang import…' : 'Import vào lớp'}
+                </button>
+              </form>
+              {importStudents.error && (
+                <p className="notice error">{importStudents.error.message}</p>
+              )}
+              {importStudents.data && (
+                <div className="notice success import-result">
+                  <strong>
+                    Đã tạo {importStudents.data.created}/{importStudents.data.total} học sinh.
+                  </strong>
+                  {importStudents.data.failed > 0 && (
+                    <ul>
+                      {importStudents.data.results
+                        .filter(({ success }) => !success)
+                        .map((result) => (
+                          <li key={`${result.row}-${result.email}`}>
+                            Dòng {result.row} · {result.email || 'không có tài khoản'}:{' '}
+                            {result.message}
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {isSystemAdmin && (
                 <form
                   className="panel member-add-form p-4"
@@ -502,7 +772,7 @@ export default function AdminPage() {
                   }}
                 >
                   <label className="field">
-                    <span>Thêm tài khoản vào tổ chức</span>
+                    <span>Thêm tài khoản vào lớp</span>
                     <select
                       onChange={(event) => setMemberUserId(event.target.value)}
                       required
@@ -517,7 +787,7 @@ export default function AdminPage() {
                     </select>
                   </label>
                   <label className="field">
-                    <span>Vai trò tổ chức</span>
+                    <span>Vai trò trong lớp</span>
                     <select
                       onChange={(event) => setMemberRole(event.target.value)}
                       value={memberRole}
@@ -528,7 +798,7 @@ export default function AdminPage() {
                     </select>
                   </label>
                   <button className="button-primary" type="submit">
-                    Thêm thành viên
+                    Thêm vào lớp
                   </button>
                 </form>
               )}
@@ -537,15 +807,33 @@ export default function AdminPage() {
                   <LoadingState label="Đang tải thành viên…" />
                 ) : !members.data?.members.length ? (
                   <EmptyState
-                    title="Chưa có thành viên"
-                    detail="Hãy thêm học sinh vào tổ chức qua API quản trị."
+                    title="Chưa có học sinh"
+                    detail="Thêm từng tài khoản hoặc import danh sách CSV/XLSX."
                   />
                 ) : (
                   members.data.members.map((member) => (
-                    <div className="admin-row" key={member.user_id}>
+                    <div className="admin-row student-row" key={member.user_id}>
                       <div className="member">
                         <Avatar name={member.display_name} size="sm" url={member.avatar_url} />
-                        <strong>{member.display_name}</strong>
+                        <div>
+                          <strong>{member.display_name}</strong>
+                          <p>
+                            {member.full_name} · {member.email}
+                          </p>
+                          <p>
+                            CC Base {member.initial_cc_level ?? '800'} · CC Level{' '}
+                            {member.cc_level ?? '800'}
+                          </p>
+                          {member.codeforces_handle && (
+                            <CodeforcesHandle
+                              handle={member.codeforces_handle}
+                              rating={member.current_rating}
+                            />
+                          )}
+                          {member.pending_handle && (
+                            <p className="pending-copy">Yêu cầu đổi: @{member.pending_handle}</p>
+                          )}
+                        </div>
                       </div>
                       <StatusPill value={member.status} />
                       <select
@@ -566,18 +854,53 @@ export default function AdminPage() {
                         <option>TEACHER</option>
                         <option>ORG_ADMIN</option>
                       </select>
-                      <button
-                        className="button-secondary"
-                        onClick={() =>
-                          mutation.mutate({
-                            path: `/organizations/${organizationId}/codeforces-accounts/${member.user_id}/verify`,
-                            body: { reason: reason || 'Xác minh trực tiếp bởi giáo viên' },
-                          })
-                        }
-                        type="button"
-                      >
-                        Xác minh CF
-                      </button>
+                      <div className="student-actions">
+                        {member.pending_handle && canApproveHandle ? (
+                          <>
+                            <button
+                              className="button-primary"
+                              onClick={() =>
+                                mutation.mutate({
+                                  path: `/organizations/${organizationId}/codeforces-accounts/${member.user_id}/approve-change`,
+                                  body: { reason: reason || 'Admin duyệt đổi Codeforces handle' },
+                                })
+                              }
+                              type="button"
+                            >
+                              Duyệt đổi CF
+                            </button>
+                            <button
+                              className="button-secondary"
+                              onClick={() =>
+                                mutation.mutate({
+                                  path: `/organizations/${organizationId}/codeforces-accounts/${member.user_id}/reject-change`,
+                                  body: { reason: reason || 'Admin từ chối đổi Codeforces handle' },
+                                })
+                              }
+                              type="button"
+                            >
+                              Từ chối
+                            </button>
+                          </>
+                        ) : member.verification_status === 'UNVERIFIED' ? (
+                          <button
+                            className="button-secondary"
+                            onClick={() =>
+                              mutation.mutate({
+                                path: `/organizations/${organizationId}/codeforces-accounts/${member.user_id}/verify`,
+                                body: { reason: reason || 'Xác minh trực tiếp bởi giáo viên' },
+                              })
+                            }
+                            type="button"
+                          >
+                            Xác minh CF
+                          </button>
+                        ) : member.verification_status ? (
+                          <StatusPill value={member.verification_status} />
+                        ) : (
+                          <span className="text-xs text-[var(--muted)]">Chưa có Codeforces</span>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}

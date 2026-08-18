@@ -209,9 +209,10 @@ describe('submission ingestion', () => {
     ];
     const environment = { values: { BACKFILL_PAGE_SIZE: 2 } } as EnvironmentService;
     const failingClient = {
+      userInfo: () => Promise.resolve({ handle: 'student', rating: 1200 }),
       userStatus: (_handle: string, from: number) =>
         from === 1 ? Promise.resolve(pages.slice(0, 2)) : Promise.reject(new Error('crash')),
-    } as CodeforcesClient;
+    } as unknown as CodeforcesClient;
     const job = {
       userId: user.id,
       accountId: account.id,
@@ -235,9 +236,10 @@ describe('submission ingestion', () => {
     expect(checkpoint?.backfill_next_from).toBe(3);
 
     const resumeClient = {
+      userInfo: () => Promise.resolve({ handle: 'student', rating: 1200 }),
       userStatus: (_handle: string, from: number) =>
         Promise.resolve(from === 3 ? pages.slice(2) : []),
-    } as CodeforcesClient;
+    } as unknown as CodeforcesClient;
     const resumedProcessor = new SyncProcessorService(
       resumeClient,
       service,
