@@ -8,9 +8,9 @@ Use a Linux host with Docker Engine and Docker Compose v2. Clone the repository,
 POSTGRES_DB=cc_tracker
 POSTGRES_USER=cc_app
 POSTGRES_PASSWORD=<strong-random-secret>
-PUBLIC_ORIGIN=https://cc.example.edu.vn
+PUBLIC_ORIGIN=https://cc.mrtee.vn
 METRICS_TOKEN=<at-least-32-random-characters>
-HTTP_PORT=80
+HTTP_PORT=8080
 ```
 
 Build and start from a clean checkout:
@@ -21,7 +21,17 @@ docker compose --env-file .env -f compose.production.yml up -d
 docker compose --env-file .env -f compose.production.yml ps
 ```
 
-The one-shot `migrate` service must complete successfully before API and worker start. PostgreSQL and Redis have no published host ports. Terminate TLS at the host/cloud load balancer, or adapt the Caddy address and certificate configuration for direct TLS.
+The one-shot `migrate` service must complete successfully before API and worker start. PostgreSQL
+and Redis have no published host ports. The web container only binds to `127.0.0.1:8080`; install
+`deploy/nginx/cc.mrtee.vn.conf` in the host Nginx and use Certbot for TLS after the DNS record points
+to the server.
+
+```bash
+sudo cp deploy/nginx/cc.mrtee.vn.conf /etc/nginx/sites-available/cc.mrtee.vn
+sudo ln -s /etc/nginx/sites-available/cc.mrtee.vn /etc/nginx/sites-enabled/cc.mrtee.vn
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d cc.mrtee.vn
+```
 
 Bootstrap the first administrator once:
 

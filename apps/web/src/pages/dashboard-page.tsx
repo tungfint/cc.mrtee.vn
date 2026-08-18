@@ -91,7 +91,12 @@ export default function DashboardPage() {
         detail="Một lát cắt gọn về năng lực, nhịp luyện tập và thành tích hiện tại của bạn."
         action={
           <div className="dashboard-identity">
-            <Avatar name={profile.display_name} size="xl" url={profile.avatar_url} />
+            <Avatar
+              name={profile.display_name}
+              rating={profile.current_rating}
+              size="xl"
+              url={profile.avatar_url}
+            />
             <div>
               {profile.codeforces_handle ? (
                 <CodeforcesHandle

@@ -592,7 +592,12 @@ export default function AdminPage() {
                   users.data?.users.map((item) => (
                     <div className="account-row" key={item.id}>
                       <div className="member">
-                        <Avatar name={item.display_name} size="sm" url={item.avatar_url} />
+                        <Avatar
+                          name={item.display_name}
+                          rating={item.current_rating}
+                          size="sm"
+                          url={item.avatar_url}
+                        />
                         <div>
                           <strong>{item.display_name}</strong>
                           <p>
@@ -876,7 +881,12 @@ export default function AdminPage() {
                   members.data.members.map((member) => (
                     <div className="admin-row student-row" key={member.user_id}>
                       <div className="member">
-                        <Avatar name={member.display_name} size="sm" url={member.avatar_url} />
+                        <Avatar
+                          name={member.display_name}
+                          rating={member.current_rating}
+                          size="sm"
+                          url={member.avatar_url}
+                        />
                         <div>
                           <strong>{member.display_name}</strong>
                           <p>
@@ -1235,7 +1245,12 @@ export default function AdminPage() {
                 {members.data?.members.map((member) => (
                   <div className="sync-account-row" key={member.user_id}>
                     <div className="member">
-                      <Avatar name={member.display_name} size="sm" url={member.avatar_url} />
+                      <Avatar
+                        name={member.display_name}
+                        rating={member.current_rating}
+                        size="sm"
+                        url={member.avatar_url}
+                      />
                       <div>
                         <strong>{member.display_name}</strong>
                         <p>@{member.codeforces_handle ?? 'Chưa liên kết Codeforces'}</p>

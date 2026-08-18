@@ -3,7 +3,15 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { Avatar } from './ui';
 
-export function AvatarUploader({ name, currentUrl }: { name: string; currentUrl: string | null }) {
+export function AvatarUploader({
+  name,
+  currentUrl,
+  rating,
+}: {
+  name: string;
+  currentUrl: string | null;
+  rating?: number | null;
+}) {
   const queryClient = useQueryClient();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sourceUrl, setSourceUrl] = useState('');
@@ -75,7 +83,7 @@ export function AvatarUploader({ name, currentUrl }: { name: string; currentUrl:
   return (
     <section className="avatar-upload-panel">
       <div className="avatar-upload-heading">
-        <Avatar name={name} size="xl" url={currentUrl} />
+        <Avatar name={name} rating={rating} size="xl" url={currentUrl} />
         <div>
           <strong>Ảnh đại diện</strong>
           <p>JPG, PNG hoặc WebP · tối đa 5 MB</p>

@@ -100,7 +100,11 @@ export default function AccountPage() {
       <section className="profile-layout">
         <div className="space-y-6">
           <div className="panel p-6">
-            <AvatarUploader currentUrl={user.avatar_url} name={displayName || user.display_name} />
+            <AvatarUploader
+              currentUrl={user.avatar_url}
+              name={displayName || user.display_name}
+              rating={user.current_rating}
+            />
             <form
               className="mt-6"
               onSubmit={(event) => {

@@ -19,7 +19,11 @@ export function AppShell({ user }: { user: SessionUser }) {
     queryKey: ['me'],
     queryFn: () =>
       api<{
-        user: { display_name: string; avatar_url: string | null };
+        user: {
+          display_name: string;
+          avatar_url: string | null;
+          current_rating: number | null;
+        };
         memberships: { role: string }[];
       }>('/me'),
   });
@@ -43,7 +47,7 @@ export function AppShell({ user }: { user: SessionUser }) {
     <div className="app-frame">
       <aside className="sidebar">
         <NavLink className="brand" to="/">
-          <span className="brand-mark">CC</span>
+          <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
             <strong>Cầy Code</strong>
             <small>MrTee.vn</small>
@@ -76,6 +80,7 @@ export function AppShell({ user }: { user: SessionUser }) {
           </button>
           <Avatar
             name={profile.data?.user.display_name ?? user.displayName}
+            rating={profile.data?.user.current_rating}
             size="sm"
             url={profile.data?.user.avatar_url}
           />

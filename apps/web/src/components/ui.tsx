@@ -3,10 +3,12 @@ import type { ReactNode } from 'react';
 export function Avatar({
   name,
   url,
+  rating,
   size = 'md',
 }: {
   name: string;
   url?: string | null | undefined;
+  rating?: number | null | undefined;
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
   const initials = name
@@ -17,11 +19,16 @@ export function Avatar({
     .join('')
     .toUpperCase();
   return (
-    <span className={`avatar avatar-${size}`} aria-label={`Avatar của ${name}`}>
-      <span>{initials || 'CC'}</span>
+    <span
+      className={`avatar avatar-${size} ${codeforcesColor(rating)}`}
+      aria-label={`Avatar của ${name}`}
+    >
+      <span className="avatar-initials">{initials || 'CC'}</span>
+      <img alt="" className="avatar-default" src="/brand/cay-code-logo.webp" />
       {url && (
         <img
           alt=""
+          className="avatar-custom"
           onError={(event) => {
             event.currentTarget.hidden = true;
           }}

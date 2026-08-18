@@ -87,16 +87,12 @@ button:disabled {
   color: inherit;
   text-decoration: none;
 }
-.brand-mark {
-  display: grid;
+.brand-logo {
   width: 42px;
   height: 42px;
-  place-items: center;
-  border-radius: 13px;
-  background: var(--accent);
-  color: #041011;
-  font-weight: 950;
-  letter-spacing: -0.04em;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
   box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .brand strong,
@@ -165,20 +161,22 @@ button:disabled {
   color: var(--muted);
 }
 .avatar {
+  --avatar-accent: var(--accent);
   position: relative;
   display: inline-grid;
   flex: none;
   place-items: center;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
-  border-radius: 32%;
+  border: 2px solid color-mix(in srgb, var(--avatar-accent) 75%, var(--line));
+  border-radius: 50%;
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--accent) 22%, var(--surface-2)),
     var(--surface-2)
   );
-  color: var(--accent);
+  color: var(--avatar-accent);
   font-weight: 950;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--avatar-accent) 28%, transparent);
 }
 .avatar img {
   position: absolute;
@@ -186,6 +184,15 @@ button:disabled {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.avatar-default {
+  z-index: 1;
+}
+.avatar-custom {
+  z-index: 2;
+}
+.avatar-initials {
+  z-index: 0;
 }
 .avatar-sm {
   width: 36px;
@@ -205,7 +212,6 @@ button:disabled {
 .avatar-xl {
   width: 104px;
   height: 104px;
-  border-radius: 28px;
   font-size: 25px;
 }
 .cf-handle {
@@ -222,31 +228,53 @@ button:disabled {
 .cf-handle-large {
   font-size: 23px;
 }
-.cf-newbie {
+.cf-handle.cf-newbie {
   color: #94a3b8;
 }
-.cf-pupil {
+.cf-handle.cf-pupil {
   color: #22c55e;
 }
-.cf-specialist {
+.cf-handle.cf-specialist {
   color: #06b6d4;
 }
-.cf-expert {
+.cf-handle.cf-expert {
   color: #3b82f6;
 }
-.cf-candidate-master {
+.cf-handle.cf-candidate-master {
   color: #a855f7;
 }
-.cf-master {
+.cf-handle.cf-master {
   color: #f59e0b;
 }
-.cf-grandmaster {
+.cf-handle.cf-grandmaster {
   color: #ef4444;
 }
-.cf-legendary {
+.cf-handle.cf-legendary {
   background: linear-gradient(90deg, #111827 0 16%, #ef4444 16% 100%);
   background-clip: text;
   color: transparent;
+}
+.avatar.cf-newbie {
+  --avatar-accent: #94a3b8;
+}
+.avatar.cf-pupil {
+  --avatar-accent: #22c55e;
+}
+.avatar.cf-specialist {
+  --avatar-accent: #06b6d4;
+}
+.avatar.cf-expert {
+  --avatar-accent: #3b82f6;
+}
+.avatar.cf-candidate-master {
+  --avatar-accent: #a855f7;
+}
+.avatar.cf-master {
+  --avatar-accent: #f59e0b;
+}
+.avatar.cf-grandmaster,
+.avatar.cf-legendary {
+  --avatar-accent: #ef4444;
 }
 .dashboard-identity {
   display: flex;

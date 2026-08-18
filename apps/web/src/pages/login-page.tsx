@@ -25,7 +25,7 @@ export default function LoginPage() {
     <main className="login-page">
       <section className="login-story">
         <div className="brand text-white">
-          <span className="brand-mark">CC</span>
+          <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
             <strong>Cầy Code</strong>
             <small>MrTee.vn</small>

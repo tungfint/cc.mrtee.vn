@@ -21,6 +21,7 @@ interface Board {
     userId: string;
     displayName: string;
     avatarUrl: string | null;
+    currentRating: number | null;
     ccLevel: string;
     seasonScore: string;
     solved: number;
@@ -119,7 +120,12 @@ export default function LeaderboardPage() {
                 {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : `#${entry.rank}`}
               </span>
               <span className="member">
-                <Avatar name={entry.displayName} size="sm" url={entry.avatarUrl} />
+                <Avatar
+                  name={entry.displayName}
+                  rating={entry.currentRating}
+                  size="sm"
+                  url={entry.avatarUrl}
+                />
                 <strong>{entry.displayName}</strong>
               </span>
               <span data-label="CC Level">{formatNumber(entry.ccLevel, 2)}</span>

@@ -10,6 +10,7 @@ interface LeaderboardRow {
   user_id: string;
   display_name: string;
   avatar_url: string | null;
+  current_rating: number | null;
   cc_level: string;
   season_score: string;
   qualifying_solves: number;
@@ -157,6 +158,7 @@ export class InsightsController {
     const offset = (input.page - 1) * input.pageSize;
     const rows = await this.database.sql<LeaderboardRow[]>`
       SELECT users.id AS user_id, users.display_name, users.avatar_url, users.timezone,
+        accounts.current_rating,
         COALESCE(skill.cc_level, 800)::text AS cc_level,
         COALESCE(totals.score, 0)::text AS season_score,
         COALESCE(totals.qualifying_solves, 0)::int AS qualifying_solves,
@@ -166,6 +168,7 @@ export class InsightsController {
       FROM users
       ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE'` : this.database.sql``}
       LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
+      LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
       LEFT JOIN season_user_totals AS totals
         ON totals.user_id = users.id AND totals.season_id IS NOT DISTINCT FROM ${seasonId}
       LEFT JOIN season_user_snapshots AS snapshots
@@ -198,6 +201,7 @@ export class InsightsController {
         userId: row.user_id,
         displayName: row.display_name,
         avatarUrl: row.avatar_url,
+        currentRating: row.current_rating,
         ccLevel: row.cc_level,
         seasonScore: row.season_score,
         solved: row.qualifying_solves,
