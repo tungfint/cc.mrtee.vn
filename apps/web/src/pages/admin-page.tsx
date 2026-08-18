@@ -261,6 +261,8 @@ export default function AdminPage() {
     (item) => item.organization_id === organizationId,
   );
   const canApproveHandle = isSystemAdmin || selectedOrganization?.role === 'ORG_ADMIN';
+  const noOrganizationSelected =
+    !organizationId && ['members', 'points', 'sync', 'audit'].includes(tab);
   const selectTarget = targetId || members.data?.members[0]?.user_id || '';
   const selectSyncTarget = syncUserId || syncEligibleMembers[0]?.user_id || '';
   const submitPoints = (event: FormEvent) => {
@@ -333,6 +335,12 @@ export default function AdminPage() {
           {mutation.error && <p className="notice error">{mutation.error.message}</p>}
           {mutation.isSuccess && (
             <p className="notice success">Thao tác đã hoàn tất và được audit.</p>
+          )}
+          {noOrganizationSelected && (
+            <EmptyState
+              title="Chưa có lớp học"
+              detail="Hãy mở tab Lớp học và tạo lớp đầu tiên trước khi quản lý học sinh."
+            />
           )}
           {tab === 'accounts' && isSystemAdmin && (
             <section className="space-y-6">
@@ -764,7 +772,7 @@ export default function AdminPage() {
               </div>
             </section>
           )}
-          {tab === 'members' && (
+          {tab === 'members' && !noOrganizationSelected && (
             <section className="space-y-4">
               <form
                 className="panel import-panel p-5"
@@ -979,7 +987,7 @@ export default function AdminPage() {
               </div>
             </section>
           )}
-          {tab === 'points' && (
+          {tab === 'points' && !noOrganizationSelected && (
             <div className="space-y-6">
               <div className="grid gap-6 lg:grid-cols-2">
                 <form className="panel p-6" onSubmit={submitPoints}>
@@ -1170,7 +1178,7 @@ export default function AdminPage() {
               </form>
             </div>
           )}
-          {tab === 'sync' && (
+          {tab === 'sync' && !noOrganizationSelected && (
             <section className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
               <form
                 className="panel p-6"
@@ -1269,7 +1277,7 @@ export default function AdminPage() {
               </div>
             </section>
           )}
-          {tab === 'audit' && (
+          {tab === 'audit' && !noOrganizationSelected && (
             <div className="panel overflow-hidden">
               {audits.isPending ? (
                 <LoadingState label="Đang tải audit…" />
