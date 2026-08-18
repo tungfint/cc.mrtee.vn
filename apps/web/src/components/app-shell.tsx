@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { api, type SessionUser } from '../lib/api';
 import { Avatar } from './ui';
@@ -16,6 +17,7 @@ const links = [
 export function AppShell({ user }: { user: SessionUser }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? 'dark');
   const profile = useQuery({
     queryKey: ['me'],
     queryFn: () =>
@@ -39,10 +41,14 @@ export function AppShell({ user }: { user: SessionUser }) {
     },
   });
   const toggleTheme = () => {
-    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    const themes = ['dark', 'light', 'pink'];
+    const next = themes[(themes.indexOf(theme) + 1) % themes.length] ?? 'dark';
     document.documentElement.dataset.theme = next;
     localStorage.setItem('cc-theme', next);
+    setTheme(next);
   };
+  const themeLabel = { dark: 'Tối', light: 'Sáng', pink: 'Hồng' }[theme] ?? 'Tối';
+  const themeIcon = { dark: '◐', light: '☀', pink: '♥' }[theme] ?? '◐';
 
   return (
     <div className="app-frame">
@@ -76,8 +82,14 @@ export function AppShell({ user }: { user: SessionUser }) {
           )}
         </nav>
         <div className="sidebar-footer">
-          <button className="icon-button" onClick={toggleTheme} title="Đổi giao diện" type="button">
-            ◐
+          <button
+            aria-label={`Giao diện hiện tại: ${themeLabel}. Nhấn để đổi màu.`}
+            className="icon-button theme-button"
+            onClick={toggleTheme}
+            title={`Giao diện: ${themeLabel}`}
+            type="button"
+          >
+            {themeIcon}
           </button>
           <Avatar
             name={profile.data?.user.display_name ?? user.displayName}

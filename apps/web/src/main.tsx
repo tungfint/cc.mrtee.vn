@@ -5,7 +5,10 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './app';
 import './index.css';
 
-document.documentElement.dataset.theme = localStorage.getItem('cc-theme') ?? 'dark';
+const savedTheme = localStorage.getItem('cc-theme');
+document.documentElement.dataset.theme = ['dark', 'light', 'pink'].includes(savedTheme ?? '')
+  ? (savedTheme ?? 'dark')
+  : 'dark';
 
 const queryClient = new QueryClient({
   defaultOptions: {

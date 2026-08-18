@@ -34,6 +34,18 @@
   --accent-strong: #057574;
 }
 
+:root[data-theme='pink'] {
+  color-scheme: light;
+  --bg: #fff3f8;
+  --surface: #fffafd;
+  --surface-2: #fbe6f0;
+  --text: #381727;
+  --muted: #8b6576;
+  --line: #edc9d8;
+  --accent: #e83e8c;
+  --accent-strong: #c92772;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -159,6 +171,17 @@ button:disabled {
   border-radius: 10px;
   background: var(--surface-2);
   color: var(--muted);
+}
+.theme-button {
+  color: var(--accent);
+}
+:root[data-theme='pink'] .main-content {
+  background-image:
+    radial-gradient(circle at 90% 0%, rgba(232, 62, 140, 0.13), transparent 28%),
+    radial-gradient(circle at 12% 90%, rgba(255, 158, 197, 0.12), transparent 25%);
+}
+:root[data-theme='pink'] .sidebar {
+  background: color-mix(in srgb, #fffafd 94%, transparent);
 }
 .avatar {
   --avatar-accent: var(--accent);
