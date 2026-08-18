@@ -9,6 +9,7 @@ import { DatabaseService } from '../database/database.service';
 interface LeaderboardRow {
   user_id: string;
   display_name: string;
+  avatar_url: string | null;
   cc_level: string;
   season_score: string;
   qualifying_solves: number;
@@ -34,9 +35,10 @@ export class InsightsController {
 
   @Get('me/dashboard')
   async dashboard(@CurrentUser() user: AuthUser) {
-    const [profile, seasons, streak, tags, activity, transactions, awards] = await Promise.all([
-      this.database.sql`
-        SELECT users.id, users.display_name, users.full_name, users.timezone,
+    const [profile, seasons, streak, tags, activity, transactions, awards, fulfilledRewards] =
+      await Promise.all([
+        this.database.sql`
+        SELECT users.id, users.display_name, users.full_name, users.avatar_url, users.timezone,
           accounts.handle AS codeforces_handle, accounts.verification_status,
           accounts.sync_status, accounts.last_sync_at, accounts.next_sync_at,
           COALESCE(skill.cc_level, 800)::text AS cc_level,
@@ -48,7 +50,7 @@ export class InsightsController {
         LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
         WHERE users.id = ${user.userId}
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT seasons.id, seasons.name, seasons.organization_id, seasons.status,
           seasons.start_at, seasons.end_at,
           COALESCE(totals.score, 0)::text AS score,
@@ -68,8 +70,8 @@ export class InsightsController {
         ORDER BY (seasons.organization_id IS NOT NULL) DESC, seasons.start_at DESC
         LIMIT 1
       `,
-      this.streak(user.userId),
-      this.database.sql`
+        this.streak(user.userId),
+        this.database.sql`
         SELECT tag, count(DISTINCT solves.problem_key)::int AS solved_count,
           round(avg(solves.rating_snapshot), 2)::text AS average_rating,
           max(solves.rating_snapshot)::int AS max_rating
@@ -79,7 +81,7 @@ export class InsightsController {
         WHERE solves.user_id = ${user.userId}
         GROUP BY tag ORDER BY solved_count DESC, tag LIMIT 20
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT solves.problem_key, problems.name, solves.rating_snapshot,
           solves.first_solved_at, problems.tags
         FROM user_problem_solves AS solves
@@ -87,19 +89,26 @@ export class InsightsController {
         WHERE solves.user_id = ${user.userId}
         ORDER BY solves.first_solved_at DESC LIMIT 10
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT id, type, amount::text, description, event_at, created_at
         FROM point_transactions WHERE user_id = ${user.userId}
         ORDER BY created_at DESC LIMIT 10
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT awards.award_type, awards.title, awards.awarded_at, seasons.name AS season_name
         FROM season_awards AS awards
         JOIN seasons ON seasons.id = awards.season_id
         WHERE awards.user_id = ${user.userId}
         ORDER BY awards.awarded_at DESC LIMIT 8
       `,
-    ]);
+        this.database.sql`
+        SELECT rewards.name, rewards.description, rewards.image_url, orders.reviewed_at AS earned_at
+        FROM reward_orders AS orders
+        JOIN rewards ON rewards.id = orders.reward_id
+        WHERE orders.user_id = ${user.userId} AND orders.status = 'FULFILLED'
+        ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 8
+      `,
+      ]);
     return {
       profile: profile[0] ?? null,
       season: seasons[0] ?? null,
@@ -108,6 +117,7 @@ export class InsightsController {
       activity,
       transactions,
       awards,
+      fulfilledRewards,
     };
   }
 
@@ -145,7 +155,7 @@ export class InsightsController {
     }
     const offset = (input.page - 1) * input.pageSize;
     const rows = await this.database.sql<LeaderboardRow[]>`
-      SELECT users.id AS user_id, users.display_name, users.timezone,
+      SELECT users.id AS user_id, users.display_name, users.avatar_url, users.timezone,
         COALESCE(skill.cc_level, 800)::text AS cc_level,
         COALESCE(totals.score, 0)::text AS season_score,
         COALESCE(totals.qualifying_solves, 0)::int AS qualifying_solves,
@@ -186,6 +196,7 @@ export class InsightsController {
         rank: row.final_rank ?? offset + index + 1,
         userId: row.user_id,
         displayName: row.display_name,
+        avatarUrl: row.avatar_url,
         ccLevel: row.cc_level,
         seasonScore: row.season_score,
         solved: row.qualifying_solves,

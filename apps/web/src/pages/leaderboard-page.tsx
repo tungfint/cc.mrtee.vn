@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, formatNumber } from '../lib/api';
-import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
+import { Avatar, EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 
 interface Organization {
   id: string;
@@ -20,6 +20,7 @@ interface Board {
     rank: number;
     userId: string;
     displayName: string;
+    avatarUrl: string | null;
     ccLevel: string;
     seasonScore: string;
     solved: number;
@@ -56,7 +57,7 @@ export default function LeaderboardPage() {
       <PageTitle
         eyebrow="BẢNG XẾP HẠNG"
         title="Thành tích không nằm trong số dư"
-        detail="Xếp hạng dựa trên Season Score; ví điểm và việc đổi thưởng không làm mất thành tích đã đạt."
+        detail="Xếp hạng dựa trên CC Current; CC Point và việc đổi thưởng không làm mất thành tích đã đạt."
         action={
           <div className="filters">
             <select
@@ -105,7 +106,7 @@ export default function LeaderboardPage() {
             <span>Hạng</span>
             <span>Thành viên</span>
             <span>CC Level</span>
-            <span>Season Score</span>
+            <span>CC Current</span>
             <span>Bài giải</span>
             <span>Streak</span>
           </div>
@@ -118,11 +119,11 @@ export default function LeaderboardPage() {
                 {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : `#${entry.rank}`}
               </span>
               <span className="member">
-                <i>{entry.displayName.slice(0, 2).toUpperCase()}</i>
+                <Avatar name={entry.displayName} size="sm" url={entry.avatarUrl} />
                 <strong>{entry.displayName}</strong>
               </span>
               <span data-label="CC Level">{formatNumber(entry.ccLevel, 2)}</span>
-              <strong data-label="Season Score">{formatNumber(entry.seasonScore, 2)}</strong>
+              <strong data-label="CC Current">{formatNumber(entry.seasonScore, 2)}</strong>
               <span data-label="Bài giải">{entry.solved}</span>
               <span data-label="Streak">🔥 {entry.streak}</span>
             </div>

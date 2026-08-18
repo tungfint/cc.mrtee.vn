@@ -1,5 +1,37 @@
 import type { ReactNode } from 'react';
 
+export function Avatar({
+  name,
+  url,
+  size = 'md',
+}: {
+  name: string;
+  url?: string | null | undefined;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+}) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(-2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+  return (
+    <span className={`avatar avatar-${size}`} aria-label={`Avatar của ${name}`}>
+      <span>{initials || 'CC'}</span>
+      {url && (
+        <img
+          alt=""
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+          src={url}
+        />
+      )}
+    </span>
+  );
+}
+
 export function LoadingState({ label, fullPage = false }: { label: string; fullPage?: boolean }) {
   return (
     <div

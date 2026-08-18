@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { api, type SessionUser } from '../lib/api';
+import { Avatar } from './ui';
 
 const links = [
   { to: '/', label: 'Tổng quan', icon: '◫', end: true },
   { to: '/leaderboard', label: 'Xếp hạng', icon: '↗' },
   { to: '/rewards', label: 'Đổi thưởng', icon: '◇' },
   { to: '/orders', label: 'Đơn của tôi', icon: '≡' },
+  { to: '/account', label: 'Tài khoản', icon: '●' },
 ];
 
 export function AppShell({ user }: { user: SessionUser }) {
@@ -14,7 +16,11 @@ export function AppShell({ user }: { user: SessionUser }) {
   const queryClient = useQueryClient();
   const profile = useQuery({
     queryKey: ['me'],
-    queryFn: () => api<{ memberships: { role: string }[] }>('/me'),
+    queryFn: () =>
+      api<{
+        user: { display_name: string; avatar_url: string | null };
+        memberships: { role: string }[];
+      }>('/me'),
   });
   const canAdmin =
     user.systemRole === 'SYSTEM_ADMIN' ||
@@ -38,8 +44,8 @@ export function AppShell({ user }: { user: SessionUser }) {
         <NavLink className="brand" to="/">
           <span className="brand-mark">CC</span>
           <span>
-            <strong>CodeCraft</strong>
-            <small>MRTEE LAB</small>
+            <strong>Cầy Code</strong>
+            <small>MrTee.vn</small>
           </span>
         </NavLink>
         <nav className="nav-list" aria-label="Điều hướng chính">
@@ -67,6 +73,11 @@ export function AppShell({ user }: { user: SessionUser }) {
           <button className="icon-button" onClick={toggleTheme} title="Đổi giao diện" type="button">
             ◐
           </button>
+          <Avatar
+            name={profile.data?.user.display_name ?? user.displayName}
+            size="sm"
+            url={profile.data?.user.avatar_url}
+          />
           <div className="min-w-0 flex-1">
             <p className="m-0 truncate text-sm font-bold">{user.displayName}</p>
             <p className="m-0 text-[11px] text-[var(--muted)]">

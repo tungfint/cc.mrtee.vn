@@ -15,6 +15,8 @@ describe('App', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument();
+    expect(screen.getByText('Cầy Code')).toBeInTheDocument();
+    expect(screen.getByText('MrTee.vn')).toBeInTheDocument();
     expect(screen.getByText('Tài khoản được cấp bởi quản trị viên lớp học.')).toBeInTheDocument();
   });
 });

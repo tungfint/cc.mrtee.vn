@@ -92,6 +92,7 @@ export class OrganizationsController {
       SELECT
         memberships.user_id,
         users.display_name,
+        users.avatar_url,
         memberships.role,
         memberships.status,
         memberships.joined_at,

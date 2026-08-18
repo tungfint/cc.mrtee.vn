@@ -122,11 +122,13 @@ async function main(): Promise<void> {
   try {
     await sql.begin(async (transaction) => {
       await transaction`
-      INSERT INTO users (id, full_name, display_name, system_role)
-      VALUES (${ids.admin}, 'Quản trị viên Demo', 'Admin Demo', 'SYSTEM_ADMIN')
+      INSERT INTO users (id, full_name, display_name, avatar_url, system_role)
+      VALUES (${ids.admin}, 'Quản trị viên Demo', 'Admin Demo',
+        'https://api.dicebear.com/9.x/initials/svg?seed=Admin%20Demo', 'SYSTEM_ADMIN')
       ON CONFLICT (id) DO UPDATE SET
         full_name = EXCLUDED.full_name,
         display_name = EXCLUDED.display_name,
+        avatar_url = EXCLUDED.avatar_url,
         system_role = EXCLUDED.system_role,
         updated_at = now()
     `;
@@ -142,8 +144,9 @@ async function main(): Promise<void> {
     `;
       await transaction`
       INSERT INTO organizations (id, name, slug, visibility)
-      VALUES (${ids.organization}, 'Lớp CodeCraft Demo', 'codecraft-demo', 'PUBLIC')
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, visibility = EXCLUDED.visibility
+      VALUES (${ids.organization}, 'Lớp Cầy Code Demo', 'cay-code-demo', 'PUBLIC')
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug,
+        visibility = EXCLUDED.visibility
     `;
       await transaction`
       INSERT INTO organization_memberships (organization_id, user_id, role)
@@ -154,8 +157,8 @@ async function main(): Promise<void> {
       await transaction`
       INSERT INTO seasons (id, organization_id, name, start_at, end_at, status, scoring_policy_version)
       VALUES
-        (${ids.activeSeason}, ${ids.organization}, 'Mùa mô phỏng hiện tại', ${activeStart}, ${activeEnd}, 'ACTIVE', 'v2.0'),
-        (${ids.previousSeason}, ${ids.organization}, 'Mùa mô phỏng tháng trước', ${previousStart}, ${activeStart}, 'CLOSED', 'v2.0')
+        (${ids.activeSeason}, ${ids.organization}, 'CC Current', ${activeStart}, ${activeEnd}, 'ACTIVE', 'v2.0'),
+        (${ids.previousSeason}, ${ids.organization}, 'CC Previous', ${previousStart}, ${activeStart}, 'CLOSED', 'v2.0')
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         start_at = EXCLUDED.start_at,
@@ -166,11 +169,13 @@ async function main(): Promise<void> {
 
       for (const [profileIndex, profile] of profiles.entries()) {
         await transaction`
-        INSERT INTO users (id, full_name, display_name)
-        VALUES (${profile.id}, ${`${profile.name} — simulation`}, ${profile.name})
+        INSERT INTO users (id, full_name, display_name, avatar_url)
+        VALUES (${profile.id}, ${`${profile.name} — simulation`}, ${profile.name},
+          ${`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(profile.name)}`})
         ON CONFLICT (id) DO UPDATE SET
           full_name = EXCLUDED.full_name,
           display_name = EXCLUDED.display_name,
+          avatar_url = EXCLUDED.avatar_url,
           updated_at = now()
       `;
         await transaction`
@@ -356,9 +361,9 @@ async function main(): Promise<void> {
       await transaction`
       INSERT INTO rewards (id, name, description, cost, stock, active)
       VALUES
-        ('40000000-0000-4000-8000-000000000001', 'Huy hiệu CodeCraft', 'Huy hiệu thành tích giới hạn', 40, 25, true),
+        ('40000000-0000-4000-8000-000000000001', 'Huy hiệu Cầy Code', 'Huy hiệu thành tích giới hạn', 40, 25, true),
         ('40000000-0000-4000-8000-000000000002', 'Mentoring 30 phút', 'Phiên trao đổi riêng với giáo viên', 120, 10, true),
-        ('40000000-0000-4000-8000-000000000003', 'Áo MRTEE LAB', 'Áo lưu niệm của câu lạc bộ', 250, 5, true)
+        ('40000000-0000-4000-8000-000000000003', 'Áo MrTee.vn', 'Áo lưu niệm của câu lạc bộ', 250, 5, true)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         description = EXCLUDED.description,

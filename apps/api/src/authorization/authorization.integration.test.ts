@@ -12,6 +12,8 @@ import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
 import { InsightsController } from '../insights/insights.controller';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
+import { UsersController } from '../users/users.controller';
+import { AdminOrganizationsController } from '../organizations/admin-organizations.controller';
 import { AuthorizationService } from './authorization.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
@@ -37,6 +39,8 @@ const rewards = new RewardsService({ sql: connection } as DatabaseService);
 const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
 const insights = new InsightsController({ sql: connection } as DatabaseService, service);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
+const usersController = new UsersController({ sql: connection } as DatabaseService, authService);
+const adminOrganizations = new AdminOrganizationsController({ sql: connection } as DatabaseService);
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
   sessionId: 'test-session',
@@ -139,6 +143,45 @@ describe('authorization matrix', () => {
     const access = await service.organizationAccess(ids.otherPrivateOrg!, systemAdmin);
     expect(() => service.assertCanView(access, systemAdmin)).not.toThrow();
     expect(() => service.assertCanManage(access, systemAdmin)).not.toThrow();
+  });
+
+  it('manages self profiles, user lifecycle, and organizations with audit records', async () => {
+    const member = authUser(ids.member!);
+    const updatedProfile = await usersController.updateMe(
+      {
+        displayName: 'Member Avatar',
+        avatarUrl: 'https://example.com/avatar.png',
+        timezone: 'Asia/Ho_Chi_Minh',
+      },
+      member,
+    );
+    expect(updatedProfile.user).toMatchObject({
+      display_name: 'Member Avatar',
+      avatar_url: 'https://example.com/avatar.png',
+    });
+
+    const listing = await usersController.listUsers({ search: 'Member Avatar', pageSize: '10' });
+    expect(listing.total).toBe(1);
+    expect(listing.users).toHaveLength(1);
+
+    const systemAdmin = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const updatedUser = await usersController.updateUser(
+      ids.member!,
+      { status: 'SUSPENDED', reason: 'Lifecycle fixture' },
+      systemAdmin,
+    );
+    expect(updatedUser.user).toMatchObject({ status: 'SUSPENDED' });
+    const updatedOrganization = await adminOrganizations.update(
+      ids.privateOrg!,
+      { visibility: 'CLOSED', reason: 'Visibility fixture' },
+      systemAdmin,
+    );
+    expect(updatedOrganization.organization).toMatchObject({ visibility: 'CLOSED' });
+    const [{ count } = { count: 0 }] = await connection<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM audit_logs
+      WHERE action IN ('USER_PROFILE_UPDATED', 'USER_UPDATED', 'ORGANIZATION_UPDATED')
+    `;
+    expect(count).toBe(3);
   });
 
   it('creates credentials and stores only hashed session and CSRF tokens', async () => {

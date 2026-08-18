@@ -82,6 +82,7 @@ export const users = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     fullName: varchar('full_name', { length: 200 }).notNull(),
     displayName: varchar('display_name', { length: 100 }).notNull(),
+    avatarUrl: text('avatar_url'),
     status: userStatus('status').default('ACTIVE').notNull(),
     systemRole: systemRole('system_role').default('USER').notNull(),
     timezone: varchar('timezone', { length: 100 }).default('Asia/Ho_Chi_Minh').notNull(),

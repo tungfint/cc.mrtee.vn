@@ -482,6 +482,20 @@ describe('Phase 1 database invariants', () => {
     ).resolves.toBeDefined();
   });
 
+  it('stores optional avatar URLs and rejects oversized values', async () => {
+    const userId = await insertUser(connection);
+    await expect(
+      connection`
+        UPDATE users SET avatar_url = 'https://example.com/avatar.png' WHERE id = ${userId}
+      `,
+    ).resolves.toBeDefined();
+    await expectPostgresError(
+      async () =>
+        connection`UPDATE users SET avatar_url = ${'x'.repeat(2049)} WHERE id = ${userId}`,
+      '23514',
+    );
+  });
+
   it('prevents duplicate redeem commands with a stable idempotency key', async () => {
     const userId = await insertUser(connection);
     const otherUserId = await insertUser(connection, 'Other redeemer');

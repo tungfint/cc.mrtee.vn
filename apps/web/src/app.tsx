@@ -10,6 +10,7 @@ const LeaderboardPage = lazy(() => import('./pages/leaderboard-page'));
 const RewardsPage = lazy(() => import('./pages/rewards-page'));
 const OrdersPage = lazy(() => import('./pages/orders-page'));
 const AdminPage = lazy(() => import('./pages/admin-page'));
+const AccountPage = lazy(() => import('./pages/account-page'));
 
 function RequireAuth() {
   const session = useSession();
@@ -29,6 +30,7 @@ export function App() {
           <Route path="leaderboard" element={<LeaderboardPage />} />
           <Route path="rewards" element={<RewardsPage />} />
           <Route path="orders" element={<OrdersPage />} />
+          <Route path="account" element={<AccountPage />} />
           <Route path="admin" element={<AdminPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

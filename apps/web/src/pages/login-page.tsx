@@ -27,8 +27,8 @@ export default function LoginPage() {
         <div className="brand text-white">
           <span className="brand-mark">CC</span>
           <span>
-            <strong>CodeCraft</strong>
-            <small>MRTEE LAB</small>
+            <strong>Cầy Code</strong>
+            <small>MrTee.vn</small>
           </span>
         </div>
         <div className="max-w-xl">
@@ -41,7 +41,7 @@ export default function LoginPage() {
             Codeforces của bạn.
           </p>
         </div>
-        <p className="text-xs text-slate-500">Codeforces Gamification Tracker · v2</p>
+        <p className="text-xs text-slate-500">Cầy Code MrTee.vn · Codeforces Tracker v2</p>
       </section>
       <section className="login-form-wrap">
         <form className="login-card" onSubmit={submit}>

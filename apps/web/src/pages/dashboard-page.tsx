@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber } from '../lib/api';
-import { EmptyState, ErrorState, LoadingState, PageTitle, StatusPill } from '../components/ui';
+import {
+  Avatar,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageTitle,
+  StatusPill,
+} from '../components/ui';
 
 interface Dashboard {
   profile: {
     display_name: string;
+    avatar_url: string | null;
     codeforces_handle: string | null;
     verification_status: string | null;
     sync_status: string | null;
@@ -37,6 +45,12 @@ interface Dashboard {
     event_at: string;
   }[];
   awards: { award_type: string; title: string; season_name: string }[];
+  fulfilledRewards: {
+    name: string;
+    description: string;
+    image_url: string | null;
+    earned_at: string;
+  }[];
 }
 
 export default function DashboardPage() {
@@ -73,6 +87,7 @@ export default function DashboardPage() {
         detail="Một lát cắt gọn về năng lực, nhịp luyện tập và thành tích hiện tại của bạn."
         action={
           <div className="flex items-center gap-3">
+            <Avatar name={profile.display_name} size="lg" url={profile.avatar_url} />
             <span className="text-xs text-[var(--muted)]">
               Sync gần nhất: {formatDate(profile.last_sync_at)}
             </span>
@@ -112,28 +127,70 @@ export default function DashboardPage() {
       <section className="stats-grid">
         <Stat
           accent="cyan"
+          icon="⚡"
           label="CC Level"
           value={formatNumber(profile.cc_level, 2)}
           note="Năng lực dài hạn"
         />
         <Stat
           accent="violet"
-          label="Ví điểm"
+          icon="◆"
+          label="CC Point"
           value={formatNumber(profile.wallet_balance, 2)}
           note="Có thể dùng đổi thưởng"
         />
         <Stat
           accent="amber"
-          label={data.season?.name ?? 'Season Score'}
+          icon="🏆"
+          label="CC Current"
           value={formatNumber(data.season?.score, 2)}
-          note={`${data.season?.qualifying_solves ?? 0} bài hợp lệ`}
+          note={`${data.season?.name ?? 'Chưa có mùa'} · ${data.season?.qualifying_solves ?? 0} bài`}
         />
         <Stat
           accent="green"
-          label="Chuỗi hiện tại"
+          icon="🔥"
+          label="Streak"
           value={`${data.streak.current_streak} ngày`}
           note={`Kỷ lục ${data.streak.longest_streak} ngày`}
         />
+      </section>
+      <section className="panel achievement-section mt-6 p-5">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">ACHIEVEMENTS</p>
+            <h2>Danh hiệu & phần thưởng đã đạt</h2>
+          </div>
+          <span className="achievement-count">
+            {data.awards.length + data.fulfilledRewards.length} thành tựu
+          </span>
+        </div>
+        {data.awards.length === 0 && data.fulfilledRewards.length === 0 ? (
+          <EmptyState
+            title="Chưa mở khóa thành tựu"
+            detail="Duy trì Streak, chinh phục thử thách và vươn lên CC Current để nhận huy chương."
+          />
+        ) : (
+          <div className="achievement-grid">
+            {data.awards.map((award) => (
+              <article className="achievement-card" key={`${award.award_type}-${award.title}`}>
+                <span className="achievement-icon">{awardIcon(award.award_type)}</span>
+                <div>
+                  <strong>{award.title}</strong>
+                  <p>{award.season_name}</p>
+                </div>
+              </article>
+            ))}
+            {data.fulfilledRewards.map((reward) => (
+              <article className="achievement-card reward-achievement" key={reward.name}>
+                <span className="achievement-icon">🎁</span>
+                <div>
+                  <strong>{reward.name}</strong>
+                  <p>{reward.description}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
         <div className="panel p-5">
@@ -265,17 +322,36 @@ function Stat({
   value,
   note,
   accent,
+  icon,
 }: {
   label: string;
   value: string;
   note: string;
   accent: string;
+  icon: string;
 }) {
   return (
     <article className={`stat-card stat-${accent}`}>
-      <p>{label}</p>
+      <div className="stat-heading">
+        <p>{label}</p>
+        <span className="stat-icon" aria-hidden>
+          {icon}
+        </span>
+      </div>
       <strong>{value}</strong>
       <span>{note}</span>
     </article>
+  );
+}
+
+function awardIcon(type: string): string {
+  return (
+    {
+      TOP_SCORE: '🏆',
+      MOST_IMPROVED: '🚀',
+      MOST_CONSISTENT: '🥇',
+      CHALLENGE: '🛡️',
+      CUSTOM: '⭐',
+    }[type] ?? '🏅'
   );
 }
