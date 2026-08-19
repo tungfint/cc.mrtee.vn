@@ -30,6 +30,14 @@ export default function RewardsPage() {
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });
+  const cashRewards =
+    rewards.data?.rewards.filter((reward) => reward.cash_value_vnd !== null) ?? [];
+  const regularRewards =
+    rewards.data?.rewards.filter((reward) => reward.cash_value_vnd === null) ?? [];
+  const redeemReward = (reward: Reward) => {
+    if (window.confirm(`Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} CC Balance?`))
+      redeem.mutate(reward.id);
+  };
   return (
     <>
       <PageTitle
@@ -50,49 +58,82 @@ export default function RewardsPage() {
       ) : !rewards.data?.rewards.length ? (
         <EmptyState title="Cửa hàng đang trống" detail="Quản trị viên chưa mở phần thưởng nào." />
       ) : (
-        <div className="reward-grid">
-          {rewards.data.rewards.map((reward, index) => (
-            <article className="reward-card" key={reward.id}>
-              <div className={`reward-visual visual-${index % 4}`}>
-                {reward.image_url ? (
-                  <img alt="" src={reward.image_url} />
-                ) : (
-                  <span>{['✦', '⌁', '◈', '⚡'][index % 4]}</span>
-                )}
-                <small>{reward.stock === null ? 'Không giới hạn' : `Còn ${reward.stock}`}</small>
+        <div className="space-y-6">
+          {cashRewards.length > 0 && (
+            <section className="panel cash-exchange-panel overflow-hidden">
+              <div className="management-header">
+                <div>
+                  <p className="eyebrow">QUY ĐỔI TIỀN MẶT</p>
+                  <strong>Bảng đổi CC Balance thành tiền</strong>
+                </div>
+                <span>Gọn, rõ mức nhận và số dư cần dùng</span>
               </div>
-              <div className="p-5">
-                <p className="eyebrow">PHẦN THƯỞNG</p>
-                <h2 className="mt-1 text-xl font-black">{reward.name}</h2>
-                {reward.cash_value_vnd !== null && (
-                  <p className="cash-reward-value">Nhận {formatVnd(reward.cash_value_vnd)}</p>
-                )}
-                <p className="min-h-12 text-sm leading-6 text-[var(--muted)]">
-                  {reward.description}
-                </p>
-                <div className="mt-5 flex items-center justify-between">
-                  <strong className="text-xl text-[var(--accent)]">
-                    {formatNumber(reward.cost, 2)} <small className="text-xs">CC Balance</small>
+              <div className="cash-exchange-table cash-exchange-header">
+                <span>CC Balance</span>
+                <span>Tiền nhận</span>
+                <span>Mô tả</span>
+                <span></span>
+              </div>
+              {cashRewards.map((reward) => (
+                <div className="cash-exchange-table" key={reward.id}>
+                  <strong data-label="CC Balance">◈ {formatNumber(reward.cost)}</strong>
+                  <strong className="cash-money" data-label="Tiền nhận">
+                    {formatVnd(reward.cash_value_vnd)}
                   </strong>
+                  <span data-label="Mô tả">{reward.description}</span>
                   <button
                     className="button-primary"
                     disabled={redeem.isPending}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} CC Balance?`,
-                        )
-                      )
-                        redeem.mutate(reward.id);
-                    }}
+                    onClick={() => redeemReward(reward)}
                     type="button"
                   >
-                    Đổi ngay
+                    Đổi tiền
                   </button>
                 </div>
-              </div>
-            </article>
-          ))}
+              ))}
+            </section>
+          )}
+          {regularRewards.length > 0 && (
+            <div className="reward-grid">
+              {regularRewards.map((reward, index) => (
+                <article className="reward-card" key={reward.id}>
+                  <div className={`reward-visual visual-${index % 4}`}>
+                    {reward.image_url ? (
+                      <img alt="" src={reward.image_url} />
+                    ) : (
+                      <span>{['✦', '⌁', '◈', '⚡'][index % 4]}</span>
+                    )}
+                    <small>
+                      {reward.stock === null ? 'Không giới hạn' : `Còn ${reward.stock}`}
+                    </small>
+                  </div>
+                  <div className="p-5">
+                    <p className="eyebrow">PHẦN THƯỞNG</p>
+                    <h2 className="mt-1 text-xl font-black">{reward.name}</h2>
+                    {reward.cash_value_vnd !== null && (
+                      <p className="cash-reward-value">Nhận {formatVnd(reward.cash_value_vnd)}</p>
+                    )}
+                    <p className="min-h-12 text-sm leading-6 text-[var(--muted)]">
+                      {reward.description}
+                    </p>
+                    <div className="mt-5 flex items-center justify-between">
+                      <strong className="text-xl text-[var(--accent)]">
+                        {formatNumber(reward.cost, 2)} <small className="text-xs">CC Balance</small>
+                      </strong>
+                      <button
+                        className="button-primary"
+                        disabled={redeem.isPending}
+                        onClick={() => redeemReward(reward)}
+                        type="button"
+                      >
+                        Đổi ngay
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </>

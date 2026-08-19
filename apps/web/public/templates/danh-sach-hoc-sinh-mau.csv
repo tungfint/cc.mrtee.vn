@@ -1,3 +1,3 @@
-tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau,slug_lop,yeu_cau_doi_mat_khau
-nguyen.an@example.com,MatKhauTam!2026,Nguyễn Văn An,An Nguyễn,example_handle,800,lop-aaa,co
-tran.binh@example.com,MatKhauTam!2026,Trần Văn Bình,Bình Trần,,800,,khong
+﻿tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau,lop_hoc_slug,doi_mat_khau_lan_dau
+nguyen.an@example.com,MatKhauTam!2026,Nguyễn Văn An,An Nguyễn,example_handle,800,lop-aaa,YES
+tran.binh@example.com,MatKhauTam!2026,Trần Văn Bình,Bình Trần,,800,,NO

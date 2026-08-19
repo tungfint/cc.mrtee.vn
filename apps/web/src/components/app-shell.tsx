@@ -11,7 +11,6 @@ const links = [
   { to: '/orders', label: 'Quà của tôi', icon: '≡' },
   { to: '/recognition', label: 'Vinh danh', icon: '✦' },
   { to: '/about', label: 'Giới thiệu', icon: '?' },
-  { to: '/account', label: 'Tài khoản', icon: '●' },
 ];
 
 export function AppShell({ user }: { user: SessionUser }) {
@@ -33,6 +32,14 @@ export function AppShell({ user }: { user: SessionUser }) {
   const canAdmin =
     user.systemRole === 'SYSTEM_ADMIN' ||
     profile.data?.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
+  const accountRoleLabel =
+    user.systemRole === 'SYSTEM_ADMIN'
+      ? 'System admin'
+      : profile.data?.memberships.some(({ role }) => role === 'ORG_ADMIN')
+        ? 'Quản trị lớp học'
+        : profile.data?.memberships.some(({ role }) => role === 'TEACHER')
+          ? 'Giáo viên'
+          : 'Học sinh';
   const logout = useMutation({
     mutationFn: () => api('/auth/logout', { method: 'POST' }),
     onSuccess: () => {
@@ -80,6 +87,12 @@ export function AppShell({ user }: { user: SessionUser }) {
               <span>⌘</span>Quản trị
             </NavLink>
           )}
+          <NavLink
+            className={({ isActive }) => `nav-link mobile-account-link ${isActive ? 'active' : ''}`}
+            to="/account"
+          >
+            <span aria-hidden>●</span>Tài khoản
+          </NavLink>
         </nav>
         <div className="sidebar-footer">
           <button
@@ -91,18 +104,18 @@ export function AppShell({ user }: { user: SessionUser }) {
           >
             {themeIcon}
           </button>
-          <Avatar
-            name={profile.data?.user.display_name ?? user.displayName}
-            rating={profile.data?.user.current_rating}
-            size="sm"
-            url={profile.data?.user.avatar_url}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="m-0 truncate text-sm font-bold">{user.displayName}</p>
-            <p className="m-0 text-[11px] text-[var(--muted)]">
-              {user.systemRole === 'SYSTEM_ADMIN' ? 'System admin' : 'Học sinh'}
-            </p>
-          </div>
+          <NavLink className="sidebar-account-link" title="Mở tài khoản" to="/account">
+            <Avatar
+              name={profile.data?.user.display_name ?? user.displayName}
+              rating={profile.data?.user.current_rating}
+              size="sm"
+              url={profile.data?.user.avatar_url}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="m-0 truncate text-sm font-bold">{user.displayName}</p>
+              <p className="m-0 text-[11px] text-[var(--muted)]">{accountRoleLabel}</p>
+            </div>
+          </NavLink>
           <button
             className="icon-button"
             disabled={logout.isPending}

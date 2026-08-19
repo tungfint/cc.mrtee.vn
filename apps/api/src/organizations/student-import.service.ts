@@ -79,10 +79,13 @@ export class StudentImportService {
         displayName: String(record.ten_hien_thi ?? ''),
         codeforcesHandle: String(record.tai_khoan_codeforces ?? ''),
         initialCcLevel: record.muc_ban_dau === '' ? 800 : record.muc_ban_dau,
-        classSlug: String(record.slug_lop ?? '')
+        classSlug: String(record.lop_hoc_slug ?? record.slug_lop ?? '')
           .trim()
           .toLowerCase(),
-        mustChangePassword: this.booleanCell(record.yeu_cau_doi_mat_khau, true),
+        mustChangePassword: this.booleanCell(
+          record.doi_mat_khau_lan_dau ?? record.yeu_cau_doi_mat_khau,
+          true,
+        ),
       });
       if (!parsed.success) {
         results.push({

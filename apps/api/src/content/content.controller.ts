@@ -25,6 +25,9 @@ const quoteSchema = z.object({
   active: z.boolean().default(true),
   sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
 });
+const pastedQuotesSchema = z.object({
+  text: z.string().trim().min(5).max(500_000),
+});
 
 const rankSchema = z.object({
   minLevel: z.coerce.number().int().min(0).max(100_000),
@@ -44,7 +47,7 @@ export class ContentController {
   async dashboardContent() {
     const [quotes, ranks] = await Promise.all([
       this.database.sql`
-        SELECT id, content, author, sort_order
+        SELECT id, content, author, sort_order, heart_count
         FROM motivational_quotes
         WHERE active = true
         ORDER BY sort_order, created_at, id
@@ -117,6 +120,55 @@ export class ContentController {
       results.push({ row: index + 2, success: true });
     }
     return { created, failed: results.length - created, total: results.length, results };
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Post('admin/quotes/import-text')
+  async importPastedQuotes(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
+    const parsedBody = pastedQuotesSchema.safeParse(body);
+    if (!parsedBody.success) throw new BadRequestException('Danh sách danh ngôn không hợp lệ');
+    const lines = parsedBody.data.text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length > 500) throw new BadRequestException('Mỗi lần chỉ dán tối đa 500 câu');
+    const results: { row: number; success: boolean; message?: string }[] = [];
+    let created = 0;
+    for (const [index, line] of lines.entries()) {
+      const cells = line.split('|').map((cell) => cell.trim());
+      if (index === 0 && this.normalizeHeader(cells[0] ?? '') === 'cham_ngon') continue;
+      const quote = quoteSchema.safeParse({
+        content: cells[0] ?? '',
+        author: cells[1] || null,
+        sortOrder: cells[2] || index + 1,
+        active: this.booleanCell(cells[3], true),
+      });
+      if (!quote.success || cells.length < 3) {
+        results.push({
+          row: index + 1,
+          success: false,
+          message: 'Đúng định dạng: Châm ngôn | Tác giả | Thứ tự | Có/Không',
+        });
+        continue;
+      }
+      await this.persistQuote(null, quote.data, actor);
+      created += 1;
+      results.push({ row: index + 1, success: true });
+    }
+    return { created, failed: results.length - created, total: results.length, results };
+  }
+
+  @Post('content/quotes/:id/heart')
+  async heartQuote(@Param('id') idInput: string) {
+    const id = this.uuid(idInput);
+    const [quote] = await this.database.sql<{ heart_count: number }[]>`
+      UPDATE motivational_quotes
+      SET heart_count = LEAST(999999, heart_count + 1), updated_at = now()
+      WHERE id = ${id} AND active = true
+      RETURNING heart_count
+    `;
+    if (!quote) throw new BadRequestException('Không tìm thấy danh ngôn');
+    return { heartCount: quote.heart_count };
   }
 
   @RequireSystemRole('SYSTEM_ADMIN')

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Avatar,
   CodeforcesHandle,
@@ -16,7 +17,7 @@ interface Organization {
   id: string;
   name: string;
 }
-type RankingMetric = 'CC_LEVEL' | 'CC_POINT' | 'STREAK';
+type RankingMetric = 'CC_LEVEL' | 'CC_POINT' | 'CC_BALANCE' | 'STREAK';
 interface Board {
   total: number;
   page: number;
@@ -40,6 +41,7 @@ interface Board {
 const metrics: { id: RankingMetric; label: string; icon: string }[] = [
   { id: 'CC_LEVEL', label: 'CC Level', icon: '⚡' },
   { id: 'CC_POINT', label: 'CC Point', icon: '◆' },
+  { id: 'CC_BALANCE', label: 'CC Balance', icon: '◈' },
   { id: 'STREAK', label: 'Streak', icon: '🔥' },
 ];
 
@@ -56,6 +58,7 @@ export default function LeaderboardPage() {
   const board = useQuery({
     queryKey: ['leaderboard', organizationId, sort, page],
     queryFn: () => api<Board>(`/leaderboards?${params}`),
+    refetchInterval: 15_000,
   });
   const metricLabel = metrics.find((metric) => metric.id === sort)?.label ?? 'CC Level';
 
@@ -114,6 +117,7 @@ export default function LeaderboardPage() {
             <span>Học sinh</span>
             <span>CC Level</span>
             <span>CC Point</span>
+            <span>CC Balance</span>
             <span>Streak</span>
           </div>
           {board.data.entries.map((entry) => (
@@ -124,7 +128,7 @@ export default function LeaderboardPage() {
               <span className="rank">
                 {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : `#${entry.rank}`}
               </span>
-              <span className="member">
+              <Link className="member student-profile-link" to={`/students/${entry.userId}`}>
                 <Avatar
                   name={entry.displayName}
                   rating={entry.currentRating}
@@ -145,9 +149,10 @@ export default function LeaderboardPage() {
                     <small>Chưa liên kết Codeforces</small>
                   )}
                 </span>
-              </span>
+              </Link>
               <span data-label="CC Level">⚡ {formatNumber(entry.ccLevel, 2)}</span>
               <strong data-label="CC Point">◆ {formatNumber(entry.ccPoint, 2)}</strong>
+              <strong data-label="CC Balance">◈ {formatNumber(entry.ccBalance, 2)}</strong>
               <span data-label="Streak">🔥 {entry.streak} ngày</span>
             </div>
           ))}
