@@ -730,7 +730,8 @@ describe('authorization matrix', () => {
       orders.map((order) => order.id),
     );
     const after = await streaks.summary(ids.member!);
-    expect(after).toMatchObject({ currentStreak: 5, pendingBonus: 4 });
+    expect(after).toMatchObject({ currentStreak: 2, pendingBonus: 1 });
+    expect(after.timeline.filter((day) => day.kind === 'RESCUE')).toHaveLength(3);
     expect(after.rescue.mascots).toHaveLength(0);
     await expect(
       streaks.rescue(

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { calculateStreakBonus, currentDateStreak, longestDateStreak } from '@cc/core';
+import { calculateStreakBonus, currentDateStreak } from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 
 export interface StreakDay {
@@ -161,10 +161,23 @@ export class StreakService {
       WHERE rescues.user_id = ${userId}
       ORDER BY rescues.rescued_date
     `;
-    const allDays: StreakDay[] = [
-      ...solveDays.map((item) => ({
+    const activityByDate = new Map<string, StreakDay>();
+    for (const item of rescueDays) {
+      activityByDate.set(item.day, {
         date: item.day,
-        kind: 'SOLVE' as const,
+        kind: 'RESCUE',
+        problemName: null,
+        problemRating: null,
+        submissionId: null,
+        codeforcesUrl: null,
+        mascotName: item.mascot_name,
+        mascotImageUrl: item.mascot_image_url,
+      });
+    }
+    for (const item of solveDays) {
+      activityByDate.set(item.day, {
+        date: item.day,
+        kind: 'SOLVE',
         problemName: item.problem_name,
         problemRating: item.rating_snapshot,
         submissionId: item.first_ok_submission_id,
@@ -173,21 +186,13 @@ export class StreakService {
           : `https://codeforces.com/submissions/${item.first_ok_submission_id}`,
         mascotName: null,
         mascotImageUrl: null,
-      })),
-      ...rescueDays.map((item) => ({
-        date: item.day,
-        kind: 'RESCUE' as const,
-        problemName: null,
-        problemRating: null,
-        submissionId: null,
-        codeforcesUrl: null,
-        mascotName: item.mascot_name,
-        mascotImageUrl: item.mascot_image_url,
-      })),
-    ].sort((a, b) => a.date.localeCompare(b.date));
+      });
+    }
+    const allDays = [...activityByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
     const dateKeys = allDays.map((item) => item.date);
-    const currentStreak = currentDateStreak(dateKeys, clock.today);
-    const timeline = currentStreak > 0 ? allDays.slice(-currentStreak) : [];
+    const currentCoverage = currentDateStreak(dateKeys, clock.today);
+    const timeline = currentCoverage > 0 ? allDays.slice(-currentCoverage) : [];
+    const currentStreak = timeline.filter((item) => item.kind === 'SOLVE').length;
     const missingDates = this.rescuableGap(
       allDays,
       solveDays.map((item) => item.day),
@@ -197,10 +202,24 @@ export class StreakService {
       today: clock.today,
       allDays,
       currentStreak,
-      longestStreak: longestDateStreak(dateKeys),
+      longestStreak: this.longestSolveStreak(allDays),
       timeline,
       missingDates,
     };
+  }
+
+  private longestSolveStreak(days: StreakDay[]) {
+    let longest = 0;
+    let current = 0;
+    let previous: number | undefined;
+    for (const item of days) {
+      const day = Date.parse(`${item.date}T00:00:00Z`) / 86_400_000;
+      if (previous === undefined || day !== previous + 1) current = 0;
+      if (item.kind === 'SOLVE') current += 1;
+      longest = Math.max(longest, current);
+      previous = day;
+    }
+    return longest;
   }
 
   private rescuableGap(allDays: StreakDay[], solveDates: string[], today: string): string[] {

@@ -198,26 +198,30 @@ export class RewardEngineService {
     userId: string,
   ) {
     const runs = await transaction<{ start_day: string; end_day: string; length: number }[]>`
-      WITH activity_days AS (
+      WITH raw_activity AS (
         SELECT DISTINCT (solves.first_solved_at AT TIME ZONE users.timezone)::date AS day,
-          (now() AT TIME ZONE users.timezone)::date AS today
+          (now() AT TIME ZONE users.timezone)::date AS today, true AS is_solve
         FROM user_problem_solves AS solves
         JOIN users ON users.id = solves.user_id
         JOIN codeforces_accounts AS accounts ON accounts.user_id = solves.user_id
         WHERE solves.user_id = ${userId}
           AND accounts.reward_eligible_from IS NOT NULL
           AND solves.first_solved_at >= accounts.reward_eligible_from
-        UNION
+        UNION ALL
         SELECT rescues.rescued_date AS day,
-          (now() AT TIME ZONE users.timezone)::date AS today
+          (now() AT TIME ZONE users.timezone)::date AS today, false AS is_solve
         FROM streak_rescues AS rescues
         JOIN users ON users.id = rescues.user_id
         WHERE rescues.user_id = ${userId}
+      ), activity_days AS (
+        SELECT day, today, bool_or(is_solve) AS is_solve
+        FROM raw_activity GROUP BY day, today
       ), grouped AS (
-        SELECT day, today, day - row_number() OVER (ORDER BY day)::int AS island
+        SELECT day, today, is_solve, day - row_number() OVER (ORDER BY day)::int AS island
         FROM activity_days
       )
-      SELECT min(day)::text AS start_day, max(day)::text AS end_day, count(*)::int AS length
+      SELECT min(day)::text AS start_day, max(day)::text AS end_day,
+        count(*) FILTER (WHERE is_solve)::int AS length
       FROM grouped
       GROUP BY island, today
       HAVING max(day) < today - 4

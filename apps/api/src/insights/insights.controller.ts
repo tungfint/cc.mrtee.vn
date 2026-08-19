@@ -251,17 +251,23 @@ export class InsightsController {
         FROM point_transactions WHERE user_id = users.id
       ) AS points ON true
       LEFT JOIN LATERAL (
-        WITH days AS (
+        WITH raw_days AS (
           SELECT DISTINCT (first_solved_at AT TIME ZONE users.timezone)::date AS day,
-            (now() AT TIME ZONE users.timezone)::date AS today
+            (now() AT TIME ZONE users.timezone)::date AS today, true AS is_solve
           FROM user_problem_solves WHERE user_id = users.id
-          UNION
-          SELECT rescued_date AS day, (now() AT TIME ZONE users.timezone)::date AS today
+          UNION ALL
+          SELECT rescued_date AS day, (now() AT TIME ZONE users.timezone)::date AS today,
+            false AS is_solve
           FROM streak_rescues WHERE user_id = users.id
+        ), days AS (
+          SELECT day, today, bool_or(is_solve) AS is_solve
+          FROM raw_days GROUP BY day, today
         ), grouped AS (
-          SELECT day, today, day - row_number() OVER (ORDER BY day)::int AS island FROM days
+          SELECT day, today, is_solve, day - row_number() OVER (ORDER BY day)::int AS island
+          FROM days
         ), runs AS (
-          SELECT count(*)::int AS length, max(day) AS end_day, max(today) AS today
+          SELECT count(*) FILTER (WHERE is_solve)::int AS length,
+            max(day) AS end_day, max(today) AS today
           FROM grouped GROUP BY island
         )
         SELECT COALESCE(max(length), 0)::int AS longest_streak,
