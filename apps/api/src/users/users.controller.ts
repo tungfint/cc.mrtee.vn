@@ -43,6 +43,7 @@ const createUserSchema = z.object({
   organizationId: z.string().uuid().optional(),
   codeforcesHandle: codeforcesHandleSchema.optional(),
   initialCcLevel: initialCcLevelSchema.default(800),
+  mustChangePassword: z.boolean().default(false),
 });
 const updateOwnProfileSchema = z
   .object({
@@ -81,6 +82,7 @@ const updateUserSchema = z
 const resetPasswordSchema = z.object({
   password: z.string().min(12).max(200),
   reason: z.string().trim().min(3).max(500),
+  mustChangePassword: z.boolean().default(true),
 });
 
 @Controller()
@@ -93,7 +95,8 @@ export class UsersController {
   @Get('me')
   async me(@CurrentUser() user: AuthUser) {
     const [profile] = await this.database.sql`
-      SELECT users.id, credentials.email, users.full_name, users.display_name,
+      SELECT users.id, credentials.email, credentials.must_change_password,
+        users.full_name, users.display_name,
         users.avatar_url, users.status, users.system_role, users.created_at,
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
@@ -160,7 +163,8 @@ export class UsersController {
     await this.database.sql.begin(async (transaction) => {
       await transaction`
         UPDATE user_credentials SET password_hash = ${passwordHash}, password_updated_at = now(),
-          failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+          must_change_password = false, failed_login_attempts = 0, locked_until = NULL,
+          updated_at = now()
         WHERE user_id = ${actor.userId}
       `;
       await transaction`
@@ -182,7 +186,8 @@ export class UsersController {
     const search = `%${input.search}%`;
     const offset = (input.page - 1) * input.pageSize;
     const users = await this.database.sql`
-      SELECT users.id, credentials.email, users.full_name, users.display_name, users.avatar_url,
+      SELECT users.id, credentials.email, credentials.must_change_password,
+        users.full_name, users.display_name, users.avatar_url,
         users.status, users.system_role, users.created_at,
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
@@ -209,7 +214,8 @@ export class UsersController {
         OR users.full_name ILIKE ${search} OR credentials.email ILIKE ${search}
         OR accounts.handle ILIKE ${search})
         AND (${input.status ?? null}::user_status IS NULL OR users.status = ${input.status ?? null})
-      GROUP BY users.id, credentials.email, skill.cc_base, skill.cc_level, accounts.handle,
+      GROUP BY users.id, credentials.email, credentials.must_change_password,
+        skill.cc_base, skill.cc_level, accounts.handle,
         accounts.pending_handle, accounts.verification_status, accounts.current_rating, accounts.rank,
         wallet.balance, points.cc_point
       ORDER BY users.created_at DESC
@@ -240,6 +246,8 @@ export class UsersController {
           displayName: input.displayName,
           systemRole: input.systemRole,
           initialCcLevel: input.initialCcLevel,
+          mustChangePassword: input.mustChangePassword,
+          verifyCodeforces: Boolean(input.codeforcesHandle),
           ...(input.organizationId ? { organizationId: input.organizationId } : {}),
           ...(input.codeforcesHandle ? { codeforcesHandle: input.codeforcesHandle } : {}),
         },
@@ -253,6 +261,7 @@ export class UsersController {
             organizationId: input.organizationId ?? null,
             codeforcesHandle: input.codeforcesHandle ?? null,
             initialCcLevel: input.initialCcLevel,
+            mustChangePassword: input.mustChangePassword,
           },
         },
       );
@@ -416,7 +425,8 @@ export class UsersController {
     await this.database.sql.begin(async (transaction) => {
       const [credential] = await transaction`
         UPDATE user_credentials SET password_hash = ${passwordHash}, password_updated_at = now(),
-          failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+          must_change_password = ${input.mustChangePassword}, failed_login_attempts = 0,
+          locked_until = NULL, updated_at = now()
         WHERE user_id = ${userId} RETURNING user_id
       `;
       if (!credential) throw new BadRequestException('Tài khoản không có thông tin đăng nhập');

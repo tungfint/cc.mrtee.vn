@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, type SessionUser } from '../lib/api';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -11,10 +11,18 @@ export default function LoginPage() {
   const location = useLocation();
   const login = useMutation({
     mutationFn: () =>
-      api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-    onSuccess: async () => {
+      api<{ user: SessionUser }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    onSuccess: async ({ user }) => {
       await queryClient.invalidateQueries({ queryKey: ['session'] });
-      void navigate((location.state as { from?: string } | null)?.from ?? '/', { replace: true });
+      void navigate(
+        user.mustChangePassword
+          ? '/account?password=required'
+          : ((location.state as { from?: string } | null)?.from ?? '/'),
+        { replace: true },
+      );
     },
   });
   const submit = (event: FormEvent) => {

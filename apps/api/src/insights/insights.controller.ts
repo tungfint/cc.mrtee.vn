@@ -32,6 +32,7 @@ const leaderboardQuery = z.object({
   sort: z.enum(['CC_LEVEL', 'CC_POINT', 'STREAK']).default('CC_LEVEL'),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  shareKey: z.string().trim().min(20).max(180).optional(),
 });
 
 @Controller()
@@ -163,7 +164,22 @@ export class InsightsController {
     const input = parsed.data;
     let organizationId = input.organizationId ?? null;
     let seasonId = input.seasonId ?? null;
-    if (seasonId) {
+    let share: { public_key: string; organization_name: string | null } | null = null;
+    if (input.shareKey) {
+      const [link] = await this.database.sql<
+        { organization_id: string | null; public_key: string; organization_name: string | null }[]
+      >`
+        SELECT links.organization_id, links.public_key, organizations.name AS organization_name
+        FROM leaderboard_share_links AS links
+        LEFT JOIN organizations ON organizations.id = links.organization_id
+        WHERE links.public_key = ${input.shareKey} AND links.active = true
+      `;
+      if (!link)
+        throw new BadRequestException('Liên kết bảng xếp hạng không hợp lệ hoặc đã thu hồi');
+      organizationId = link.organization_id;
+      seasonId = null;
+      share = { public_key: link.public_key, organization_name: link.organization_name };
+    } else if (seasonId) {
       const [season] = await this.database.sql<{ organization_id: string | null }[]>`
         SELECT organization_id FROM seasons WHERE id = ${seasonId}
       `;
@@ -173,7 +189,7 @@ export class InsightsController {
       }
       organizationId = season.organization_id;
     }
-    if (organizationId) {
+    if (organizationId && !input.shareKey) {
       const access = await this.authorization.organizationAccess(organizationId, user);
       this.authorization.assertCanView(access, user);
     }
@@ -279,6 +295,13 @@ export class InsightsController {
             }
           : null,
       })),
+      share: share
+        ? {
+            publicKey: share.public_key,
+            scope: organizationId ? 'ORGANIZATION' : 'ALL',
+            organizationName: share.organization_name,
+          }
+        : null,
     };
   }
 

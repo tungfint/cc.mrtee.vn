@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, formatNumber } from '../lib/api';
+import { api, formatNumber, formatVnd } from '../lib/api';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 
 interface Reward {
@@ -9,6 +9,7 @@ interface Reward {
   cost: string;
   stock: number | null;
   image_url: string | null;
+  cash_value_vnd: number | null;
 }
 
 export default function RewardsPage() {
@@ -63,6 +64,9 @@ export default function RewardsPage() {
               <div className="p-5">
                 <p className="eyebrow">PHẦN THƯỞNG</p>
                 <h2 className="mt-1 text-xl font-black">{reward.name}</h2>
+                {reward.cash_value_vnd !== null && (
+                  <p className="cash-reward-value">Nhận {formatVnd(reward.cash_value_vnd)}</p>
+                )}
                 <p className="min-h-12 text-sm leading-6 text-[var(--muted)]">
                   {reward.description}
                 </p>

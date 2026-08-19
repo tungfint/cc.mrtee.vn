@@ -7,8 +7,8 @@ import './index.css';
 
 const savedTheme = localStorage.getItem('cc-theme');
 document.documentElement.dataset.theme = ['dark', 'light', 'pink'].includes(savedTheme ?? '')
-  ? (savedTheme ?? 'dark')
-  : 'dark';
+  ? (savedTheme ?? 'pink')
+  : 'pink';
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -7,7 +7,13 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { parse as parseCsv } from 'csv-parse/sync';
+import { readSheet } from 'read-excel-file/node';
 import { z } from 'zod';
 import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -27,6 +33,8 @@ const rankSchema = z.object({
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
   active: z.boolean().default(true),
 });
+
+type CellValue = string | number | boolean | Date | DateConstructor | null;
 
 @Controller()
 export class ContentController {
@@ -65,6 +73,50 @@ export class ContentController {
   @Post('admin/quotes')
   createQuote(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
     return this.persistQuote(null, body, actor);
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Post('admin/quotes/import')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 3 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async importQuotes(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    if (!file) throw new BadRequestException('Chọn file CSV hoặc XLSX để import');
+    const rows = await this.readRows(file);
+    if (rows.length < 2) throw new BadRequestException('File chưa có danh ngôn');
+    if (rows.length > 1001) throw new BadRequestException('Mỗi lần chỉ import tối đa 1.000 câu');
+    const header = rows[0]!.map((value) => this.normalizeHeader(String(value ?? '')));
+    if (!header.includes('noi_dung')) throw new BadRequestException('Thiếu cột bắt buộc: noi_dung');
+    const results: { row: number; success: boolean; message?: string }[] = [];
+    let created = 0;
+    for (const [index, row] of rows.slice(1).entries()) {
+      if (row.every((value) => value === null || String(value).trim() === '')) continue;
+      const record = Object.fromEntries(header.map((key, column) => [key, row[column] ?? '']));
+      const parsed = quoteSchema.safeParse({
+        content: String(record.noi_dung ?? ''),
+        author: String(record.tac_gia ?? '').trim() || null,
+        sortOrder: record.thu_tu === '' ? index * 10 : record.thu_tu,
+        active: this.booleanCell(record.hien_thi, true),
+      });
+      if (!parsed.success) {
+        results.push({
+          row: index + 2,
+          success: false,
+          message: parsed.error.issues.map((issue) => issue.message).join('; '),
+        });
+        continue;
+      }
+      await this.persistQuote(null, parsed.data, actor);
+      created += 1;
+      results.push({ row: index + 2, success: true });
+    }
+    return { created, failed: results.length - created, total: results.length, results };
   }
 
   @RequireSystemRole('SYSTEM_ADMIN')
@@ -210,5 +262,41 @@ export class ContentController {
     const parsed = z.string().uuid().safeParse(input);
     if (!parsed.success) throw new BadRequestException('ID không hợp lệ');
     return parsed.data;
+  }
+
+  private async readRows(file: Express.Multer.File): Promise<CellValue[][]> {
+    try {
+      if (file.originalname.toLowerCase().endsWith('.xlsx')) return await readSheet(file.buffer);
+      if (file.originalname.toLowerCase().endsWith('.csv')) {
+        return parseCsv(file.buffer, {
+          bom: true,
+          skip_empty_lines: true,
+          relax_column_count: true,
+          trim: true,
+        });
+      }
+    } catch {
+      throw new BadRequestException('Không đọc được file CSV/XLSX');
+    }
+    throw new BadRequestException('Chỉ hỗ trợ file .csv hoặc .xlsx');
+  }
+
+  private normalizeHeader(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+  }
+
+  private booleanCell(value: unknown, fallback: boolean): boolean {
+    const normalized = (['string', 'number', 'boolean'].includes(typeof value) ? String(value) : '')
+      .trim()
+      .toLowerCase();
+    if (!normalized) return fallback;
+    return !['0', 'false', 'no', 'không', 'khong', 'ẩn', 'an'].includes(normalized);
   }
 }

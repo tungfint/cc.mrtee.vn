@@ -152,7 +152,7 @@ export function RewardImageUploader({
         <input
           onChange={(event) => onChange(event.target.value)}
           placeholder="https://…"
-          type="url"
+          type="text"
           value={value}
         />
       </label>

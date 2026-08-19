@@ -12,6 +12,7 @@ interface SessionRow {
   display_name: string;
   system_role: AuthUser['systemRole'];
   csrf_token_hash: string;
+  must_change_password: boolean;
 }
 
 @Injectable()
@@ -49,9 +50,11 @@ export class AuthGuard implements CanActivate {
         sessions.user_id,
         sessions.csrf_token_hash,
         users.display_name,
-        users.system_role
+        users.system_role,
+        credentials.must_change_password
       FROM auth_sessions AS sessions
       JOIN users ON users.id = sessions.user_id
+      JOIN user_credentials AS credentials ON credentials.user_id = users.id
       WHERE sessions.token_hash = ${hashToken(token)}
         AND sessions.revoked_at IS NULL
         AND sessions.expires_at > now()
@@ -67,6 +70,7 @@ export class AuthGuard implements CanActivate {
       displayName: session.display_name,
       systemRole: session.system_role,
       csrfTokenHash: session.csrf_token_hash,
+      mustChangePassword: session.must_change_password,
     };
     return true;
   }

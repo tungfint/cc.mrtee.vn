@@ -9,6 +9,7 @@ export interface AuthUser {
   displayName: string;
   systemRole: 'USER' | 'SYSTEM_ADMIN';
   csrfTokenHash: string;
+  mustChangePassword?: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {

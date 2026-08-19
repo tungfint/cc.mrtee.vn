@@ -22,6 +22,7 @@ interface CredentialRow {
   password_hash: string;
   failed_login_attempts: number;
   locked_until: Date | null;
+  must_change_password: boolean;
 }
 
 export interface LoginResult {
@@ -49,7 +50,8 @@ export class AuthService {
         users.status,
         credentials.password_hash,
         credentials.failed_login_attempts,
-        credentials.locked_until
+        credentials.locked_until,
+        credentials.must_change_password
       FROM user_credentials AS credentials
       JOIN users ON users.id = credentials.user_id
       WHERE credentials.email = ${email}
@@ -109,6 +111,7 @@ export class AuthService {
         userId: credential.user_id,
         displayName: credential.display_name,
         systemRole: credential.system_role,
+        mustChangePassword: credential.must_change_password,
       },
     };
   }
@@ -129,6 +132,8 @@ export class AuthService {
       organizationId?: string;
       codeforcesHandle?: string;
       initialCcLevel?: number;
+      mustChangePassword?: boolean;
+      verifyCodeforces?: boolean;
     },
     audit?: {
       actorUserId: string;
@@ -149,8 +154,8 @@ export class AuthService {
           )
           RETURNING id
         )
-        INSERT INTO user_credentials (user_id, email, password_hash)
-        SELECT id, ${email}, ${passwordHash} FROM new_user
+        INSERT INTO user_credentials (user_id, email, password_hash, must_change_password)
+        SELECT id, ${email}, ${passwordHash}, ${input.mustChangePassword ?? false} FROM new_user
         RETURNING user_id AS id
       `;
       if (user) {
@@ -167,8 +172,18 @@ export class AuthService {
         }
         if (input.codeforcesHandle) {
           await transaction`
-            INSERT INTO codeforces_accounts (user_id, handle)
-            VALUES (${user.id}, ${input.codeforcesHandle})
+            INSERT INTO codeforces_accounts (
+              user_id, handle, verification_status, verified_at, verified_by,
+              reward_eligible_from, sync_status, next_sync_at
+            ) VALUES (
+              ${user.id}, ${input.codeforcesHandle},
+              ${input.verifyCodeforces ? 'ADMIN_VERIFIED' : 'UNVERIFIED'},
+              ${input.verifyCodeforces ? new Date().toISOString() : null},
+              ${input.verifyCodeforces ? (audit?.actorUserId ?? null) : null},
+              ${input.verifyCodeforces ? new Date().toISOString() : null},
+              ${input.verifyCodeforces ? 'INITIALIZING' : 'UNVERIFIED'},
+              ${input.verifyCodeforces ? new Date().toISOString() : null}
+            )
           `;
         }
       }

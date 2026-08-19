@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, formatDate, formatNumber } from '../lib/api';
+import { api, formatDate, formatNumber, formatVnd } from '../lib/api';
 import { EmptyState, ErrorState, LoadingState, PageTitle, StatusPill } from '../components/ui';
 
 interface Order {
@@ -10,13 +10,19 @@ interface Order {
   created_at: string;
   reviewed_at: string | null;
   note: string | null;
+  cash_value_vnd: number | null;
+}
+
+interface CashSummary {
+  fulfilledCount: number;
+  fulfilledValueVnd: number;
 }
 
 export default function OrdersPage() {
   const queryClient = useQueryClient();
   const orders = useQuery({
     queryKey: ['orders'],
-    queryFn: () => api<{ orders: Order[] }>('/me/reward-orders'),
+    queryFn: () => api<{ orders: Order[]; cashSummary: CashSummary }>('/me/reward-orders'),
   });
   const cancel = useMutation({
     mutationFn: (id: string) =>
@@ -47,6 +53,17 @@ export default function OrdersPage() {
         />
       ) : (
         <div className="space-y-3">
+          <section className="cash-summary panel">
+            <div>
+              <span>Tiền đã nhận</span>
+              <strong>{formatVnd(orders.data.cashSummary.fulfilledValueVnd)}</strong>
+            </div>
+            <div>
+              <span>Lần đổi tiền hoàn tất</span>
+              <strong>{formatNumber(orders.data.cashSummary.fulfilledCount)}</strong>
+            </div>
+            <p>Chỉ các quà tiền đã được Admin xác nhận gửi mới được cộng vào tổng này.</p>
+          </section>
           {orders.data.orders.map((order) => (
             <article
               className="panel flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"
@@ -60,6 +77,12 @@ export default function OrdersPage() {
                 <p className="mb-0 mt-2 text-sm text-[var(--muted)]">
                   Tạo {formatDate(order.created_at)} {order.note ? `· ${order.note}` : ''}
                 </p>
+                {order.cash_value_vnd !== null && (
+                  <p className="cash-order-line">
+                    {order.status === 'FULFILLED' ? 'Đã nhận' : 'Quà tiền'}:{' '}
+                    <strong>{formatVnd(order.cash_value_vnd)}</strong>
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-4">
                 <strong>{formatNumber(order.cost_snapshot, 2)} CC Balance</strong>

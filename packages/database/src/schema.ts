@@ -105,6 +105,7 @@ export const userCredentials = pgTable(
     passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    mustChangePassword: boolean('must_change_password').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -184,6 +185,25 @@ export const organizationMemberships = pgTable(
       'organization_memberships_left_at_check',
       sql`(${table.status} = 'LEFT' AND ${table.leftAt} IS NOT NULL) OR (${table.status} <> 'LEFT' AND ${table.leftAt} IS NULL)`,
     ),
+  ],
+);
+
+export const leaderboardShareLinks = pgTable(
+  'leaderboard_share_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'restrict',
+    }),
+    publicKey: varchar('public_key', { length: 180 }).notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('leaderboard_share_links_public_key_unique').on(table.publicKey),
+    index('leaderboard_share_links_scope_idx').on(table.organizationId, table.active),
   ],
 );
 
@@ -478,6 +498,7 @@ export const rewards = pgTable(
     stock: integer('stock'),
     active: boolean('active').default(true).notNull(),
     imageUrl: text('image_url'),
+    cashValueVnd: integer('cash_value_vnd'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -485,6 +506,10 @@ export const rewards = pgTable(
     index('rewards_active_idx').on(table.active),
     check('rewards_cost_check', sql`${table.cost} > 0`),
     check('rewards_stock_check', sql`${table.stock} IS NULL OR ${table.stock} >= 0`),
+    check(
+      'rewards_cash_value_check',
+      sql`${table.cashValueVnd} IS NULL OR ${table.cashValueVnd} > 0`,
+    ),
   ],
 );
 

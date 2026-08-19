@@ -15,6 +15,7 @@ export interface RewardRow {
   stock: number | null;
   active: boolean;
   image_url: string | null;
+  cash_value_vnd: number | null;
 }
 
 export interface OrderRow {
@@ -34,7 +35,7 @@ export class RewardsService {
 
   async catalog() {
     return this.database.sql<RewardRow[]>`
-      SELECT id, name, description, cost, stock, active, image_url
+      SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd
       FROM rewards
       WHERE active = true AND (stock IS NULL OR stock > 0)
       ORDER BY cost, name
@@ -42,13 +43,30 @@ export class RewardsService {
   }
 
   async orders(userId: string) {
-    return this.database.sql`
-      SELECT orders.*, rewards.name AS reward_name, rewards.image_url
-      FROM reward_orders AS orders
-      JOIN rewards ON rewards.id = orders.reward_id
-      WHERE orders.user_id = ${userId}
-      ORDER BY orders.created_at DESC
-    `;
+    const [orders, [cashSummary]] = await Promise.all([
+      this.database.sql`
+        SELECT orders.*, rewards.name AS reward_name, rewards.image_url, rewards.cash_value_vnd
+        FROM reward_orders AS orders
+        JOIN rewards ON rewards.id = orders.reward_id
+        WHERE orders.user_id = ${userId}
+        ORDER BY orders.created_at DESC
+      `,
+      this.database.sql<{ fulfilled_count: number; fulfilled_vnd: string }[]>`
+        SELECT count(*) FILTER (WHERE orders.status = 'FULFILLED')::int AS fulfilled_count,
+          COALESCE(sum(rewards.cash_value_vnd) FILTER (WHERE orders.status = 'FULFILLED'), 0)::text
+            AS fulfilled_vnd
+        FROM reward_orders AS orders
+        JOIN rewards ON rewards.id = orders.reward_id
+        WHERE orders.user_id = ${userId} AND rewards.cash_value_vnd IS NOT NULL
+      `,
+    ]);
+    return {
+      orders,
+      cashSummary: {
+        fulfilledCount: cashSummary?.fulfilled_count ?? 0,
+        fulfilledValueVnd: Number(cashSummary?.fulfilled_vnd ?? 0),
+      },
+    };
   }
 
   async redeem(userId: string, rewardId: string, clientKey: string) {
@@ -75,7 +93,7 @@ export class RewardsService {
         SELECT balance FROM user_wallets WHERE user_id = ${userId} FOR UPDATE
       `;
       const [reward] = await transaction<RewardRow[]>`
-        SELECT id, name, description, cost, stock, active, image_url
+        SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd
         FROM rewards WHERE id = ${rewardId} FOR UPDATE
       `;
       if (!reward || !reward.active) throw new NotFoundException('Phần thưởng không khả dụng');

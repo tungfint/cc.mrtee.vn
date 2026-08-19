@@ -34,6 +34,7 @@ const rewardSchema = z.object({
   stock: z.coerce.number().int().nonnegative().nullable().default(null),
   active: z.boolean().default(true),
   imageUrl: rewardImageUrlSchema.nullable().default(null),
+  cashValueVnd: z.coerce.number().int().positive().max(100_000_000).nullable().default(null),
 });
 
 @RequireSystemRole('SYSTEM_ADMIN')
@@ -53,7 +54,8 @@ export class RewardsAdminController {
   async orders() {
     return {
       orders: await this.database.sql`
-        SELECT orders.*, users.display_name, rewards.name AS reward_name
+        SELECT orders.*, users.display_name, users.full_name, rewards.name AS reward_name,
+          rewards.cash_value_vnd
         FROM reward_orders AS orders
         JOIN users ON users.id = orders.user_id
         JOIN rewards ON rewards.id = orders.reward_id
@@ -124,14 +126,17 @@ export class RewardsAdminController {
             UPDATE rewards SET
               name = ${input.name}, description = ${input.description}, cost = ${input.cost},
               stock = ${input.stock}, active = ${input.active}, image_url = ${input.imageUrl},
+              cash_value_vnd = ${input.cashValueVnd},
               updated_at = now()
             WHERE id = ${id} RETURNING *
           `
         : await transaction`
-            INSERT INTO rewards (name, description, cost, stock, active, image_url)
+            INSERT INTO rewards (
+              name, description, cost, stock, active, image_url, cash_value_vnd
+            )
             VALUES (
               ${input.name}, ${input.description}, ${input.cost}, ${input.stock},
-              ${input.active}, ${input.imageUrl}
+              ${input.active}, ${input.imageUrl}, ${input.cashValueVnd}
             ) RETURNING *
           `;
       if (!reward) throw new BadRequestException('Không tìm thấy phần thưởng');

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, formatDate, formatNumber, useSession } from '../lib/api';
+import { api, formatDate, formatNumber, formatVnd, useSession } from '../lib/api';
 import {
   Avatar,
   CodeforcesHandle,
@@ -52,6 +52,7 @@ interface UserAccount {
   rank: string | null;
   cc_point: string;
   cc_balance: string;
+  must_change_password: boolean;
   memberships: { organizationId: string; organizationName: string; role: string }[];
 }
 interface Organization {
@@ -72,6 +73,26 @@ interface Reward {
   stock: number | null;
   active: boolean;
   image_url: string | null;
+  cash_value_vnd: number | null;
+}
+interface RewardOrder {
+  id: string;
+  display_name: string;
+  full_name: string;
+  reward_name: string;
+  cost_snapshot: string;
+  cash_value_vnd: number | null;
+  status: string;
+  note: string | null;
+  created_at: string;
+}
+interface LeaderboardLink {
+  id: string;
+  public_key: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  active: boolean;
+  created_at: string;
 }
 interface MotivationalQuote {
   id: string;
@@ -108,6 +129,7 @@ export default function AdminPage() {
   const [rewardStock, setRewardStock] = useState('');
   const [rewardImageUrl, setRewardImageUrl] = useState('');
   const [rewardActive, setRewardActive] = useState(true);
+  const [rewardCashValue, setRewardCashValue] = useState('');
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
   const [quoteContent, setQuoteContent] = useState('');
   const [quoteAuthor, setQuoteAuthor] = useState('');
@@ -122,6 +144,7 @@ export default function AdminPage() {
   const [editingRank, setEditingRank] = useState<LevelRank | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mustChangePassword, setMustChangePassword] = useState(true);
   const [fullName, setFullName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [codeforcesHandle, setCodeforcesHandle] = useState('');
@@ -129,6 +152,7 @@ export default function AdminPage() {
   const [classId, setClassId] = useState('');
   const [resetUserId, setResetUserId] = useState('');
   const [resetPassword, setResetPassword] = useState('');
+  const [resetMustChangePassword, setResetMustChangePassword] = useState(true);
   const [organizationName, setOrganizationName] = useState('');
   const [organizationSlug, setOrganizationSlug] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
@@ -136,6 +160,9 @@ export default function AdminPage() {
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [pointImportFile, setPointImportFile] = useState<File | null>(null);
+  const [quoteImportFile, setQuoteImportFile] = useState<File | null>(null);
+  const [leaderboardScope, setLeaderboardScope] = useState<'ALL' | 'ORGANIZATION'>('ALL');
+  const [leaderboardOrganizationId, setLeaderboardOrganizationId] = useState('');
   const [syncScope, setSyncScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>('USER');
   const [syncUserId, setSyncUserId] = useState('');
   const [studentClassFilter, setStudentClassFilter] = useState('ALL');
@@ -181,6 +208,16 @@ export default function AdminPage() {
     queryFn: () => api<{ rewards: Reward[] }>('/admin/rewards'),
     enabled: Boolean(isSystemAdmin),
   });
+  const rewardOrders = useQuery({
+    queryKey: ['admin-reward-orders'],
+    queryFn: () => api<{ orders: RewardOrder[] }>('/admin/rewards/orders'),
+    enabled: Boolean(isSystemAdmin),
+  });
+  const leaderboardLinks = useQuery({
+    queryKey: ['admin-leaderboard-links'],
+    queryFn: () => api<{ links: LeaderboardLink[] }>('/admin/leaderboard-links'),
+    enabled: Boolean(isSystemAdmin),
+  });
   const content = useQuery({
     queryKey: ['admin-content'],
     queryFn: () => api<{ quotes: MotivationalQuote[]; ranks: LevelRank[] }>('/admin/content'),
@@ -217,6 +254,8 @@ export default function AdminPage() {
         'admin-organizations',
         'admin-rewards',
         'admin-content',
+        'admin-reward-orders',
+        'admin-leaderboard-links',
         'dashboard-content',
         'audits',
         'me',
@@ -236,10 +275,13 @@ export default function AdminPage() {
         failed: number;
         total: number;
         results: { row: number; email: string; success: boolean; message?: string }[];
-      }>(`/organizations/${organizationId}/students/import`, {
-        method: 'POST',
-        body: form,
-      });
+      }>(
+        isSystemAdmin ? '/admin/users/import' : `/organizations/${organizationId}/students/import`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      );
     },
     onSuccess: async () => {
       await Promise.all([
@@ -247,6 +289,18 @@ export default function AdminPage() {
         queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
       ]);
     },
+  });
+  const importQuotes = useMutation({
+    mutationFn: async () => {
+      if (!quoteImportFile) throw new Error('Chọn file CSV hoặc XLSX');
+      const form = new FormData();
+      form.append('file', quoteImportFile);
+      return api<{ created: number; failed: number; total: number }>('/admin/quotes/import', {
+        method: 'POST',
+        body: form,
+      });
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-content'] }),
   });
   const importPoints = useMutation({
     mutationFn: async () => {
@@ -380,13 +434,14 @@ export default function AdminPage() {
     { id: 'members', label: 'Học sinh' },
     { id: 'points', label: 'Điểm & CC Base' },
     { id: 'sync', label: 'Đồng bộ CF' },
-    { id: 'audit', label: 'Nhật ký' },
     ...(isSystemAdmin
       ? [
           { id: 'rewards', label: 'Phần thưởng' },
           { id: 'content', label: 'Nội dung & cấp bậc' },
+          { id: 'leaderboard-links', label: 'Link BXH' },
         ]
       : []),
+    { id: 'audit', label: 'Nhật ký' },
   ];
   return (
     <>
@@ -453,6 +508,7 @@ export default function AdminPage() {
                         displayName,
                         systemRole: 'USER',
                         initialCcLevel: Number(initialCcLevel),
+                        mustChangePassword,
                         ...(classId ? { organizationId: classId } : {}),
                         ...(codeforcesHandle ? { codeforcesHandle } : {}),
                       },
@@ -530,6 +586,16 @@ export default function AdminPage() {
                           ))}
                       </select>
                     </label>
+                    <label className="field form-span-2">
+                      <span>Yêu cầu đổi mật khẩu ở lần đăng nhập đầu?</span>
+                      <select
+                        onChange={(event) => setMustChangePassword(event.target.value === 'YES')}
+                        value={mustChangePassword ? 'YES' : 'NO'}
+                      >
+                        <option value="YES">Có</option>
+                        <option value="NO">Không</option>
+                      </select>
+                    </label>
                   </div>
                   <button className="button-primary mt-5" type="submit">
                     Tạo tài khoản
@@ -541,7 +607,11 @@ export default function AdminPage() {
                     event.preventDefault();
                     mutation.mutate({
                       path: `/admin/users/${resetUserId}/reset-password`,
-                      body: { password: resetPassword, reason: reason || 'Admin đặt lại mật khẩu' },
+                      body: {
+                        password: resetPassword,
+                        mustChangePassword: resetMustChangePassword,
+                        reason: reason || 'Admin đặt lại mật khẩu',
+                      },
                     });
                   }}
                 >
@@ -576,11 +646,64 @@ export default function AdminPage() {
                     <span>Lý do</span>
                     <textarea onChange={(e) => setReason(e.target.value)} value={reason} />
                   </label>
+                  <label className="field mt-4">
+                    <span>Yêu cầu đổi mật khẩu ở lần đăng nhập tiếp theo?</span>
+                    <select
+                      onChange={(event) => setResetMustChangePassword(event.target.value === 'YES')}
+                      value={resetMustChangePassword ? 'YES' : 'NO'}
+                    >
+                      <option value="YES">Có</option>
+                      <option value="NO">Không</option>
+                    </select>
+                  </label>
                   <button className="button-secondary mt-5" type="submit">
                     Đặt lại & đăng xuất các phiên
                   </button>
                 </form>
               </div>
+              <form
+                className="panel import-panel p-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  importStudents.mutate();
+                }}
+              >
+                <div>
+                  <p className="eyebrow">BULK IMPORT</p>
+                  <h2 className="mt-2 text-lg font-black">Import tài khoản học sinh</h2>
+                  <p className="text-sm text-[var(--muted)]">
+                    Điền slug lớp cho từng học sinh; để trống nếu học sinh chưa thuộc lớp nào.
+                  </p>
+                  <a
+                    className="template-link"
+                    download
+                    href="/templates/danh-sach-hoc-sinh-mau.csv"
+                  >
+                    ⇩ Tải file mẫu CSV
+                  </a>
+                </div>
+                <label className="field">
+                  <span>File CSV/XLSX</span>
+                  <input
+                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={(event) => setImportFile(event.target.files?.[0] ?? null)}
+                    required
+                    type="file"
+                  />
+                </label>
+                <button className="button-secondary" disabled={importStudents.isPending}>
+                  {importStudents.isPending ? 'Đang import…' : 'Import tài khoản'}
+                </button>
+              </form>
+              {importStudents.error && (
+                <p className="notice error">{importStudents.error.message}</p>
+              )}
+              {importStudents.data && (
+                <p className="notice success">
+                  Đã tạo {importStudents.data.created}/{importStudents.data.total} học sinh; lỗi{' '}
+                  {importStudents.data.failed}.
+                </p>
+              )}
               {editingUser && (
                 <form
                   className="panel p-6"
@@ -711,6 +834,9 @@ export default function AdminPage() {
                             {item.email} · CC Base {item.initial_cc_level ?? '800'} ·{' '}
                             {item.memberships.length} lớp
                           </p>
+                          {item.must_change_password && (
+                            <p className="pending-copy">Phải đổi mật khẩu khi đăng nhập</p>
+                          )}
                           {item.codeforces_handle && (
                             <CodeforcesHandle
                               handle={item.codeforces_handle}
@@ -943,7 +1069,7 @@ export default function AdminPage() {
                   khoản; bỏ qua {verifyStudents.data.skipped}.
                 </p>
               )}
-              {organizationId && (
+              {!isSystemAdmin && organizationId && (
                 <form
                   className="panel import-panel p-5"
                   onSubmit={(event) => {
@@ -1648,6 +1774,110 @@ export default function AdminPage() {
               </div>
             </section>
           )}
+          {tab === 'leaderboard-links' && isSystemAdmin && (
+            <section className="space-y-6">
+              <form
+                className="panel leaderboard-link-generator p-6"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  mutation.mutate({
+                    path: '/admin/leaderboard-links',
+                    body: {
+                      organizationId: leaderboardScope === 'ALL' ? null : leaderboardOrganizationId,
+                    },
+                  });
+                }}
+              >
+                <div>
+                  <p className="eyebrow">PUBLIC LEADERBOARD</p>
+                  <h2 className="mt-2 text-xl font-black">Tạo link xem BXH không cần đăng nhập</h2>
+                  <p className="text-sm text-[var(--muted)]">
+                    Mỗi phạm vi chỉ có một link đang hoạt động. Tạo link mới sẽ tự thu hồi link cũ.
+                  </p>
+                </div>
+                <label className="field">
+                  <span>Phạm vi</span>
+                  <select
+                    onChange={(event) =>
+                      setLeaderboardScope(event.target.value as 'ALL' | 'ORGANIZATION')
+                    }
+                    value={leaderboardScope}
+                  >
+                    <option value="ALL">Toàn hệ thống</option>
+                    <option value="ORGANIZATION">Một lớp học</option>
+                  </select>
+                </label>
+                {leaderboardScope === 'ORGANIZATION' && (
+                  <label className="field">
+                    <span>Lớp học</span>
+                    <select
+                      onChange={(event) => setLeaderboardOrganizationId(event.target.value)}
+                      required
+                      value={leaderboardOrganizationId}
+                    >
+                      <option value="">Chọn lớp</option>
+                      {organizations.data?.organizations
+                        .filter(({ status }) => status === 'ACTIVE')
+                        .map((organization) => (
+                          <option key={organization.id} value={organization.id}>
+                            {organization.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                )}
+                <button className="button-primary" type="submit">
+                  Gen link mới
+                </button>
+              </form>
+              <div className="panel overflow-hidden">
+                <div className="management-header">
+                  <strong>Link BXH đang hoạt động</strong>
+                  <span>Có thể gửi trực tiếp cho phụ huynh và học sinh</span>
+                </div>
+                {!leaderboardLinks.data?.links.length ? (
+                  <EmptyState
+                    title="Chưa có link công khai"
+                    detail="Hãy tạo link đầu tiên ở phía trên."
+                  />
+                ) : (
+                  leaderboardLinks.data.links.map((link) => {
+                    const publicUrl = `${window.location.origin}/leaderboard/${link.public_key}`;
+                    return (
+                      <div className="admin-row leaderboard-link-row" key={link.id}>
+                        <div>
+                          <strong>{link.organization_name ?? 'Toàn hệ thống'}</strong>
+                          <a href={publicUrl} rel="noreferrer" target="_blank">
+                            {publicUrl}
+                          </a>
+                        </div>
+                        <button
+                          className="button-secondary"
+                          onClick={() => void navigator.clipboard.writeText(publicUrl)}
+                          type="button"
+                        >
+                          Sao chép
+                        </button>
+                        <button
+                          className="button-danger"
+                          onClick={() =>
+                            mutation.mutate({
+                              path: `/admin/leaderboard-links/${link.id}`,
+                              method: 'DELETE',
+                              body: null,
+                            })
+                          }
+                          type="button"
+                        >
+                          Thu hồi
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          )}
           {tab === 'audit' && !noOrganizationSelected && (
             <div className="panel overflow-hidden">
               {audits.isPending ? (
@@ -1676,149 +1906,249 @@ export default function AdminPage() {
             </div>
           )}
           {tab === 'rewards' && isSystemAdmin && (
-            <div className="grid gap-6 lg:grid-cols-[0.7fr_1.3fr]">
-              <form
-                className="panel p-6"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  mutation.mutate({
-                    path: editingReward ? `/admin/rewards/${editingReward.id}` : '/admin/rewards',
-                    method: editingReward ? 'PATCH' : 'POST',
-                    body: {
-                      name: rewardName,
-                      description: rewardDescription,
-                      cost: Number(rewardCost),
-                      stock: rewardStock === '' ? null : Number(rewardStock),
-                      active: rewardActive,
-                      imageUrl: rewardImageUrl || null,
-                    },
-                  });
-                }}
-              >
-                <p className="eyebrow">CATALOG</p>
-                <div className="section-heading mt-2">
-                  <h2 className="m-0 text-xl font-black">
-                    {editingReward ? 'Sửa phần thưởng' : 'Tạo phần thưởng'}
-                  </h2>
-                  {editingReward && (
-                    <button
-                      className="button-secondary"
-                      onClick={() => {
-                        setEditingReward(null);
-                        setRewardName('');
-                        setRewardDescription('');
-                        setRewardCost('100');
-                        setRewardStock('');
-                        setRewardImageUrl('');
-                        setRewardActive(true);
-                      }}
-                      type="button"
-                    >
-                      Huỷ sửa
-                    </button>
-                  )}
-                </div>
-                <label className="field mt-5">
-                  <span>Tên</span>
-                  <input
-                    onChange={(e) => setRewardName(e.target.value)}
-                    required
-                    value={rewardName}
-                  />
-                </label>
-                <label className="field mt-4">
-                  <span>Chi phí CC Balance</span>
-                  <input
-                    min="1"
-                    onChange={(e) => setRewardCost(e.target.value)}
-                    required
-                    step="1"
-                    type="number"
-                    value={rewardCost}
-                  />
-                </label>
-                <label className="field mt-4">
-                  <span>Mô tả</span>
-                  <textarea
-                    onChange={(e) => setRewardDescription(e.target.value)}
-                    required
-                    value={rewardDescription}
-                  />
-                </label>
-                <div className="form-grid mt-4">
-                  <label className="field">
-                    <span>Số lượng (trống = không giới hạn)</span>
-                    <input
-                      min="0"
-                      onChange={(e) => setRewardStock(e.target.value)}
-                      type="number"
-                      value={rewardStock}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Trạng thái</span>
-                    <select
-                      onChange={(e) => setRewardActive(e.target.value === 'ACTIVE')}
-                      value={rewardActive ? 'ACTIVE' : 'INACTIVE'}
-                    >
-                      <option value="ACTIVE">Đang mở</option>
-                      <option value="INACTIVE">Tạm ẩn</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="mt-4">
-                  <RewardImageUploader onChange={setRewardImageUrl} value={rewardImageUrl} />
-                </div>
-                <button className="button-primary mt-5" type="submit">
-                  {editingReward ? 'Lưu phần thưởng' : 'Tạo phần thưởng'}
-                </button>
-              </form>
-              <div className="panel overflow-hidden">
-                {rewards.data?.rewards.map((reward) => (
-                  <div className="admin-row reward-admin-row" key={reward.id}>
-                    <div>
-                      <strong>{reward.name}</strong>
-                      <p className="m-0 text-xs text-[var(--muted)]">
-                        {formatNumber(reward.cost, 2)} CC Balance · {reward.stock ?? '∞'} suất
-                      </p>
-                    </div>
-                    <StatusPill value={reward.active ? 'ACTIVE' : 'INACTIVE'} />
-                    <div className="student-actions">
+            <section className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-[0.7fr_1.3fr]">
+                <form
+                  className="panel p-6"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    mutation.mutate({
+                      path: editingReward ? `/admin/rewards/${editingReward.id}` : '/admin/rewards',
+                      method: editingReward ? 'PATCH' : 'POST',
+                      body: {
+                        name: rewardName,
+                        description: rewardDescription,
+                        cost: Number(rewardCost),
+                        stock: rewardStock === '' ? null : Number(rewardStock),
+                        active: rewardActive,
+                        imageUrl: rewardImageUrl || null,
+                        cashValueVnd: rewardCashValue === '' ? null : Number(rewardCashValue),
+                      },
+                    });
+                  }}
+                >
+                  <p className="eyebrow">CATALOG</p>
+                  <div className="section-heading mt-2">
+                    <h2 className="m-0 text-xl font-black">
+                      {editingReward ? 'Sửa phần thưởng' : 'Tạo phần thưởng'}
+                    </h2>
+                    {editingReward && (
                       <button
                         className="button-secondary"
                         onClick={() => {
-                          setEditingReward(reward);
-                          setRewardName(reward.name);
-                          setRewardDescription(reward.description);
-                          setRewardCost(reward.cost);
-                          setRewardStock(reward.stock === null ? '' : String(reward.stock));
-                          setRewardImageUrl(reward.image_url ?? '');
-                          setRewardActive(reward.active);
+                          setEditingReward(null);
+                          setRewardName('');
+                          setRewardDescription('');
+                          setRewardCost('100');
+                          setRewardStock('');
+                          setRewardImageUrl('');
+                          setRewardCashValue('');
+                          setRewardActive(true);
                         }}
                         type="button"
                       >
-                        Sửa
+                        Huỷ sửa
                       </button>
-                      <button
-                        className="button-danger"
-                        disabled={!reward.active}
-                        onClick={() => {
-                          if (!window.confirm(`Lưu trữ phần thưởng “${reward.name}”?`)) return;
-                          mutation.mutate({
-                            path: `/admin/rewards/${reward.id}`,
-                            method: 'DELETE',
-                            body: null,
-                          });
-                        }}
-                        type="button"
-                      >
-                        {reward.active ? 'Xoá' : 'Đã lưu trữ'}
-                      </button>
-                    </div>
+                    )}
                   </div>
-                ))}
+                  <label className="field mt-5">
+                    <span>Tên</span>
+                    <input
+                      onChange={(e) => setRewardName(e.target.value)}
+                      required
+                      value={rewardName}
+                    />
+                  </label>
+                  <label className="field mt-4">
+                    <span>Chi phí CC Balance</span>
+                    <input
+                      min="1"
+                      onChange={(e) => setRewardCost(e.target.value)}
+                      required
+                      step="1"
+                      type="number"
+                      value={rewardCost}
+                    />
+                  </label>
+                  <label className="field mt-4">
+                    <span>Mô tả</span>
+                    <textarea
+                      onChange={(e) => setRewardDescription(e.target.value)}
+                      required
+                      value={rewardDescription}
+                    />
+                  </label>
+                  <label className="field mt-4">
+                    <span>Giá trị tiền nhận được (VND, trống nếu là quà thường)</span>
+                    <input
+                      min="1"
+                      onChange={(event) => setRewardCashValue(event.target.value)}
+                      placeholder="Ví dụ: 100000"
+                      step="1"
+                      type="number"
+                      value={rewardCashValue}
+                    />
+                  </label>
+                  <div className="form-grid mt-4">
+                    <label className="field">
+                      <span>Số lượng (trống = không giới hạn)</span>
+                      <input
+                        min="0"
+                        onChange={(e) => setRewardStock(e.target.value)}
+                        type="number"
+                        value={rewardStock}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Trạng thái</span>
+                      <select
+                        onChange={(e) => setRewardActive(e.target.value === 'ACTIVE')}
+                        value={rewardActive ? 'ACTIVE' : 'INACTIVE'}
+                      >
+                        <option value="ACTIVE">Đang mở</option>
+                        <option value="INACTIVE">Tạm ẩn</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="mt-4">
+                    <RewardImageUploader onChange={setRewardImageUrl} value={rewardImageUrl} />
+                  </div>
+                  <button className="button-primary mt-5" type="submit">
+                    {editingReward ? 'Lưu phần thưởng' : 'Tạo phần thưởng'}
+                  </button>
+                </form>
+                <div className="panel overflow-hidden">
+                  {rewards.data?.rewards.map((reward) => (
+                    <div className="admin-row reward-admin-row" key={reward.id}>
+                      <div>
+                        <strong>{reward.name}</strong>
+                        <p className="m-0 text-xs text-[var(--muted)]">
+                          {formatNumber(reward.cost, 2)} CC Balance · {reward.stock ?? '∞'} suất
+                        </p>
+                        {reward.cash_value_vnd !== null && (
+                          <p className="cash-reward-value">
+                            Nhận {formatVnd(reward.cash_value_vnd)}
+                          </p>
+                        )}
+                      </div>
+                      <StatusPill value={reward.active ? 'ACTIVE' : 'INACTIVE'} />
+                      <div className="student-actions">
+                        <button
+                          className="button-secondary"
+                          onClick={() => {
+                            setEditingReward(reward);
+                            setRewardName(reward.name);
+                            setRewardDescription(reward.description);
+                            setRewardCost(reward.cost);
+                            setRewardStock(reward.stock === null ? '' : String(reward.stock));
+                            setRewardImageUrl(reward.image_url ?? '');
+                            setRewardCashValue(
+                              reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd),
+                            );
+                            setRewardActive(reward.active);
+                          }}
+                          type="button"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          className="button-danger"
+                          disabled={!reward.active}
+                          onClick={() => {
+                            if (!window.confirm(`Lưu trữ phần thưởng “${reward.name}”?`)) return;
+                            mutation.mutate({
+                              path: `/admin/rewards/${reward.id}`,
+                              method: 'DELETE',
+                              body: null,
+                            });
+                          }}
+                          type="button"
+                        >
+                          {reward.active ? 'Xoá' : 'Đã lưu trữ'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+              <div className="panel overflow-hidden">
+                <div className="management-header">
+                  <strong>Yêu cầu đổi quà & quà tiền</strong>
+                  <span>“Đã gửi quà” sẽ cập nhật ngay cho Admin và học sinh</span>
+                </div>
+                {!rewardOrders.data?.orders.length ? (
+                  <EmptyState
+                    title="Chưa có yêu cầu đổi quà"
+                    detail="Các yêu cầu mới sẽ xuất hiện tại đây."
+                  />
+                ) : (
+                  rewardOrders.data.orders.map((order) => (
+                    <div className="admin-row reward-order-admin-row" key={order.id}>
+                      <div>
+                        <strong>{order.display_name}</strong>
+                        <p>
+                          {order.reward_name} · {formatNumber(order.cost_snapshot)} CC Balance
+                        </p>
+                        {order.cash_value_vnd !== null && (
+                          <p className="cash-reward-value">
+                            Quà tiền {formatVnd(order.cash_value_vnd)}
+                          </p>
+                        )}
+                        <small>{formatDate(order.created_at)}</small>
+                      </div>
+                      <StatusPill value={order.status} />
+                      <div className="student-actions">
+                        {order.status === 'REQUESTED' && (
+                          <>
+                            <button
+                              className="button-secondary"
+                              onClick={() =>
+                                mutation.mutate({
+                                  path: `/reward-orders/${order.id}/status`,
+                                  method: 'PATCH',
+                                  body: { status: 'APPROVED', note: 'Admin đã duyệt quà' },
+                                })
+                              }
+                              type="button"
+                            >
+                              Duyệt
+                            </button>
+                            <button
+                              className="button-danger"
+                              onClick={() =>
+                                mutation.mutate({
+                                  path: `/reward-orders/${order.id}/status`,
+                                  method: 'PATCH',
+                                  body: { status: 'REJECTED', note: 'Admin từ chối yêu cầu' },
+                                })
+                              }
+                              type="button"
+                            >
+                              Từ chối
+                            </button>
+                          </>
+                        )}
+                        {order.status === 'APPROVED' && (
+                          <button
+                            className="button-primary"
+                            onClick={() =>
+                              mutation.mutate({
+                                path: `/reward-orders/${order.id}/status`,
+                                method: 'PATCH',
+                                body: { status: 'FULFILLED', note: 'Admin xác nhận đã gửi quà' },
+                              })
+                            }
+                            type="button"
+                          >
+                            Đã gửi quà
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
           )}
           {tab === 'content' && isSystemAdmin && (
             <div className="content-admin-grid">
@@ -1844,6 +2174,36 @@ export default function AdminPage() {
                     </button>
                   )}
                 </div>
+                <form
+                  className="quote-import-box"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    importQuotes.mutate();
+                  }}
+                >
+                  <div>
+                    <strong>Import danh sách danh ngôn</strong>
+                    <a download href="/templates/danh-ngon-mau.csv">
+                      ⇩ File mẫu CSV
+                    </a>
+                  </div>
+                  <input
+                    accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={(event) => setQuoteImportFile(event.target.files?.[0] ?? null)}
+                    required
+                    type="file"
+                  />
+                  <button className="button-secondary" disabled={importQuotes.isPending}>
+                    {importQuotes.isPending ? 'Đang import…' : 'Import'}
+                  </button>
+                </form>
+                {importQuotes.error && <p className="notice error">{importQuotes.error.message}</p>}
+                {importQuotes.data && (
+                  <p className="notice success">
+                    Đã import {importQuotes.data.created}/{importQuotes.data.total} danh ngôn; lỗi{' '}
+                    {importQuotes.data.failed}.
+                  </p>
+                )}
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();

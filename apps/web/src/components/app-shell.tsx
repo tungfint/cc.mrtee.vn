@@ -17,7 +17,7 @@ const links = [
 export function AppShell({ user }: { user: SessionUser }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? 'dark');
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? 'pink');
   const profile = useQuery({
     queryKey: ['me'],
     queryFn: () =>
@@ -42,13 +42,13 @@ export function AppShell({ user }: { user: SessionUser }) {
   });
   const toggleTheme = () => {
     const themes = ['dark', 'light', 'pink'];
-    const next = themes[(themes.indexOf(theme) + 1) % themes.length] ?? 'dark';
+    const next = themes[(themes.indexOf(theme) + 1) % themes.length] ?? 'pink';
     document.documentElement.dataset.theme = next;
     localStorage.setItem('cc-theme', next);
     setTheme(next);
   };
-  const themeLabel = { dark: 'Tối', light: 'Sáng', pink: 'Hồng' }[theme] ?? 'Tối';
-  const themeIcon = { dark: '◐', light: '☀', pink: '♥' }[theme] ?? '◐';
+  const themeLabel = { dark: 'Tối', light: 'Sáng', pink: 'Hồng' }[theme] ?? 'Hồng';
+  const themeIcon = { dark: '◐', light: '☀', pink: '♥' }[theme] ?? '♥';
 
   return (
     <div className="app-frame">

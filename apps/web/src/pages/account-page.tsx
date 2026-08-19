@@ -26,6 +26,7 @@ interface AccountData {
     verification_status: string | null;
     current_rating: number | null;
     rank: string | null;
+    must_change_password: boolean;
   };
   memberships: {
     organization_id: string;
@@ -80,9 +81,13 @@ export default function AccountPage() {
         method: 'POST',
         body: JSON.stringify({ currentPassword, newPassword }),
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setCurrentPassword('');
       setNewPassword('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['session'] }),
+        queryClient.invalidateQueries({ queryKey: ['me'] }),
+      ]);
     },
   });
   if (account.isPending) return <LoadingState label="Đang tải tài khoản…" />;
@@ -97,6 +102,12 @@ export default function AccountPage() {
         detail="Quản lý hồ sơ, ảnh đại diện, lớp học, Codeforces và bảo mật đăng nhập."
         action={<StatusPill value={user.status} />}
       />
+      {user.must_change_password && (
+        <p className="notice pending mb-6">
+          Bạn đang dùng mật khẩu tạm. Hãy đổi mật khẩu ở mục Bảo mật trước khi tiếp tục sử dụng hệ
+          thống.
+        </p>
+      )}
       <section className="profile-layout">
         <div className="space-y-6">
           <div className="panel p-6">

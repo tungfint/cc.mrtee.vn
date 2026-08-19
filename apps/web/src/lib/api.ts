@@ -51,6 +51,7 @@ export interface SessionUser {
   userId: string;
   displayName: string;
   systemRole: 'USER' | 'SYSTEM_ADMIN';
+  mustChangePassword: boolean;
 }
 
 export function useSession() {
@@ -72,6 +73,14 @@ export function formatNumber(value: string | number | null | undefined, digits =
   return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: digits }).format(
     Number(value ?? 0),
   );
+}
+
+export function formatVnd(value: string | number | null | undefined) {
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Number(value ?? 0));
 }
 
 export function formatDate(value: string | null | undefined) {
