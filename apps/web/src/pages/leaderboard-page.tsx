@@ -1,17 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import {
+  Avatar,
+  CodeforcesHandle,
+  EmptyState,
+  ErrorState,
+  LevelRankBadge,
+  LoadingState,
+  PageTitle,
+  StudentName,
+} from '../components/ui';
 import { api, formatNumber } from '../lib/api';
-import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 
 interface Organization {
   id: string;
   name: string;
 }
-interface Season {
-  id: string;
-  name: string;
-  organization_id: string | null;
-}
+type RankingMetric = 'CC_LEVEL' | 'CC_POINT' | 'STREAK';
 interface Board {
   total: number;
   page: number;
@@ -20,111 +25,130 @@ interface Board {
     rank: number;
     userId: string;
     displayName: string;
+    avatarUrl: string | null;
+    codeforcesHandle: string | null;
+    currentRating: number | null;
     ccLevel: string;
-    seasonScore: string;
-    solved: number;
+    ccPoint: string;
+    ccBalance: string;
     streak: number;
     longestStreak: number;
+    levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
 }
 
+const metrics: { id: RankingMetric; label: string; icon: string }[] = [
+  { id: 'CC_LEVEL', label: 'CC Level', icon: '⚡' },
+  { id: 'CC_POINT', label: 'CC Point', icon: '◆' },
+  { id: 'STREAK', label: 'Streak', icon: '🔥' },
+];
+
 export default function LeaderboardPage() {
   const [organizationId, setOrganizationId] = useState('');
-  const [seasonId, setSeasonId] = useState('');
+  const [sort, setSort] = useState<RankingMetric>('CC_LEVEL');
   const [page, setPage] = useState(1);
   const organizations = useQuery({
     queryKey: ['organizations'],
     queryFn: () => api<{ organizations: Organization[] }>('/organizations'),
   });
-  const seasons = useQuery({
-    queryKey: ['seasons'],
-    queryFn: () => api<{ seasons: Season[] }>('/seasons'),
-  });
-  const params = new URLSearchParams({ page: String(page), pageSize: '20' });
+  const params = new URLSearchParams({ page: String(page), pageSize: '20', sort });
   if (organizationId) params.set('organizationId', organizationId);
-  if (seasonId) params.set('seasonId', seasonId);
   const board = useQuery({
-    queryKey: ['leaderboard', organizationId, seasonId, page],
+    queryKey: ['leaderboard', organizationId, sort, page],
     queryFn: () => api<Board>(`/leaderboards?${params}`),
   });
-  const filteredSeasons =
-    seasons.data?.seasons.filter(
-      (season) => !organizationId || season.organization_id === organizationId,
-    ) ?? [];
+  const metricLabel = metrics.find((metric) => metric.id === sort)?.label ?? 'CC Level';
+
   return (
     <>
       <PageTitle
         eyebrow="BẢNG XẾP HẠNG"
-        title="Thành tích không nằm trong số dư"
-        detail="Xếp hạng dựa trên Season Score; ví điểm và việc đổi thưởng không làm mất thành tích đã đạt."
+        title="Mỗi nỗ lực đều có vị trí"
+        detail={`Đang xếp hạng theo ${metricLabel}. CC Point là tổng điểm thành tích và không giảm khi bạn đổi quà.`}
         action={
-          <div className="filters">
-            <select
-              aria-label="Tổ chức"
-              onChange={(e) => {
-                setOrganizationId(e.target.value);
-                setSeasonId('');
-                setPage(1);
-              }}
-              value={organizationId}
-            >
-              <option value="">Toàn hệ thống</option>
-              {organizations.data?.organizations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Mùa giải"
-              onChange={(e) => {
-                setSeasonId(e.target.value);
-                setPage(1);
-              }}
-              value={seasonId}
-            >
-              <option value="">Mùa hiện tại</option>
-              {filteredSeasons.map((season) => (
-                <option key={season.id} value={season.id}>
-                  {season.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <select
+            aria-label="Lọc theo lớp"
+            onChange={(event) => {
+              setOrganizationId(event.target.value);
+              setPage(1);
+            }}
+            value={organizationId}
+          >
+            <option value="">Tất cả học sinh</option>
+            {organizations.data?.organizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.name}
+              </option>
+            ))}
+          </select>
         }
       />
+
+      <div className="ranking-toolbar" role="group" aria-label="Tiêu chí xếp hạng">
+        {metrics.map((metric) => (
+          <button
+            className={sort === metric.id ? 'active' : ''}
+            key={metric.id}
+            onClick={() => {
+              setSort(metric.id);
+              setPage(1);
+            }}
+            type="button"
+          >
+            <span aria-hidden>{metric.icon}</span>
+            {metric.label}
+          </button>
+        ))}
+      </div>
+
       {board.isPending ? (
         <LoadingState label="Đang dựng bảng xếp hạng…" />
       ) : board.error ? (
         <ErrorState error={board.error} retry={() => void board.refetch()} />
       ) : !board.data?.entries.length ? (
-        <EmptyState title="Chưa có thứ hạng" detail="Mùa giải này chưa ghi nhận điểm." />
+        <EmptyState title="Chưa có thứ hạng" detail="Chưa có dữ liệu học sinh để xếp hạng." />
       ) : (
         <div className="panel overflow-hidden">
-          <div className="leader-table header">
+          <div className="leader-table leader-table-compact header">
             <span>Hạng</span>
-            <span>Thành viên</span>
+            <span>Học sinh</span>
             <span>CC Level</span>
-            <span>Season Score</span>
-            <span>Bài giải</span>
+            <span>CC Point</span>
             <span>Streak</span>
           </div>
           {board.data.entries.map((entry) => (
             <div
-              className={`leader-table ${entry.rank <= 3 ? `top-${entry.rank}` : ''}`}
+              className={`leader-table leader-table-compact ${entry.rank <= 3 ? `top-${entry.rank}` : ''}`}
               key={entry.userId}
             >
               <span className="rank">
                 {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : `#${entry.rank}`}
               </span>
               <span className="member">
-                <i>{entry.displayName.slice(0, 2).toUpperCase()}</i>
-                <strong>{entry.displayName}</strong>
+                <Avatar
+                  name={entry.displayName}
+                  rating={entry.currentRating}
+                  size="sm"
+                  url={entry.avatarUrl}
+                />
+                <span className="leader-identity-copy">
+                  <span className="leader-name-row">
+                    <StudentName name={entry.displayName} rating={entry.currentRating} />
+                    <LevelRankBadge rank={entry.levelRank} />
+                  </span>
+                  {entry.codeforcesHandle ? (
+                    <CodeforcesHandle
+                      handle={entry.codeforcesHandle}
+                      rating={entry.currentRating}
+                    />
+                  ) : (
+                    <small>Chưa liên kết Codeforces</small>
+                  )}
+                </span>
               </span>
-              <span data-label="CC Level">{formatNumber(entry.ccLevel, 2)}</span>
-              <strong data-label="Season Score">{formatNumber(entry.seasonScore, 2)}</strong>
-              <span data-label="Bài giải">{entry.solved}</span>
-              <span data-label="Streak">🔥 {entry.streak}</span>
+              <span data-label="CC Level">⚡ {formatNumber(entry.ccLevel, 2)}</span>
+              <strong data-label="CC Point">◆ {formatNumber(entry.ccPoint, 2)}</strong>
+              <span data-label="Streak">🔥 {entry.streak} ngày</span>
             </div>
           ))}
         </div>

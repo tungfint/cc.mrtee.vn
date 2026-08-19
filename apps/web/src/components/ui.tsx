@@ -1,4 +1,99 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+
+export function Avatar({
+  name,
+  url,
+  rating,
+  size = 'md',
+}: {
+  name: string;
+  url?: string | null | undefined;
+  rating?: number | null | undefined;
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+}) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(-2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+  return (
+    <span
+      className={`avatar avatar-${size} ${codeforcesColor(rating)}`}
+      aria-label={`Avatar của ${name}`}
+    >
+      <span className="avatar-initials">{initials || 'CC'}</span>
+      <img alt="" className="avatar-default" src="/brand/cay-code-logo.webp" />
+      {url && (
+        <img
+          alt=""
+          className="avatar-custom"
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+          src={url}
+        />
+      )}
+    </span>
+  );
+}
+
+export function CodeforcesHandle({
+  handle,
+  rating,
+  large = false,
+}: {
+  handle: string;
+  rating?: number | null;
+  large?: boolean;
+}) {
+  return (
+    <a
+      className={`cf-handle ${codeforcesColor(rating)}${large ? ' cf-handle-large' : ''}`}
+      href={`https://codeforces.com/profile/${encodeURIComponent(handle)}`}
+      rel="noreferrer"
+      target="_blank"
+    >
+      @{handle}
+      {rating !== null && rating !== undefined && <small>{rating}</small>}
+    </a>
+  );
+}
+
+function codeforcesColor(rating: number | null | undefined): string {
+  if (rating === null || rating === undefined || rating < 1200) return 'cf-newbie';
+  if (rating < 1400) return 'cf-pupil';
+  if (rating < 1600) return 'cf-specialist';
+  if (rating < 1900) return 'cf-expert';
+  if (rating < 2100) return 'cf-candidate-master';
+  if (rating < 2400) return 'cf-master';
+  if (rating < 3000) return 'cf-grandmaster';
+  return 'cf-legendary';
+}
+
+export function StudentName({ name, rating }: { name: string; rating?: number | null }) {
+  return <strong className={`student-name ${codeforcesColor(rating)}`}>{name}</strong>;
+}
+
+export function LevelRankBadge({
+  rank,
+}: {
+  rank: { name: string; icon: string | null; color: string | null } | null;
+}) {
+  if (!rank) return null;
+  const icon = rank.icon ?? '🏅';
+  const image = /^https?:\/\//i.test(icon) || icon.startsWith('/');
+  return (
+    <span
+      className="level-rank-badge"
+      style={{ '--rank-color': rank.color ?? '#94a3b8' } as CSSProperties}
+    >
+      <span className="level-rank-badge-icon">{image ? <img alt="" src={icon} /> : icon}</span>
+      {rank.name}
+    </span>
+  );
+}
 
 export function LoadingState({ label, fullPage = false }: { label: string; fullPage?: boolean }) {
   return (
@@ -52,7 +147,7 @@ export function PageTitle({
 }: {
   eyebrow: string;
   title: string;
-  detail: string;
+  detail: ReactNode;
   action?: ReactNode;
 }) {
   return (
@@ -60,7 +155,7 @@ export function PageTitle({
       <div>
         <p className="eyebrow">{eyebrow}</p>
         <h1 className="page-title">{title}</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">{detail}</p>
+        <div className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">{detail}</div>
       </div>
       {action}
     </header>

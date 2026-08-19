@@ -36,6 +36,34 @@
       "when": 1787002800000,
       "tag": "0004_immutable_season_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787010000000,
+      "tag": "0005_user_avatar",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787030000000,
+      "tag": "0006_student_profile_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787117939848,
+      "tag": "0007_reflective_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787134279932,
+      "tag": "0008_magical_bulldozer",
+      "breakpoints": true
     }
   ]
 }

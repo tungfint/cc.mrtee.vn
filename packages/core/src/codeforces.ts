@@ -26,6 +26,14 @@ export interface CodeforcesSubmission {
   verdict?: string;
 }
 
+export interface CodeforcesUser {
+  handle: string;
+  rank?: string;
+  rating?: number;
+  maxRank?: string;
+  maxRating?: number;
+}
+
 export interface CodeforcesApiResponse<T> {
   status: 'OK' | 'FAILED';
   result?: T;

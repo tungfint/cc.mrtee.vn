@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, formatNumber } from '../lib/api';
+import { api, formatNumber, formatVnd } from '../lib/api';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 
 interface Reward {
@@ -9,6 +9,7 @@ interface Reward {
   cost: string;
   stock: number | null;
   image_url: string | null;
+  cash_value_vnd: number | null;
 }
 
 export default function RewardsPage() {
@@ -34,11 +35,11 @@ export default function RewardsPage() {
       <PageTitle
         eyebrow="REWARD STORE"
         title="Đổi nỗ lực thành trải nghiệm"
-        detail="Mua quà chỉ trừ ví điểm. Season Score và thứ hạng của bạn được giữ nguyên."
+        detail="Đổi quà chỉ trừ CC Balance; CC Point, CC Level và thành tích của bạn được giữ nguyên."
       />
       {redeem.isSuccess && (
         <p className="notice success">
-          Đã tạo đơn đổi thưởng. Bạn có thể theo dõi tại “Đơn của tôi”.
+          Đã tạo yêu cầu đổi thưởng. Bạn có thể theo dõi tại “Quà của tôi”.
         </p>
       )}
       {redeem.error && <p className="notice error">{redeem.error.message}</p>}
@@ -63,12 +64,15 @@ export default function RewardsPage() {
               <div className="p-5">
                 <p className="eyebrow">PHẦN THƯỞNG</p>
                 <h2 className="mt-1 text-xl font-black">{reward.name}</h2>
+                {reward.cash_value_vnd !== null && (
+                  <p className="cash-reward-value">Nhận {formatVnd(reward.cash_value_vnd)}</p>
+                )}
                 <p className="min-h-12 text-sm leading-6 text-[var(--muted)]">
                   {reward.description}
                 </p>
                 <div className="mt-5 flex items-center justify-between">
                   <strong className="text-xl text-[var(--accent)]">
-                    {formatNumber(reward.cost, 2)} <small className="text-xs">điểm</small>
+                    {formatNumber(reward.cost, 2)} <small className="text-xs">CC Balance</small>
                   </strong>
                   <button
                     className="button-primary"
@@ -76,7 +80,7 @@ export default function RewardsPage() {
                     onClick={() => {
                       if (
                         window.confirm(
-                          `Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} điểm?`,
+                          `Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} CC Balance?`,
                         )
                       )
                         redeem.mutate(reward.id);

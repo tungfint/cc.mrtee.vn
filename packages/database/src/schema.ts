@@ -82,6 +82,7 @@ export const users = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     fullName: varchar('full_name', { length: 200 }).notNull(),
     displayName: varchar('display_name', { length: 100 }).notNull(),
+    avatarUrl: text('avatar_url'),
     status: userStatus('status').default('ACTIVE').notNull(),
     systemRole: systemRole('system_role').default('USER').notNull(),
     timezone: varchar('timezone', { length: 100 }).default('Asia/Ho_Chi_Minh').notNull(),
@@ -104,6 +105,7 @@ export const userCredentials = pgTable(
     passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
+    mustChangePassword: boolean('must_change_password').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -186,6 +188,25 @@ export const organizationMemberships = pgTable(
   ],
 );
 
+export const leaderboardShareLinks = pgTable(
+  'leaderboard_share_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'restrict',
+    }),
+    publicKey: varchar('public_key', { length: 180 }).notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('leaderboard_share_links_public_key_unique').on(table.publicKey),
+    index('leaderboard_share_links_scope_idx').on(table.organizationId, table.active),
+  ],
+);
+
 export const codeforcesAccounts = pgTable(
   'codeforces_accounts',
   {
@@ -194,6 +215,11 @@ export const codeforcesAccounts = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     handle: citext('handle').notNull(),
+    pendingHandle: citext('pending_handle'),
+    currentRating: integer('current_rating'),
+    maxRating: integer('max_rating'),
+    rank: varchar('rank', { length: 50 }),
+    maxRank: varchar('max_rank', { length: 50 }),
     verificationStatus: verificationStatus('verification_status').default('UNVERIFIED').notNull(),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
     verifiedBy: uuid('verified_by').references((): AnyPgColumn => users.id, {
@@ -213,6 +239,9 @@ export const codeforcesAccounts = pgTable(
   (table) => [
     uniqueIndex('codeforces_accounts_user_unique').on(table.userId),
     uniqueIndex('codeforces_accounts_handle_unique').on(table.handle),
+    uniqueIndex('codeforces_accounts_pending_handle_unique')
+      .on(table.pendingHandle)
+      .where(sql`${table.pendingHandle} IS NOT NULL`),
     index('codeforces_accounts_next_sync_idx')
       .on(table.nextSyncAt)
       .where(sql`${table.syncStatus} NOT IN ('UNVERIFIED', 'INACTIVE')`),
@@ -223,6 +252,10 @@ export const codeforcesAccounts = pgTable(
     check(
       'codeforces_accounts_backfill_cursor_check',
       sql`${table.backfillNextFrom} IS NULL OR ${table.backfillNextFrom} > 0`,
+    ),
+    check(
+      'codeforces_accounts_rating_check',
+      sql`(${table.currentRating} IS NULL OR ${table.currentRating} >= 0) AND (${table.maxRating} IS NULL OR ${table.maxRating} >= 0)`,
     ),
   ],
 );
@@ -465,6 +498,7 @@ export const rewards = pgTable(
     stock: integer('stock'),
     active: boolean('active').default(true).notNull(),
     imageUrl: text('image_url'),
+    cashValueVnd: integer('cash_value_vnd'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -472,6 +506,46 @@ export const rewards = pgTable(
     index('rewards_active_idx').on(table.active),
     check('rewards_cost_check', sql`${table.cost} > 0`),
     check('rewards_stock_check', sql`${table.stock} IS NULL OR ${table.stock} >= 0`),
+    check(
+      'rewards_cash_value_check',
+      sql`${table.cashValueVnd} IS NULL OR ${table.cashValueVnd} > 0`,
+    ),
+  ],
+);
+
+export const motivationalQuotes = pgTable(
+  'motivational_quotes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    content: text('content').notNull(),
+    author: varchar('author', { length: 160 }),
+    active: boolean('active').default(true).notNull(),
+    sortOrder: integer('sort_order').default(0).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('motivational_quotes_active_order_idx').on(table.active, table.sortOrder),
+    check('motivational_quotes_sort_order_check', sql`${table.sortOrder} >= 0`),
+  ],
+);
+
+export const ccLevelRanks = pgTable(
+  'cc_level_ranks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    minLevel: integer('min_level').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    icon: text('icon').notNull(),
+    color: varchar('color', { length: 20 }).notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('cc_level_ranks_min_level_unique').on(table.minLevel),
+    index('cc_level_ranks_active_level_idx').on(table.active, table.minLevel),
+    check('cc_level_ranks_min_level_check', sql`${table.minLevel} >= 0`),
   ],
 );
 

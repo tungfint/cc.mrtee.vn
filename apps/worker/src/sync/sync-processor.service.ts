@@ -35,6 +35,16 @@ export class SyncProcessorService {
       RETURNING reward_eligible_from, backfill_next_from
     `;
     if (!account) throw new Error('Codeforces account no longer exists');
+    const codeforcesUser = await this.codeforces.userInfo(data.handle);
+    await this.database.sql`
+      UPDATE codeforces_accounts SET
+        current_rating = ${codeforcesUser.rating ?? null},
+        max_rating = ${codeforcesUser.maxRating ?? null},
+        rank = ${codeforcesUser.rank ?? null},
+        max_rank = ${codeforcesUser.maxRank ?? null},
+        updated_at = now()
+      WHERE id = ${data.accountId}
+    `;
     return data.mode === 'BACKFILL'
       ? this.backfill(data, account)
       : this.incremental(data, account);

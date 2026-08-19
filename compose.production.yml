@@ -60,6 +60,9 @@ services:
       AUTH_COOKIE_SECURE: 'true'
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
       METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - avatar_uploads:/app/data/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -114,7 +117,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - '${HTTP_PORT:-80}:8080'
+      - '127.0.0.1:${HTTP_PORT:-8080}:8080'
     healthcheck:
       test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://127.0.0.1:8080/']
       interval: 15s
@@ -130,3 +133,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  avatar_uploads:

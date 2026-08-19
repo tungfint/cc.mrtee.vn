@@ -482,6 +482,44 @@ describe('Phase 1 database invariants', () => {
     ).resolves.toBeDefined();
   });
 
+  it('stores optional avatar URLs and rejects oversized values', async () => {
+    const userId = await insertUser(connection);
+    await expect(
+      connection`
+        UPDATE users SET avatar_url = 'https://example.com/avatar.png' WHERE id = ${userId}
+      `,
+    ).resolves.toBeDefined();
+    await expectPostgresError(
+      async () =>
+        connection`UPDATE users SET avatar_url = ${'x'.repeat(2049)} WHERE id = ${userId}`,
+      '23514',
+    );
+  });
+
+  it('tracks pending Codeforces handles and validates rating snapshots', async () => {
+    const firstUserId = await insertUser(connection, 'Handle owner one');
+    const secondUserId = await insertUser(connection, 'Handle owner two');
+    await connection`
+      INSERT INTO codeforces_accounts (user_id, handle, pending_handle, current_rating)
+      VALUES (${firstUserId}, 'first_handle', 'future_handle', 1420)
+    `;
+    await expectPostgresError(
+      async () =>
+        connection`
+          INSERT INTO codeforces_accounts (user_id, handle, pending_handle)
+          VALUES (${secondUserId}, 'second_handle', 'future_handle')
+        `,
+      '23505',
+    );
+    await expectPostgresError(
+      async () =>
+        connection`
+          UPDATE codeforces_accounts SET current_rating = -1 WHERE user_id = ${firstUserId}
+        `,
+      '23514',
+    );
+  });
+
   it('prevents duplicate redeem commands with a stable idempotency key', async () => {
     const userId = await insertUser(connection);
     const otherUserId = await insertUser(connection, 'Other redeemer');

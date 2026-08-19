@@ -63,6 +63,7 @@ export class AuthController {
       userId: user.userId,
       displayName: user.displayName,
       systemRole: user.systemRole,
+      mustChangePassword: user.mustChangePassword ?? false,
     };
   }
 }

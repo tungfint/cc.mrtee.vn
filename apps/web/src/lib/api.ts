@@ -23,7 +23,9 @@ export class ApiError extends Error {
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
-  if (options.body) headers.set('content-type', 'application/json');
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set('content-type', 'application/json');
+  }
   if (options.method && !['GET', 'HEAD'].includes(options.method.toUpperCase())) {
     const csrf = cookie('cc_csrf');
     if (csrf) headers.set('x-csrf-token', decodeURIComponent(csrf));
@@ -49,6 +51,7 @@ export interface SessionUser {
   userId: string;
   displayName: string;
   systemRole: 'USER' | 'SYSTEM_ADMIN';
+  mustChangePassword: boolean;
 }
 
 export function useSession() {
@@ -70,6 +73,14 @@ export function formatNumber(value: string | number | null | undefined, digits =
   return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: digits }).format(
     Number(value ?? 0),
   );
+}
+
+export function formatVnd(value: string | number | null | undefined) {
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Number(value ?? 0));
 }
 
 export function formatDate(value: string | null | undefined) {

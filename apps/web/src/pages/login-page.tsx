@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, type SessionUser } from '../lib/api';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -11,10 +11,18 @@ export default function LoginPage() {
   const location = useLocation();
   const login = useMutation({
     mutationFn: () =>
-      api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-    onSuccess: async () => {
+      api<{ user: SessionUser }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    onSuccess: async ({ user }) => {
       await queryClient.invalidateQueries({ queryKey: ['session'] });
-      void navigate((location.state as { from?: string } | null)?.from ?? '/', { replace: true });
+      void navigate(
+        user.mustChangePassword
+          ? '/account?password=required'
+          : ((location.state as { from?: string } | null)?.from ?? '/'),
+        { replace: true },
+      );
     },
   });
   const submit = (event: FormEvent) => {
@@ -25,10 +33,10 @@ export default function LoginPage() {
     <main className="login-page">
       <section className="login-story">
         <div className="brand text-white">
-          <span className="brand-mark">CC</span>
+          <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
-            <strong>CodeCraft</strong>
-            <small>MRTEE LAB</small>
+            <strong>Cầy Code</strong>
+            <small>MrTee.vn</small>
           </span>
         </div>
         <div className="max-w-xl">
@@ -41,7 +49,7 @@ export default function LoginPage() {
             Codeforces của bạn.
           </p>
         </div>
-        <p className="text-xs text-slate-500">Codeforces Gamification Tracker · v2</p>
+        <p className="text-xs text-slate-500">Cầy Code MrTee.vn · Codeforces Tracker v2</p>
       </section>
       <section className="login-form-wrap">
         <form className="login-card" onSubmit={submit}>

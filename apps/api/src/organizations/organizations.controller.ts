@@ -91,13 +91,28 @@ export class OrganizationsController {
     const members = await this.database.sql`
       SELECT
         memberships.user_id,
+        credentials.email,
+        users.full_name,
         users.display_name,
+        users.avatar_url,
+        skill.cc_base::text AS initial_cc_level,
+        skill.cc_level::text AS cc_level,
+        accounts.handle AS codeforces_handle,
+        accounts.pending_handle,
+        accounts.verification_status,
+        accounts.current_rating,
+        accounts.rank AS codeforces_rank,
+        accounts.sync_status,
+        accounts.last_sync_at,
         memberships.role,
         memberships.status,
         memberships.joined_at,
         memberships.left_at
       FROM organization_memberships AS memberships
       JOIN users ON users.id = memberships.user_id
+      LEFT JOIN user_credentials AS credentials ON credentials.user_id = users.id
+      LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
+      LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
       WHERE memberships.organization_id = ${id}
       ORDER BY memberships.joined_at DESC
     `;

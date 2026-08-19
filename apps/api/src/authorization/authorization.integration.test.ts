@@ -1,6 +1,9 @@
-import { resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { config } from 'dotenv';
 import postgres from 'postgres';
+import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { migrateDatabase } from '@cc/database';
 import type { DatabaseService } from '../database/database.service';
@@ -10,9 +13,18 @@ import type { EnvironmentService } from '../config/environment';
 import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
 import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
+import { RewardsAdminController } from '../rewards/rewards-admin.controller';
+import { RewardImageService } from '../rewards/reward-image.service';
 import { InsightsController } from '../insights/insights.controller';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
+import { BulkPointImportService } from '../scoring/bulk-point-import.service';
+import type { SyncJobData } from '@cc/core';
+import { UsersController } from '../users/users.controller';
+import { AdminOrganizationsController } from '../organizations/admin-organizations.controller';
+import { StudentImportService } from '../organizations/student-import.service';
+import { AvatarService } from '../users/avatar.service';
 import { AuthorizationService } from './authorization.service';
+import { ContentController } from '../content/content.controller';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -25,18 +37,37 @@ const authService = new AuthService(
   { sql: connection } as DatabaseService,
   { values: { SESSION_TTL_HOURS: 168 } } as EnvironmentService,
 );
+const syncQueueCalls: SyncJobData[] = [];
 const codeforcesAccounts = new CodeforcesAccountsService(
   { sql: connection } as DatabaseService,
   service,
   {
-    enqueue: () => Promise.resolve(true),
+    enqueue: (data: SyncJobData) => {
+      syncQueueCalls.push(data);
+      return Promise.resolve(true);
+    },
   } as unknown as import('../sync/sync-queue.service').SyncQueueService,
 );
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
 const rewards = new RewardsService({ sql: connection } as DatabaseService);
 const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
+const rewardsAdmin = new RewardsAdminController(
+  { sql: connection } as DatabaseService,
+  {
+    store: () => Promise.resolve('/api/uploads/rewards/test.webp'),
+  } as unknown as RewardImageService,
+);
 const insights = new InsightsController({ sql: connection } as DatabaseService, service);
+const contentController = new ContentController({ sql: connection } as DatabaseService);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
+const bulkPointImport = new BulkPointImportService(service, adjustments, {
+  sql: connection,
+} as DatabaseService);
+const usersController = new UsersController({ sql: connection } as DatabaseService, authService);
+const adminOrganizations = new AdminOrganizationsController({ sql: connection } as DatabaseService);
+const studentImport = new StudentImportService(service, authService, {
+  sql: connection,
+} as DatabaseService);
 
 const authUser = (userId: string, systemRole: AuthUser['systemRole'] = 'USER'): AuthUser => ({
   sessionId: 'test-session',
@@ -53,6 +84,7 @@ describe('authorization matrix', () => {
     migrateDatabase(testDatabaseUrl, resolve(__dirname, '../../../../packages/database/drizzle')),
   );
   beforeEach(async () => {
+    syncQueueCalls.length = 0;
     await connection`
       TRUNCATE auth_sessions, user_credentials, audit_logs, organization_memberships,
         organizations, scoring_policies, users RESTART IDENTITY CASCADE
@@ -141,6 +173,45 @@ describe('authorization matrix', () => {
     expect(() => service.assertCanManage(access, systemAdmin)).not.toThrow();
   });
 
+  it('manages self profiles, user lifecycle, and organizations with audit records', async () => {
+    const member = authUser(ids.member!);
+    const updatedProfile = await usersController.updateMe(
+      {
+        displayName: 'Member Avatar',
+        avatarUrl: 'https://example.com/avatar.png',
+        timezone: 'Asia/Ho_Chi_Minh',
+      },
+      member,
+    );
+    expect(updatedProfile.user).toMatchObject({
+      display_name: 'Member Avatar',
+      avatar_url: 'https://example.com/avatar.png',
+    });
+
+    const listing = await usersController.listUsers({ search: 'Member Avatar', pageSize: '10' });
+    expect(listing.total).toBe(1);
+    expect(listing.users).toHaveLength(1);
+
+    const systemAdmin = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const updatedUser = await usersController.updateUser(
+      ids.member!,
+      { status: 'SUSPENDED', reason: 'Lifecycle fixture' },
+      systemAdmin,
+    );
+    expect(updatedUser.user).toMatchObject({ status: 'SUSPENDED' });
+    const updatedOrganization = await adminOrganizations.update(
+      ids.privateOrg!,
+      { visibility: 'CLOSED', reason: 'Visibility fixture' },
+      systemAdmin,
+    );
+    expect(updatedOrganization.organization).toMatchObject({ visibility: 'CLOSED' });
+    const [{ count } = { count: 0 }] = await connection<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM audit_logs
+      WHERE action IN ('USER_PROFILE_UPDATED', 'USER_UPDATED', 'ORGANIZATION_UPDATED')
+    `;
+    expect(count).toBe(3);
+  });
+
   it('creates credentials and stores only hashed session and CSRF tokens', async () => {
     const userId = await authService.createUser({
       email: 'student@example.com',
@@ -156,6 +227,10 @@ describe('authorization matrix', () => {
     expect(session?.token_hash).not.toContain(login.sessionToken);
     expect(session?.csrf_token_hash).not.toContain(login.csrfToken);
     expect(session?.token_hash).toMatch(/^[a-f0-9]{64}$/);
+    const [skill] = await connection<{ cc_base: string; cc_level: string }[]>`
+      SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${userId}
+    `;
+    expect(skill).toMatchObject({ cc_base: '800.00', cc_level: '800.00' });
   });
 
   it('keeps linked handles unverified until an authorized atomic verification', async () => {
@@ -176,8 +251,180 @@ describe('authorization matrix', () => {
     });
     expect(verified.verification_status).toBe('TEACHER_VERIFIED');
     expect(verified.sync_status).toBe('INITIALIZING');
-    expect(verified.verified_at?.getTime()).toBe(verified.reward_eligible_from?.getTime());
+    expect(new Date(verified.verified_at!).getTime()).toBe(
+      new Date(verified.reward_eligible_from!).getTime(),
+    );
     expect((await codeforcesAccounts.getOwn(member.userId))?.eligible).toBe(true);
+
+    const requested = await codeforcesAccounts.link(member, 'Tourist_Changed');
+    expect(requested.handle).toBe('Tourist_Test');
+    expect(requested.pending_handle).toBe('Tourist_Changed');
+    await expect(
+      codeforcesAccounts.approveHandleChange({
+        organizationId: ids.privateOrg!,
+        targetUserId: member.userId,
+        actor: authUser(ids.teacher!),
+        reason: 'Teacher cannot approve a handle change',
+      }),
+    ).rejects.toThrow('Chỉ Admin');
+    const approved = await codeforcesAccounts.approveHandleChange({
+      organizationId: ids.privateOrg!,
+      targetUserId: member.userId,
+      actor: authUser(ids.orgAdmin!),
+      reason: 'Admin confirmed ownership',
+    });
+    expect(approved.handle).toBe('Tourist_Changed');
+    expect(approved.pending_handle).toBeNull();
+    expect(approved.verification_status).toBe('ADMIN_VERIFIED');
+  });
+
+  it('lets system admins verify unassigned students in one batch', async () => {
+    const [student] = await connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('No Class', 'No Class') RETURNING id
+    `;
+    if (!student) throw new Error('Failed to create unassigned student');
+    await codeforcesAccounts.link(authUser(student.id), 'no_class_cf');
+    const result = await codeforcesAccounts.verifyBatch({
+      targetUserIds: [student.id],
+      actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      reason: 'System admin verified an unassigned student',
+    });
+    expect(result).toMatchObject({ requested: 1, verified: 1, skipped: 0 });
+    expect((await codeforcesAccounts.getOwn(student.id))?.verification_status).toBe(
+      'ADMIN_VERIFIED',
+    );
+  });
+
+  it('allows teachers to import students with class, handle, and initial level', async () => {
+    const csv = [
+      'tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau',
+      'imported@example.com,Temporary!2026,Nguyen Van Import,Import Student,import_cf,950',
+    ].join('\n');
+    const result = await studentImport.import(
+      ids.privateOrg!,
+      {
+        originalname: 'students.csv',
+        buffer: Buffer.from(csv),
+      } as Express.Multer.File,
+      authUser(ids.teacher!),
+    );
+    expect(result).toMatchObject({ created: 1, failed: 0, total: 1 });
+    const [student] = await connection<
+      { email: string; cc_base: string; handle: string; organization_id: string }[]
+    >`
+      SELECT credentials.email, skill.cc_base, accounts.handle, memberships.organization_id
+      FROM user_credentials AS credentials
+      JOIN user_skill_state AS skill ON skill.user_id = credentials.user_id
+      JOIN codeforces_accounts AS accounts ON accounts.user_id = credentials.user_id
+      JOIN organization_memberships AS memberships ON memberships.user_id = credentials.user_id
+      WHERE credentials.email = 'imported@example.com'
+    `;
+    expect(student).toMatchObject({
+      email: 'imported@example.com',
+      cc_base: '950.00',
+      handle: 'import_cf',
+      organization_id: ids.privateOrg,
+    });
+  });
+
+  it('imports signed CC Point commands idempotently for students in the class', async () => {
+    await connection`
+      INSERT INTO user_credentials (user_id, email, password_hash)
+      VALUES (${ids.member!}, 'member@example.com', 'test-password-hash')
+    `;
+    const csv = [
+      'tai_khoan,thao_tac,cc_point,ly_do,anh_huong_mua',
+      'member@example.com,CỘNG,25,Thuong thu thach,KHÔNG',
+    ].join('\n');
+    const file = {
+      originalname: 'points.csv',
+      buffer: Buffer.from(csv),
+    } as Express.Multer.File;
+    const first = await bulkPointImport.import(ids.privateOrg!, file, authUser(ids.teacher!));
+    expect(first).toMatchObject({ applied: 1, replayed: 0, failed: 0, total: 1 });
+    const replay = await bulkPointImport.import(ids.privateOrg!, file, authUser(ids.teacher!));
+    expect(replay).toMatchObject({ applied: 0, replayed: 1, failed: 0, total: 1 });
+    const [wallet] = await connection<{ balance: string; transactions: number }[]>`
+      SELECT wallets.balance,
+        (SELECT count(*)::int FROM point_transactions WHERE user_id = ${ids.member!}) AS transactions
+      FROM user_wallets AS wallets WHERE wallets.user_id = ${ids.member!}
+    `;
+    expect(wallet).toEqual({ balance: '25.00', transactions: 1 });
+  });
+
+  it('queues Codeforces sync by account, class, or system scope with authorization', async () => {
+    await codeforcesAccounts.link(authUser(ids.member!), 'Sync_Student');
+    await codeforcesAccounts.verify({
+      organizationId: ids.privateOrg!,
+      targetUserId: ids.member!,
+      actor: authUser(ids.teacher!),
+      reason: 'Verify before sync',
+    });
+    const organizationResult = await codeforcesAccounts.requestAdminSync({
+      scope: 'ORGANIZATION',
+      organizationId: ids.privateOrg!,
+      actor: authUser(ids.teacher!),
+    });
+    expect(organizationResult).toEqual({
+      scope: 'ORGANIZATION',
+      matched: 1,
+      queued: 1,
+      skipped: 0,
+    });
+    expect(syncQueueCalls).toHaveLength(1);
+    await expect(
+      codeforcesAccounts.requestAdminSync({ scope: 'ALL', actor: authUser(ids.teacher!) }),
+    ).rejects.toThrow('System Admin');
+    await expect(
+      codeforcesAccounts.requestAdminSync({
+        scope: 'ALL',
+        actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      }),
+    ).resolves.toMatchObject({ matched: 1, queued: 1 });
+  });
+
+  it('validates, normalizes, and stores cropped avatars', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cc-avatar-test-'));
+    try {
+      const avatars = new AvatarService(
+        { sql: connection } as DatabaseService,
+        { values: { UPLOAD_DIR: directory } } as EnvironmentService,
+      );
+      const input = await sharp({
+        create: { width: 120, height: 240, channels: 3, background: '#35d5d1' },
+      })
+        .png()
+        .toBuffer();
+      const url = await avatars.store(ids.member!, input);
+      const stored = await readFile(join(directory, 'avatars', basename(url)));
+      const metadata = await sharp(stored).metadata();
+      expect(url).toMatch(/^\/api\/uploads\/avatars\/[a-f0-9-]+\.webp$/);
+      expect(metadata).toMatchObject({ width: 512, height: 512, format: 'webp' });
+      await avatars.remove(ids.member!);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('normalizes reward uploads to the catalog aspect ratio', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cc-reward-test-'));
+    try {
+      const images = new RewardImageService({
+        values: { UPLOAD_DIR: directory },
+      } as EnvironmentService);
+      const source = await sharp({
+        create: { width: 300, height: 700, channels: 3, background: '#e83e8c' },
+      })
+        .png()
+        .toBuffer();
+      const url = await images.store(source);
+      expect(url).toMatch(/^\/api\/uploads\/rewards\/[a-f0-9-]+\.webp$/);
+      const file = await readFile(join(directory, 'rewards', basename(url)));
+      const metadata = await sharp(file).metadata();
+      expect(metadata).toMatchObject({ width: 1200, height: 800, format: 'webp' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('closes a season into deterministic snapshots and awards exactly once', async () => {
@@ -303,10 +550,75 @@ describe('authorization matrix', () => {
     expect(dashboard.profile).toMatchObject({ id: ids.member!, display_name: 'member' });
     expect(dashboard.streak).toEqual({ longest_streak: 0, current_streak: 0 });
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
-    expect(leaderboard.entries).toHaveLength(2);
+    expect(leaderboard.entries).toHaveLength(1);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
-    expect(leaderboard.total).toBe(4);
+    expect(leaderboard.total).toBe(1);
+    const recognition = await insights.ownRecognition(authUser(ids.member!));
+    expect(recognition.profile).toMatchObject({
+      id: ids.member!,
+      total_solves: 0,
+      highest_problem_rating: null,
+    });
+    expect(recognition).toHaveProperty('awards');
+    expect(recognition).toHaveProperty('rewards');
+  });
+
+  it('archives classes and rewards without deleting historical rows', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const archivedClass = await adminOrganizations.archive(ids.publicOrg!, actor);
+    expect(archivedClass.organization).toMatchObject({ status: 'INACTIVE' });
+    const created = await rewardsAdmin.create(
+      {
+        name: 'Archive me',
+        description: 'Reward retained for history',
+        cost: 100,
+        stock: null,
+        active: true,
+        imageUrl: '/api/uploads/rewards/test.webp',
+      },
+      actor,
+    );
+    const archivedReward = await rewardsAdmin.archive(String(created.reward.id), actor);
+    expect(archivedReward.reward).toMatchObject({ active: false });
+    const [counts] = await connection<{ organizations: string; rewards: string }[]>`
+      SELECT
+        (SELECT count(*)::text FROM organizations WHERE id = ${ids.publicOrg!}) AS organizations,
+        (SELECT count(*)::text FROM rewards WHERE id = ${String(created.reward.id)}) AS rewards
+    `;
+    expect(counts).toEqual({ organizations: '1', rewards: '1' });
+  });
+
+  it('manages rotating quotes and configurable CC Level ranks', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const createdQuote = await contentController.createQuote(
+      {
+        content: 'Kiên trì tạo nên tiến bộ.',
+        author: 'Test suite',
+        active: true,
+        sortOrder: 999,
+      },
+      actor,
+    );
+    const createdRank = await contentController.createRank(
+      {
+        minLevel: 9999,
+        name: 'Test rank',
+        icon: 'TEST',
+        color: '#e83e8c',
+        active: true,
+      },
+      actor,
+    );
+    const dashboardContent = await contentController.dashboardContent();
+    expect(dashboardContent.quotes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: createdQuote.quote.id })]),
+    );
+    expect(dashboardContent.ranks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: createdRank.rank.id })]),
+    );
+    await contentController.deleteQuote(String(createdQuote.quote.id), actor);
+    await contentController.deleteRank(String(createdRank.rank.id), actor);
   });
 
   it('enforces organization-scoped teacher adjustments with atomic audit and idempotency', async () => {

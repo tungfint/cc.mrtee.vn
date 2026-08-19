@@ -37,7 +37,7 @@ export class RewardsController {
 
   @Get('me/reward-orders')
   async orders(@CurrentUser() user: AuthUser) {
-    return { orders: await this.rewards.orders(user.userId) };
+    return this.rewards.orders(user.userId);
   }
 
   @Patch('reward-orders/:id/status')
