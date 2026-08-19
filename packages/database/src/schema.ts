@@ -488,6 +488,42 @@ export const rewards = pgTable(
   ],
 );
 
+export const motivationalQuotes = pgTable(
+  'motivational_quotes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    content: text('content').notNull(),
+    author: varchar('author', { length: 160 }),
+    active: boolean('active').default(true).notNull(),
+    sortOrder: integer('sort_order').default(0).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('motivational_quotes_active_order_idx').on(table.active, table.sortOrder),
+    check('motivational_quotes_sort_order_check', sql`${table.sortOrder} >= 0`),
+  ],
+);
+
+export const ccLevelRanks = pgTable(
+  'cc_level_ranks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    minLevel: integer('min_level').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    icon: text('icon').notNull(),
+    color: varchar('color', { length: 20 }).notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('cc_level_ranks_min_level_unique').on(table.minLevel),
+    index('cc_level_ranks_active_level_idx').on(table.active, table.minLevel),
+    check('cc_level_ranks_min_level_check', sql`${table.minLevel} >= 0`),
+  ],
+);
+
 export const rewardOrders = pgTable(
   'reward_orders',
   {

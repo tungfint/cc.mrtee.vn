@@ -10,6 +10,7 @@ import {
   PageTitle,
   StatusPill,
 } from '../components/ui';
+import { RewardImageUploader } from '../components/reward-image-uploader';
 
 interface Membership {
   organization_id: string;
@@ -72,6 +73,21 @@ interface Reward {
   active: boolean;
   image_url: string | null;
 }
+interface MotivationalQuote {
+  id: string;
+  content: string;
+  author: string | null;
+  active: boolean;
+  sort_order: number;
+}
+interface LevelRank {
+  id: string;
+  min_level: number;
+  name: string;
+  icon: string;
+  color: string;
+  active: boolean;
+}
 
 export default function AdminPage() {
   const queryClient = useQueryClient();
@@ -93,6 +109,17 @@ export default function AdminPage() {
   const [rewardImageUrl, setRewardImageUrl] = useState('');
   const [rewardActive, setRewardActive] = useState(true);
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
+  const [quoteContent, setQuoteContent] = useState('');
+  const [quoteAuthor, setQuoteAuthor] = useState('');
+  const [quoteOrder, setQuoteOrder] = useState('0');
+  const [quoteActive, setQuoteActive] = useState(true);
+  const [editingQuote, setEditingQuote] = useState<MotivationalQuote | null>(null);
+  const [rankMinLevel, setRankMinLevel] = useState('800');
+  const [rankName, setRankName] = useState('');
+  const [rankIcon, setRankIcon] = useState('🏅');
+  const [rankColor, setRankColor] = useState('#22d3ee');
+  const [rankActive, setRankActive] = useState(true);
+  const [editingRank, setEditingRank] = useState<LevelRank | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -154,6 +181,11 @@ export default function AdminPage() {
     queryFn: () => api<{ rewards: Reward[] }>('/admin/rewards'),
     enabled: Boolean(isSystemAdmin),
   });
+  const content = useQuery({
+    queryKey: ['admin-content'],
+    queryFn: () => api<{ quotes: MotivationalQuote[]; ranks: LevelRank[] }>('/admin/content'),
+    enabled: Boolean(isSystemAdmin),
+  });
   const audits = useQuery({
     queryKey: ['audits', organizationId],
     queryFn: () =>
@@ -184,6 +216,8 @@ export default function AdminPage() {
         'admin-users',
         'admin-organizations',
         'admin-rewards',
+        'admin-content',
+        'dashboard-content',
         'audits',
         'me',
       ]) {
@@ -347,7 +381,12 @@ export default function AdminPage() {
     { id: 'points', label: 'Điểm & CC Base' },
     { id: 'sync', label: 'Đồng bộ CF' },
     { id: 'audit', label: 'Nhật ký' },
-    ...(isSystemAdmin ? [{ id: 'rewards', label: 'Phần thưởng' }] : []),
+    ...(isSystemAdmin
+      ? [
+          { id: 'rewards', label: 'Phần thưởng' },
+          { id: 'content', label: 'Nội dung & cấp bậc' },
+        ]
+      : []),
   ];
   return (
     <>
@@ -1690,8 +1729,10 @@ export default function AdminPage() {
                 <label className="field mt-4">
                   <span>Chi phí CC Balance</span>
                   <input
-                    min="0.01"
+                    min="1"
                     onChange={(e) => setRewardCost(e.target.value)}
+                    required
+                    step="1"
                     type="number"
                     value={rewardCost}
                   />
@@ -1725,14 +1766,9 @@ export default function AdminPage() {
                     </select>
                   </label>
                 </div>
-                <label className="field mt-4">
-                  <span>URL hình ảnh (không bắt buộc)</span>
-                  <input
-                    onChange={(e) => setRewardImageUrl(e.target.value)}
-                    type="url"
-                    value={rewardImageUrl}
-                  />
-                </label>
+                <div className="mt-4">
+                  <RewardImageUploader onChange={setRewardImageUrl} value={rewardImageUrl} />
+                </div>
                 <button className="button-primary mt-5" type="submit">
                   {editingReward ? 'Lưu phần thưởng' : 'Tạo phần thưởng'}
                 </button>
@@ -1784,8 +1820,293 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+          {tab === 'content' && isSystemAdmin && (
+            <div className="content-admin-grid">
+              <section className="panel p-6">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">DANH NGÔN TRANG CHỦ</p>
+                    <h2>Thông điệp truyền cảm hứng</h2>
+                  </div>
+                  {editingQuote && (
+                    <button
+                      className="button-secondary"
+                      onClick={() => {
+                        setEditingQuote(null);
+                        setQuoteContent('');
+                        setQuoteAuthor('');
+                        setQuoteOrder('0');
+                        setQuoteActive(true);
+                      }}
+                      type="button"
+                    >
+                      Huỷ sửa
+                    </button>
+                  )}
+                </div>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    mutation.mutate({
+                      path: editingQuote ? `/admin/quotes/${editingQuote.id}` : '/admin/quotes',
+                      method: editingQuote ? 'PATCH' : 'POST',
+                      body: {
+                        content: quoteContent,
+                        author: quoteAuthor || null,
+                        sortOrder: Number(quoteOrder),
+                        active: quoteActive,
+                      },
+                    });
+                  }}
+                >
+                  <label className="field">
+                    <span>Nội dung</span>
+                    <textarea
+                      maxLength={1000}
+                      onChange={(event) => setQuoteContent(event.target.value)}
+                      placeholder="Mỗi bài toán hôm nay là một bước tiến ngày mai…"
+                      required
+                      value={quoteContent}
+                    />
+                  </label>
+                  <div className="form-grid mt-4">
+                    <label className="field">
+                      <span>Tác giả / nguồn</span>
+                      <input
+                        onChange={(event) => setQuoteAuthor(event.target.value)}
+                        value={quoteAuthor}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Thứ tự</span>
+                      <input
+                        min="0"
+                        onChange={(event) => setQuoteOrder(event.target.value)}
+                        step="1"
+                        type="number"
+                        value={quoteOrder}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Trạng thái</span>
+                      <select
+                        onChange={(event) => setQuoteActive(event.target.value === 'ACTIVE')}
+                        value={quoteActive ? 'ACTIVE' : 'INACTIVE'}
+                      >
+                        <option value="ACTIVE">Đang hiển thị</option>
+                        <option value="INACTIVE">Tạm ẩn</option>
+                      </select>
+                    </label>
+                  </div>
+                  <button className="button-primary mt-4" type="submit">
+                    {editingQuote ? 'Lưu danh ngôn' : 'Thêm danh ngôn'}
+                  </button>
+                </form>
+                <div className="content-admin-list mt-6">
+                  {content.data?.quotes.map((quote) => (
+                    <article className="content-admin-item" key={quote.id}>
+                      <div>
+                        <blockquote>“{quote.content}”</blockquote>
+                        <p>
+                          {quote.author || 'Không ghi nguồn'} · thứ tự {quote.sort_order}
+                        </p>
+                      </div>
+                      <StatusPill value={quote.active ? 'ACTIVE' : 'INACTIVE'} />
+                      <div className="student-actions">
+                        <button
+                          className="button-secondary"
+                          onClick={() => {
+                            setEditingQuote(quote);
+                            setQuoteContent(quote.content);
+                            setQuoteAuthor(quote.author ?? '');
+                            setQuoteOrder(String(quote.sort_order));
+                            setQuoteActive(quote.active);
+                          }}
+                          type="button"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          className="button-danger"
+                          onClick={() => {
+                            if (!window.confirm('Xoá danh ngôn này?')) return;
+                            mutation.mutate({
+                              path: `/admin/quotes/${quote.id}`,
+                              method: 'DELETE',
+                              body: null,
+                            });
+                          }}
+                          type="button"
+                        >
+                          Xoá
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel p-6">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">CC LEVEL RANKS</p>
+                    <h2>Cấp bậc học sinh</h2>
+                  </div>
+                  {editingRank && (
+                    <button
+                      className="button-secondary"
+                      onClick={() => {
+                        setEditingRank(null);
+                        setRankMinLevel('800');
+                        setRankName('');
+                        setRankIcon('🏅');
+                        setRankColor('#22d3ee');
+                        setRankActive(true);
+                      }}
+                      type="button"
+                    >
+                      Huỷ sửa
+                    </button>
+                  )}
+                </div>
+                <p className="admin-helper-copy">
+                  Hệ thống chọn mốc cao nhất không vượt quá CC Level hiện tại. Icon có thể là emoji
+                  hoặc URL ảnh.
+                </p>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    mutation.mutate({
+                      path: editingRank
+                        ? `/admin/level-ranks/${editingRank.id}`
+                        : '/admin/level-ranks',
+                      method: editingRank ? 'PATCH' : 'POST',
+                      body: {
+                        minLevel: Number(rankMinLevel),
+                        name: rankName,
+                        icon: rankIcon,
+                        color: rankColor,
+                        active: rankActive,
+                      },
+                    });
+                  }}
+                >
+                  <div className="form-grid">
+                    <label className="field">
+                      <span>CC Level tối thiểu</span>
+                      <input
+                        min="0"
+                        onChange={(event) => setRankMinLevel(event.target.value)}
+                        required
+                        step="1"
+                        type="number"
+                        value={rankMinLevel}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Tên cấp bậc</span>
+                      <input
+                        onChange={(event) => setRankName(event.target.value)}
+                        placeholder="Đồng, Bạc, Vàng…"
+                        required
+                        value={rankName}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Icon / URL icon</span>
+                      <input
+                        onChange={(event) => setRankIcon(event.target.value)}
+                        required
+                        value={rankIcon}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Màu cấp bậc</span>
+                      <div className="color-field">
+                        <input
+                          aria-label="Chọn màu cấp bậc"
+                          onChange={(event) => setRankColor(event.target.value)}
+                          type="color"
+                          value={rankColor}
+                        />
+                        <input
+                          onChange={(event) => setRankColor(event.target.value)}
+                          pattern="#[0-9a-fA-F]{6}"
+                          value={rankColor}
+                        />
+                      </div>
+                    </label>
+                    <label className="field">
+                      <span>Trạng thái</span>
+                      <select
+                        onChange={(event) => setRankActive(event.target.value === 'ACTIVE')}
+                        value={rankActive ? 'ACTIVE' : 'INACTIVE'}
+                      >
+                        <option value="ACTIVE">Đang áp dụng</option>
+                        <option value="INACTIVE">Tạm ẩn</option>
+                      </select>
+                    </label>
+                  </div>
+                  <button className="button-primary mt-4" type="submit">
+                    {editingRank ? 'Lưu cấp bậc' : 'Thêm cấp bậc'}
+                  </button>
+                </form>
+                <div className="rank-admin-list mt-6">
+                  {content.data?.ranks.map((rank) => (
+                    <article className="rank-admin-item" key={rank.id}>
+                      <LevelRankIcon icon={rank.icon} name={rank.name} />
+                      <div>
+                        <strong style={{ color: rank.color }}>{rank.name}</strong>
+                        <p>Từ CC Level {formatNumber(rank.min_level)}</p>
+                      </div>
+                      <StatusPill value={rank.active ? 'ACTIVE' : 'INACTIVE'} />
+                      <div className="student-actions">
+                        <button
+                          className="button-secondary"
+                          onClick={() => {
+                            setEditingRank(rank);
+                            setRankMinLevel(String(rank.min_level));
+                            setRankName(rank.name);
+                            setRankIcon(rank.icon);
+                            setRankColor(rank.color);
+                            setRankActive(rank.active);
+                          }}
+                          type="button"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          className="button-danger"
+                          onClick={() => {
+                            if (!window.confirm(`Xoá cấp bậc “${rank.name}”?`)) return;
+                            mutation.mutate({
+                              path: `/admin/level-ranks/${rank.id}`,
+                              method: 'DELETE',
+                              body: null,
+                            });
+                          }}
+                          type="button"
+                        >
+                          Xoá
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
         </>
       )}
     </>
+  );
+}
+
+function LevelRankIcon({ icon, name }: { icon: string; name: string }) {
+  const isImage = /^https?:\/\//i.test(icon) || icon.startsWith('/');
+  return (
+    <span className="level-rank-icon" aria-label={`Cấp bậc ${name}`}>
+      {isImage ? <img alt="" src={icon} /> : icon}
+    </span>
   );
 }

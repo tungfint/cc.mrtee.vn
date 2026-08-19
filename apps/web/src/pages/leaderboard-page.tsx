@@ -1,6 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Avatar, EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
+import {
+  Avatar,
+  CodeforcesHandle,
+  EmptyState,
+  ErrorState,
+  LevelRankBadge,
+  LoadingState,
+  PageTitle,
+  StudentName,
+} from '../components/ui';
 import { api, formatNumber } from '../lib/api';
 
 interface Organization {
@@ -17,12 +26,14 @@ interface Board {
     userId: string;
     displayName: string;
     avatarUrl: string | null;
+    codeforcesHandle: string | null;
     currentRating: number | null;
     ccLevel: string;
     ccPoint: string;
     ccBalance: string;
     streak: number;
     longestStreak: number;
+    levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
 }
 
@@ -120,7 +131,20 @@ export default function LeaderboardPage() {
                   size="sm"
                   url={entry.avatarUrl}
                 />
-                <strong>{entry.displayName}</strong>
+                <span className="leader-identity-copy">
+                  <span className="leader-name-row">
+                    <StudentName name={entry.displayName} rating={entry.currentRating} />
+                    <LevelRankBadge rank={entry.levelRank} />
+                  </span>
+                  {entry.codeforcesHandle ? (
+                    <CodeforcesHandle
+                      handle={entry.codeforcesHandle}
+                      rating={entry.currentRating}
+                    />
+                  ) : (
+                    <small>Chưa liên kết Codeforces</small>
+                  )}
+                </span>
               </span>
               <span data-label="CC Level">⚡ {formatNumber(entry.ccLevel, 2)}</span>
               <strong data-label="CC Point">◆ {formatNumber(entry.ccPoint, 2)}</strong>

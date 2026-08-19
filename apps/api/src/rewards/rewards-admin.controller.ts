@@ -7,25 +7,42 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { z } from 'zod';
 import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
+import { RewardImageService } from './reward-image.service';
+
+const rewardImageUrlSchema = z
+  .string()
+  .trim()
+  .max(2000)
+  .refine(
+    (value) =>
+      value.startsWith('/api/uploads/rewards/') || z.string().url().safeParse(value).success,
+  );
 
 const rewardSchema = z.object({
   name: z.string().trim().min(2).max(200),
   description: z.string().trim().min(2).max(2000),
-  cost: z.coerce.number().positive().max(1_000_000),
+  cost: z.coerce.number().int().positive().max(1_000_000),
   stock: z.coerce.number().int().nonnegative().nullable().default(null),
   active: z.boolean().default(true),
-  imageUrl: z.string().url().max(2000).nullable().default(null),
+  imageUrl: rewardImageUrlSchema.nullable().default(null),
 });
 
 @RequireSystemRole('SYSTEM_ADMIN')
 @Controller('admin/rewards')
 export class RewardsAdminController {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly images: RewardImageService,
+  ) {}
 
   @Get()
   async list() {
@@ -43,6 +60,21 @@ export class RewardsAdminController {
         ORDER BY orders.created_at DESC LIMIT 200
       `,
     };
+  }
+
+  @Post('image')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+      fileFilter: (_request, file, callback) => {
+        callback(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype));
+      },
+    }),
+  )
+  async uploadImage(@UploadedFile() file: Express.Multer.File | undefined) {
+    if (!file) throw new BadRequestException('Chọn ảnh JPG, PNG hoặc WebP tối đa 8 MB');
+    return { imageUrl: await this.images.store(file.buffer) };
   }
 
   @Post()

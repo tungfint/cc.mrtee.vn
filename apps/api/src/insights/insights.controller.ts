@@ -14,12 +14,16 @@ interface LeaderboardRow {
   user_id: string;
   display_name: string;
   avatar_url: string | null;
+  codeforces_handle: string | null;
   current_rating: number | null;
   cc_level: string;
   cc_point: string;
   cc_balance: string;
   current_streak: number;
   longest_streak: number;
+  level_rank_name: string | null;
+  level_rank_icon: string | null;
+  level_rank_color: string | null;
 }
 
 const leaderboardQuery = z.object({
@@ -186,12 +190,14 @@ export class InsightsController {
     const offset = (input.page - 1) * input.pageSize;
     const rows = await this.database.sql<LeaderboardRow[]>`
       SELECT users.id AS user_id, users.display_name, users.avatar_url,
-        accounts.current_rating,
+        accounts.handle AS codeforces_handle, accounts.current_rating,
         COALESCE(skill.cc_level, 800)::text AS cc_level,
         COALESCE(points.cc_point, 0)::text AS cc_point,
         COALESCE(wallet.balance, 0)::text AS cc_balance,
         COALESCE(streak.current_streak, 0)::int AS current_streak,
-        COALESCE(streak.longest_streak, 0)::int AS longest_streak
+        COALESCE(streak.longest_streak, 0)::int AS longest_streak,
+        level_rank.name AS level_rank_name, level_rank.icon AS level_rank_icon,
+        level_rank.color AS level_rank_color
       FROM users
       ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE' AND memberships.role = 'MEMBER'` : this.database.sql``}
       LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
@@ -217,6 +223,11 @@ export class InsightsController {
             AS current_streak
         FROM runs
       ) AS streak ON true
+      LEFT JOIN LATERAL (
+        SELECT name, icon, color FROM cc_level_ranks
+        WHERE active = true AND min_level <= COALESCE(skill.cc_level, 800)
+        ORDER BY min_level DESC LIMIT 1
+      ) AS level_rank ON true
       WHERE users.status = 'ACTIVE' AND users.system_role = 'USER'
         AND NOT EXISTS (
           SELECT 1 FROM organization_memberships AS staff_memberships
@@ -253,12 +264,20 @@ export class InsightsController {
         userId: row.user_id,
         displayName: row.display_name,
         avatarUrl: row.avatar_url,
+        codeforcesHandle: row.codeforces_handle,
         currentRating: row.current_rating,
         ccLevel: row.cc_level,
         ccPoint: row.cc_point,
         ccBalance: row.cc_balance,
         streak: row.current_streak,
         longestStreak: row.longest_streak,
+        levelRank: row.level_rank_name
+          ? {
+              name: row.level_rank_name,
+              icon: row.level_rank_icon,
+              color: row.level_rank_color,
+            }
+          : null,
       })),
     };
   }

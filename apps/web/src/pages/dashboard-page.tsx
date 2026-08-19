@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber } from '../lib/api';
 import {
   Avatar,
@@ -7,7 +7,9 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
+  LevelRankBadge,
   PageTitle,
+  StudentName,
 } from '../components/ui';
 
 interface Dashboard {
@@ -65,11 +67,17 @@ interface TopBoard {
     userId: string;
     displayName: string;
     avatarUrl: string | null;
+    codeforcesHandle: string | null;
     currentRating: number | null;
     ccLevel: string;
     ccPoint: string;
     streak: number;
+    levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
+}
+
+interface DashboardContent {
+  quotes: { id: string; content: string; author: string | null; sort_order: number }[];
 }
 
 export default function DashboardPage() {
@@ -91,6 +99,11 @@ export default function DashboardPage() {
   const topStreak = useQuery({
     queryKey: ['dashboard-top', 'STREAK'],
     queryFn: () => api<TopBoard>('/leaderboards?sort=STREAK&pageSize=10'),
+  });
+  const dashboardContent = useQuery({
+    queryKey: ['dashboard-content'],
+    queryFn: () => api<DashboardContent>('/content/dashboard'),
+    staleTime: 5 * 60_000,
   });
   const sync = useMutation({
     mutationFn: () => api('/me/sync', { method: 'POST' }),
@@ -116,7 +129,7 @@ export default function DashboardPage() {
       <PageTitle
         eyebrow="BẢNG ĐIỀU KHIỂN"
         title={`Chào ${profile.display_name}`}
-        detail="Một lát cắt gọn về năng lực, nhịp luyện tập và thành tích hiện tại của bạn."
+        detail={<QuoteRotator quotes={dashboardContent.data?.quotes ?? []} />}
         action={
           <div className="dashboard-identity">
             <Avatar
@@ -363,6 +376,75 @@ function recommendedRange(ccLevel: string, highestRating: number | null) {
   return { min, max: Math.min(3500, min + 200) };
 }
 
+function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
+  const fallback = {
+    id: 'fallback',
+    content: 'Một lát cắt gọn về năng lực, nhịp luyện tập và thành tích hiện tại của bạn.',
+    author: null,
+  };
+  const available = quotes.length ? quotes : [fallback];
+  const [index, setIndex] = useState(0);
+  const [loved, setLoved] = useState(false);
+  const [liked, setLiked] = useState(false);
+
+  useEffect(() => {
+    if (index >= available.length) setIndex(0);
+  }, [available.length, index]);
+  useEffect(() => {
+    if (available.length < 2) return;
+    const timer = window.setInterval(() => {
+      setIndex((current) => (current + 1) % available.length);
+      setLoved(false);
+      setLiked(false);
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [available.length]);
+
+  const quote = available[index] ?? fallback;
+  const next = () => {
+    setIndex((current) => (current + 1) % available.length);
+    setLoved(false);
+    setLiked(false);
+  };
+  return (
+    <div className="dashboard-quote">
+      <div>
+        <q>{quote.content}</q>
+        {quote.author && <small>— {quote.author}</small>}
+      </div>
+      <div className="quote-actions" aria-label="Tương tác với danh ngôn">
+        <button
+          aria-label="Yêu thích câu này"
+          className={loved ? 'active' : ''}
+          onClick={() => setLoved((value) => !value)}
+          title="Yêu thích"
+          type="button"
+        >
+          ♥
+        </button>
+        <button
+          aria-label="Thích câu này"
+          className={liked ? 'active' : ''}
+          onClick={() => setLiked((value) => !value)}
+          title="Thích"
+          type="button"
+        >
+          👍
+        </button>
+        <button
+          aria-label="Xem danh ngôn tiếp theo"
+          disabled={available.length < 2}
+          onClick={next}
+          title="Câu tiếp theo"
+          type="button"
+        >
+          →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type TopEntry = TopBoard['entries'][number];
 
 function MiniLeaderboard({
@@ -383,8 +465,8 @@ function MiniLeaderboard({
       <div className="mini-leaderboard-title">
         <span aria-hidden>{icon}</span>
         <div>
-          <p>TOP 10</p>
-          <h3>{label}</h3>
+          <p>BXH NỔI BẬT</p>
+          <h3>TOP 10 {label}</h3>
         </div>
       </div>
       {loading ? (
@@ -404,7 +486,10 @@ function MiniLeaderboard({
                 size="sm"
                 url={row.avatarUrl}
               />
-              <strong>{row.displayName}</strong>
+              <div className="mini-rank-identity">
+                <StudentName name={row.displayName} rating={row.currentRating} />
+                <LevelRankBadge rank={row.levelRank} />
+              </div>
               <b>{value(row)}</b>
             </div>
           ))}

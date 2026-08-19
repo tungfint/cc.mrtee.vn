@@ -14,6 +14,7 @@ import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-acc
 import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
 import { RewardsAdminController } from '../rewards/rewards-admin.controller';
+import { RewardImageService } from '../rewards/reward-image.service';
 import { InsightsController } from '../insights/insights.controller';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
 import { BulkPointImportService } from '../scoring/bulk-point-import.service';
@@ -23,6 +24,7 @@ import { AdminOrganizationsController } from '../organizations/admin-organizatio
 import { StudentImportService } from '../organizations/student-import.service';
 import { AvatarService } from '../users/avatar.service';
 import { AuthorizationService } from './authorization.service';
+import { ContentController } from '../content/content.controller';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -49,8 +51,14 @@ const codeforcesAccounts = new CodeforcesAccountsService(
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
 const rewards = new RewardsService({ sql: connection } as DatabaseService);
 const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
-const rewardsAdmin = new RewardsAdminController({ sql: connection } as DatabaseService);
+const rewardsAdmin = new RewardsAdminController(
+  { sql: connection } as DatabaseService,
+  {
+    store: () => Promise.resolve('/api/uploads/rewards/test.webp'),
+  } as unknown as RewardImageService,
+);
 const insights = new InsightsController({ sql: connection } as DatabaseService, service);
+const contentController = new ContentController({ sql: connection } as DatabaseService);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 const bulkPointImport = new BulkPointImportService(service, adjustments, {
   sql: connection,
@@ -398,6 +406,27 @@ describe('authorization matrix', () => {
     }
   });
 
+  it('normalizes reward uploads to the catalog aspect ratio', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cc-reward-test-'));
+    try {
+      const images = new RewardImageService({
+        values: { UPLOAD_DIR: directory },
+      } as EnvironmentService);
+      const source = await sharp({
+        create: { width: 300, height: 700, channels: 3, background: '#e83e8c' },
+      })
+        .png()
+        .toBuffer();
+      const url = await images.store(source);
+      expect(url).toMatch(/^\/api\/uploads\/rewards\/[a-f0-9-]+\.webp$/);
+      const file = await readFile(join(directory, 'rewards', basename(url)));
+      const metadata = await sharp(file).metadata();
+      expect(metadata).toMatchObject({ width: 1200, height: 800, format: 'webp' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('closes a season into deterministic snapshots and awards exactly once', async () => {
     await connection`
       INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
@@ -546,7 +575,7 @@ describe('authorization matrix', () => {
         cost: 100,
         stock: null,
         active: true,
-        imageUrl: null,
+        imageUrl: '/api/uploads/rewards/test.webp',
       },
       actor,
     );
@@ -558,6 +587,38 @@ describe('authorization matrix', () => {
         (SELECT count(*)::text FROM rewards WHERE id = ${String(created.reward.id)}) AS rewards
     `;
     expect(counts).toEqual({ organizations: '1', rewards: '1' });
+  });
+
+  it('manages rotating quotes and configurable CC Level ranks', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const createdQuote = await contentController.createQuote(
+      {
+        content: 'Kiên trì tạo nên tiến bộ.',
+        author: 'Test suite',
+        active: true,
+        sortOrder: 999,
+      },
+      actor,
+    );
+    const createdRank = await contentController.createRank(
+      {
+        minLevel: 9999,
+        name: 'Test rank',
+        icon: 'TEST',
+        color: '#e83e8c',
+        active: true,
+      },
+      actor,
+    );
+    const dashboardContent = await contentController.dashboardContent();
+    expect(dashboardContent.quotes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: createdQuote.quote.id })]),
+    );
+    expect(dashboardContent.ranks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: createdRank.rank.id })]),
+    );
+    await contentController.deleteQuote(String(createdQuote.quote.id), actor);
+    await contentController.deleteRank(String(createdRank.rank.id), actor);
   });
 
   it('enforces organization-scoped teacher adjustments with atomic audit and idempotency', async () => {
