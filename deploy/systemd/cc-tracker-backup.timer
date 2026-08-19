@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Cay Code MrTee.vn PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=cc-tracker-backup.service
+
+[Install]
+WantedBy=timers.target

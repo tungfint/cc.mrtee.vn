@@ -1,0 +1,17 @@
+[Unit]
+Description=Cay Code MrTee.vn PostgreSQL backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cc.mrtee.vn
+Environment=BACKUP_RETENTION_DAYS=30
+ExecStart=/opt/cc.mrtee.vn/scripts/backup-postgres.sh /opt/cc-backups
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

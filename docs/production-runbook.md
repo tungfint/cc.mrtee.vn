@@ -47,17 +47,35 @@ docker compose --env-file .env -f compose.production.yml exec \
 
 Check `GET /api/health/live` and `GET /api/health/ready`, then log in and verify dashboard, leaderboard, sync and a test account. Scrape `GET /api/metrics` with `Authorization: Bearer <METRICS_TOKEN>` from the private monitoring network. Inspect logs with `docker compose ... logs api worker`; see `docs/monitoring.md` for alert thresholds.
 
-Create a daily encrypted off-host backup:
+Create and validate an on-host backup. The script reads the database credentials inside the
+PostgreSQL container, writes atomically, and retains 30 days by default:
 
 ```bash
-POSTGRES_USER=cc_app POSTGRES_DB=cc_tracker ./scripts/backup-postgres.sh /secure/backups
+./scripts/backup-postgres.sh /opt/cc-backups
 ```
+
+Install the included systemd timer for a daily backup at about 02:30 server time (with up to
+15 minutes of randomized delay):
+
+```bash
+sudo install -m 0644 deploy/systemd/cc-tracker-backup.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/cc-tracker-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cc-tracker-backup.timer
+sudo systemctl start cc-tracker-backup.service
+sudo systemctl status cc-tracker-backup.service --no-pager
+sudo systemctl list-timers cc-tracker-backup.timer --no-pager
+```
+
+Set `BACKUP_RETENTION_DAYS` in the service override to change retention. A backup on the same
+VPS does not protect against host loss: copy it to encrypted off-host storage and rehearse restore
+regularly.
 
 Test restore on an isolated environment regularly:
 
 ```bash
-POSTGRES_USER=cc_app POSTGRES_DB=cc_tracker RESTORE_CONFIRM=yes \
-  ./scripts/restore-postgres.sh /secure/backups/cc-tracker-YYYYMMDDTHHMMSSZ.dump
+RESTORE_CONFIRM=yes \
+  ./scripts/restore-postgres.sh /opt/cc-backups/cc-tracker-YYYYMMDDTHHMMSSZ.dump
 ```
 
 Before an upgrade, take a backup, build immutable images, run the migration service and only then replace API/worker/web. Migrations are forward-only; restore the pre-deploy backup if application rollback also requires a database rollback.

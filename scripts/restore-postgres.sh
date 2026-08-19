@@ -12,7 +12,7 @@ if [ "${RESTORE_CONFIRM:-}" != 'yes' ]; then
 fi
 
 docker compose -f compose.production.yml exec -T postgres \
-  pg_restore --clean --if-exists --no-owner --no-acl \
-  --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" < "$backup_file"
+  sh -eu -c 'pg_restore --clean --if-exists --no-owner --no-acl --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"' \
+  < "$backup_file"
 
 printf 'Restore completed from: %s\n' "$backup_file"

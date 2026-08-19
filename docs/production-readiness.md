@@ -1,6 +1,6 @@
 # Production readiness audit
 
-Audit date: 2026-08-18. Scope: the complete repository through Phase 19.
+Audit date: 2026-08-20. Scope: the complete repository through Phase 19 and production hardening.
 
 | Area                       | Status | Evidence / disposition                                                                                                                     |
 | -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -19,18 +19,19 @@ Audit date: 2026-08-18. Scope: the complete repository through Phase 19.
 | 13. Season boundaries      | PASS   | Event-time attribution and atomic, immutable close snapshots.                                                                              |
 | 14. Rejudge reconciliation | PASS   | Reversal ledger entries, replacement promotion, closed-season audit workflow.                                                              |
 | 15. Privacy                | PASS   | Private organizations are authorization-gated; logs omit bodies, credentials, cookies and query values.                                    |
-| 16. Backup/restore         | PASS   | Versioned scripts and runbook; restore rehearsal is a release checklist gate.                                                              |
+| 16. Backup/restore         | PASS   | Atomic validated dumps, 30-day retention, a daily systemd timer and restore rehearsal gate.                                                |
 | 17. Secrets                | PASS   | Required production secrets are environment-only; examples contain placeholders.                                                           |
-| 18. Docker/network         | PASS   | Only Caddy exposes a host port; API, PostgreSQL and Redis stay internal; workloads run non-root with health checks.                        |
-| 19. Logging/monitoring     | PASS   | Request IDs, structured request logs, protected queue/account/wallet metrics and documented alert thresholds.                              |
+| 18. Docker/network         | PASS   | Only the web service binds to host loopback; API, PostgreSQL and Redis stay on the Compose network with health checks.                     |
+| 19. Logging/monitoring     | PASS   | Structured logs and protected metrics; Docker local logs rotate at 10 MB x 5 files per container.                                          |
 | 20. Resource usage         | PASS   | Bounded DB pools, queue concurrency, pagination and adaptive sync scheduling.                                                              |
 
 ## Findings
 
 - BLOCKER: none.
 - HIGH: none after Phase 19 fixes.
-- MEDIUM: container logs still require an external collector and retention policy on the target VPS.
-- MEDIUM: Caddy currently serves HTTP because TLS is expected at an upstream edge. Enable a public hostname/TLS policy before exposing Caddy directly.
+- MEDIUM: the VPS backup still requires encrypted off-host replication to protect against total host loss.
+- LOW: container logs have bounded local retention but no external collector for long-term search.
+- LOW: TLS terminates at host Nginx; keep the loopback-only web upstream inaccessible from the public network.
 - LOW: `npm audit` reports moderate issues only in development tooling; production dependency audit is clean. Recheck during each release.
 - LOW: the included load smoke detects regressions but is not a capacity benchmark. Establish capacity targets from pilot traffic before a broad rollout.
 
@@ -43,7 +44,7 @@ reconciliation, failed restore, or failing readiness probe.
 
 ## Verification record
 
-- 63 unit/integration tests passed across API, web, worker, core, and database.
+- 77 unit/integration tests passed across API, web, worker, core, and database.
 - TypeScript strict check, ESLint, Prettier, production build, and Drizzle metadata check passed.
 - All five migrations ran on a new empty PostgreSQL database and produced 20 application tables.
 - A custom-format PostgreSQL dump restored into an isolated database with 20 tables and all 5 migration records.
