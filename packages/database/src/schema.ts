@@ -5,6 +5,7 @@ import {
   boolean,
   check,
   customType,
+  date,
   foreignKey,
   index,
   integer,
@@ -581,6 +582,26 @@ export const rewardOrders = pgTable(
     uniqueIndex('reward_orders_idempotency_key_unique').on(table.idempotencyKey),
     index('reward_orders_user_created_idx').on(table.userId, table.createdAt.desc()),
     check('reward_orders_cost_snapshot_check', sql`${table.costSnapshot} > 0`),
+  ],
+);
+
+export const streakRescues = pgTable(
+  'streak_rescues',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    rewardOrderId: uuid('reward_order_id')
+      .notNull()
+      .references(() => rewardOrders.id, { onDelete: 'restrict' }),
+    rescuedDate: date('rescued_date').notNull(),
+    sacrificedAt: timestamp('sacrificed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('streak_rescues_reward_order_unique').on(table.rewardOrderId),
+    uniqueIndex('streak_rescues_user_date_unique').on(table.userId, table.rescuedDate),
+    index('streak_rescues_user_date_idx').on(table.userId, table.rescuedDate.desc()),
   ],
 );
 

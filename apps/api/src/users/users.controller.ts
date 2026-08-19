@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -441,6 +442,50 @@ export class UsersController {
       `;
     });
     return { success: true };
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Delete('admin/users/:id')
+  async deleteUser(@Param('id') id: string, @CurrentUser() actor: AuthUser, @Body() body: unknown) {
+    const userId = this.uuid(id);
+    if (userId === actor.userId) {
+      throw new BadRequestException('Không thể xoá tài khoản đang đăng nhập');
+    }
+    const input = this.parse(
+      z.object({ reason: z.string().trim().min(3).max(500).default('Admin xoá tài khoản') }),
+      body ?? {},
+    );
+    const user = await this.database.sql.begin(async (transaction) => {
+      const [before] = await transaction`
+        SELECT id, full_name, display_name, status, system_role
+        FROM users WHERE id = ${userId} FOR UPDATE
+      `;
+      if (!before) throw new BadRequestException('Không tìm thấy tài khoản');
+      await transaction`
+        UPDATE auth_sessions SET revoked_at = now()
+        WHERE user_id = ${userId} AND revoked_at IS NULL
+      `;
+      await transaction`
+        UPDATE organization_memberships SET status = 'LEFT', left_at = now(), updated_at = now()
+        WHERE user_id = ${userId} AND status = 'ACTIVE'
+      `;
+      await transaction`
+        UPDATE codeforces_accounts SET sync_status = 'INACTIVE', next_sync_at = NULL, updated_at = now()
+        WHERE user_id = ${userId}
+      `;
+      const [after] = await transaction`
+        UPDATE users SET status = 'INACTIVE', updated_at = now()
+        WHERE id = ${userId}
+        RETURNING id, full_name, display_name, status, system_role, updated_at
+      `;
+      await transaction`
+        INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
+        VALUES (${actor.userId}, 'USER_DELETED', 'user', ${userId},
+          ${JSON.stringify(before)}::jsonb, ${JSON.stringify(after ?? null)}::jsonb, ${input.reason})
+      `;
+      return after;
+    });
+    return { user, deleted: true, archived: true };
   }
 
   private uuid(value: string): string {

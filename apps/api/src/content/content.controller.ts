@@ -21,12 +21,32 @@ import { DatabaseService } from '../database/database.service';
 
 const quoteSchema = z.object({
   content: z.string().trim().min(5).max(1000),
-  author: z.string().trim().max(160).nullable().default(null),
+  author: z
+    .string()
+    .trim()
+    .max(160)
+    .nullable()
+    .optional()
+    .transform((value) => value || 'Cầy Cốt MrTee.VN'),
   active: z.boolean().default(true),
-  sortOrder: z.coerce.number().int().min(0).max(100_000).default(0),
+  sortOrder: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(100_000)
+    .optional()
+    .transform((value) => value ?? Math.floor(Math.random() * 100_001)),
 });
 const pastedQuotesSchema = z.object({
   text: z.string().trim().min(5).max(500_000),
+});
+const editableQuoteSchema = z.object({
+  row: z.number().int().positive(),
+  content: z.string(),
+  author: z.string().nullable().optional(),
+  sortOrder: z.coerce.number().int().min(0).max(100_000).optional(),
+  active: z.boolean().default(true),
+  errors: z.array(z.string()).optional().default([]),
 });
 
 const rankSchema = z.object({
@@ -103,8 +123,8 @@ export class ContentController {
       const record = Object.fromEntries(header.map((key, column) => [key, row[column] ?? '']));
       const parsed = quoteSchema.safeParse({
         content: String(record.noi_dung ?? ''),
-        author: String(record.tac_gia ?? '').trim() || null,
-        sortOrder: record.thu_tu === '' ? index * 10 : record.thu_tu,
+        author: String(record.tac_gia ?? '').trim() || undefined,
+        sortOrder: record.thu_tu === '' ? undefined : record.thu_tu,
         active: this.booleanCell(record.hien_thi, true),
       });
       if (!parsed.success) {
@@ -119,6 +139,70 @@ export class ContentController {
       created += 1;
       results.push({ row: index + 2, success: true });
     }
+    return { created, failed: results.length - created, total: results.length, results };
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Post('admin/quotes/import-preview')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 3 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async previewQuotes(@UploadedFile() file: Express.Multer.File | undefined) {
+    if (!file) throw new BadRequestException('Chọn file CSV hoặc XLSX để đọc dữ liệu');
+    const rows = await this.readRows(file);
+    if (rows.length < 2) throw new BadRequestException('File chưa có danh ngôn');
+    if (rows.length > 1001) throw new BadRequestException('Mỗi lần chỉ import tối đa 1.000 câu');
+    const header = rows[0]!.map((value) => this.normalizeHeader(String(value ?? '')));
+    if (!header.includes('noi_dung')) throw new BadRequestException('Thiếu cột bắt buộc: noi_dung');
+    const result = rows.slice(1).flatMap((row, index) => {
+      if (row.every((value) => value === null || String(value).trim() === '')) return [];
+      const record = Object.fromEntries(header.map((key, column) => [key, row[column] ?? '']));
+      const candidate = {
+        row: index + 2,
+        content: String(record.noi_dung ?? '').trim(),
+        author: String(record.tac_gia ?? '').trim() || 'Cầy Cốt MrTee.VN',
+        sortOrder:
+          record.thu_tu === '' ? Math.floor(Math.random() * 100_001) : Number(record.thu_tu),
+        active: this.booleanCell(record.hien_thi, true),
+      };
+      const parsed = quoteSchema.safeParse(candidate);
+      return [
+        {
+          ...candidate,
+          errors: parsed.success ? [] : parsed.error.issues.map((issue) => issue.message),
+        },
+      ];
+    });
+    return {
+      rows: result,
+      total: result.length,
+      valid: result.filter((row) => !row.errors.length).length,
+    };
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Post('admin/quotes/import-confirm')
+  async confirmQuotes(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
+    const input = z.object({ rows: z.array(editableQuoteSchema).min(1).max(1000) }).safeParse(body);
+    if (!input.success) throw new BadRequestException('Dữ liệu xác nhận import không hợp lệ');
+    const results: { row: number; success: boolean; message?: string }[] = [];
+    for (const row of input.data.rows) {
+      const parsed = quoteSchema.safeParse(row);
+      if (!parsed.success) {
+        results.push({
+          row: row.row,
+          success: false,
+          message: parsed.error.issues.map((issue) => issue.message).join('; '),
+        });
+        continue;
+      }
+      await this.persistQuote(null, parsed.data, actor);
+      results.push({ row: row.row, success: true });
+    }
+    const created = results.filter((result) => result.success).length;
     return { created, failed: results.length - created, total: results.length, results };
   }
 
@@ -139,15 +223,15 @@ export class ContentController {
       if (index === 0 && this.normalizeHeader(cells[0] ?? '') === 'cham_ngon') continue;
       const quote = quoteSchema.safeParse({
         content: cells[0] ?? '',
-        author: cells[1] || null,
-        sortOrder: cells[2] || index + 1,
+        author: cells[1] || undefined,
+        sortOrder: cells[2] || undefined,
         active: this.booleanCell(cells[3], true),
       });
-      if (!quote.success || cells.length < 3) {
+      if (!quote.success) {
         results.push({
           row: index + 1,
           success: false,
-          message: 'Đúng định dạng: Châm ngôn | Tác giả | Thứ tự | Có/Không',
+          message: 'Câu châm ngôn phải có ít nhất 5 ký tự',
         });
         continue;
       }

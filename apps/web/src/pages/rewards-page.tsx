@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 import { api, formatNumber, formatVnd } from '../lib/api';
 
@@ -75,7 +75,7 @@ export default function RewardsPage() {
                 detail="Mở khóa theo CC Level, đổi bằng CC Balance và trưng bày trong hồ sơ cá nhân."
                 eyebrow="BỘ SƯU TẬP LINH VẬT"
                 rewards={mascotRewards}
-                title="Đồng đội đáng yêu của dân Cầy Code"
+                title="Đồng đội đáng yêu của dân Cầy Cốt"
                 onRedeem={redeemReward}
                 pending={redeem.isPending}
               />

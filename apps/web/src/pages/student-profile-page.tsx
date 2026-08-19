@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import type { CSSProperties } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, type CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   Avatar,
@@ -10,7 +10,7 @@ import {
   LoadingState,
   StudentName,
 } from '../components/ui';
-import { api, formatDate, formatNumber, formatVnd } from '../lib/api';
+import { api, formatDate, formatNumber, formatVnd, useSession } from '../lib/api';
 
 interface StudentProfile {
   profile: {
@@ -37,7 +37,36 @@ interface StudentProfile {
     level_rank_icon: string | null;
     level_rank_color: string | null;
   };
-  streak: { current_streak: number; longest_streak: number };
+  streak: {
+    current_streak: number;
+    longest_streak: number;
+    pending_bonus: number;
+    settled_bonus: number;
+    timeline: {
+      date: string;
+      kind: 'SOLVE' | 'RESCUE';
+      problemName: string | null;
+      problemRating: number | null;
+      submissionId: string | null;
+      codeforcesUrl: string | null;
+      mascotName: string | null;
+      mascotImageUrl: string | null;
+    }[];
+    rescue: {
+      missingDates: string[];
+      requiredMascots: number;
+      available: boolean;
+      maxDays: number;
+      mascots: {
+        order_id: string;
+        reward_id: string;
+        name: string;
+        image_url: string | null;
+        acquired_at: string;
+      }[];
+    };
+    bonus_milestones: { days: number; ccPoint: number }[];
+  };
   awards: { award_type: string; title: string; season_name: string; awarded_at: string }[];
   rewards: {
     name: string;
@@ -51,11 +80,29 @@ interface StudentProfile {
 
 export default function StudentProfilePage() {
   const { userId = '' } = useParams();
+  const session = useSession();
+  const queryClient = useQueryClient();
+  const [selectedMascots, setSelectedMascots] = useState<string[]>([]);
   const student = useQuery({
     queryKey: ['student-profile', userId],
     queryFn: () => api<StudentProfile>(`/students/${userId}/profile`),
     enabled: Boolean(userId),
     refetchInterval: 15_000,
+  });
+  const rescue = useMutation({
+    mutationFn: () =>
+      api('/me/streak/rescue', {
+        method: 'POST',
+        body: JSON.stringify({ rewardOrderIds: selectedMascots }),
+      }),
+    onSuccess: async () => {
+      setSelectedMascots([]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['student-profile', userId] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['leaderboard'] }),
+      ]);
+    },
   });
   if (student.isPending) return <LoadingState label="Đang tải hồ sơ học sinh…" fullPage />;
   if (student.error)
@@ -63,6 +110,7 @@ export default function StudentProfilePage() {
   if (!student.data)
     return <EmptyState title="Không tìm thấy học sinh" detail="Hồ sơ không còn khả dụng." />;
   const { profile, streak, awards, rewards, topTags } = student.data;
+  const isOwner = session.data?.user.userId === profile.id;
   const rank = profile.level_rank_name
     ? {
         name: profile.level_rank_name,
@@ -140,6 +188,142 @@ export default function StudentProfilePage() {
             value={`${streak.current_streak} ngày`}
             note={`Kỷ lục ${streak.longest_streak} ngày`}
           />
+        </section>
+
+        <section className="panel streak-profile-panel p-6">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">NHẬT KÝ STREAK</p>
+              <h2>Bài đầu tiên được ghi nhận mỗi ngày</h2>
+              <p>
+                Chuỗi hiện tại có thể nhận{' '}
+                <strong>{formatNumber(streak.pending_bonus)} CC Point</strong> khi kết thúc; CC
+                Balance cũng tăng đúng số điểm này.
+              </p>
+            </div>
+            <div className="streak-bonus-summary">
+              <span>Đã nhận từ Streak</span>
+              <strong>◆ {formatNumber(streak.settled_bonus)} CC</strong>
+            </div>
+          </div>
+          <div className="streak-milestones">
+            {streak.bonus_milestones.map((milestone) => (
+              <span key={milestone.days}>
+                <strong>{milestone.days} ngày</strong>
+                {milestone.ccPoint} CC Point
+              </span>
+            ))}
+          </div>
+          {streak.timeline.length ? (
+            <div className="streak-day-table">
+              <div className="streak-day-row header">
+                <span>Ngày</span>
+                <span>Ghi nhận đầu tiên</span>
+                <span>Rating</span>
+                <span>Minh chứng</span>
+              </div>
+              {[...streak.timeline].reverse().map((day) => (
+                <div className={`streak-day-row ${day.kind.toLowerCase()}`} key={day.date}>
+                  <strong>{formatProfileDay(day.date)}</strong>
+                  <span className="streak-day-main">
+                    {day.kind === 'SOLVE' ? (
+                      <>
+                        <b>✓ {day.problemName}</b>
+                        <small>Accepted đầu tiên trong ngày</small>
+                      </>
+                    ) : (
+                      <>
+                        <b>🛡️ Ngày được bảo vệ</b>
+                        <small>Hi sinh {day.mascotName}</small>
+                      </>
+                    )}
+                  </span>
+                  <span>{day.problemRating ?? '—'}</span>
+                  {day.codeforcesUrl ? (
+                    <a
+                      className="button-secondary"
+                      href={day.codeforcesUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Mở Codeforces ↗
+                    </a>
+                  ) : (
+                    <span className="streak-rescue-mark">Linh vật</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="Chưa có ngày Streak"
+              detail="Bài Accepted đầu tiên trong ngày sẽ xuất hiện tại đây."
+            />
+          )}
+
+          {isOwner && streak.rescue.available && (
+            <div className="streak-rescue-box">
+              <div>
+                <p className="eyebrow">CỨU CHUỖI</p>
+                <h3>
+                  Hi sinh {streak.rescue.requiredMascots} linh vật cho{' '}
+                  {streak.rescue.requiredMascots} ngày bị thiếu
+                </h3>
+                <p>{streak.rescue.missingDates.map(formatProfileDay).join(' · ')}</p>
+              </div>
+              <div className="streak-mascot-inventory">
+                {streak.rescue.mascots.map((mascot) => {
+                  const checked = selectedMascots.includes(mascot.order_id);
+                  const disabled =
+                    !checked && selectedMascots.length >= streak.rescue.requiredMascots;
+                  return (
+                    <label className={checked ? 'selected' : ''} key={mascot.order_id}>
+                      <input
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={() =>
+                          setSelectedMascots((current) =>
+                            checked
+                              ? current.filter((id) => id !== mascot.order_id)
+                              : [...current, mascot.order_id],
+                          )
+                        }
+                        type="checkbox"
+                      />
+                      {mascot.image_url && <img alt="" src={mascot.image_url} />}
+                      <strong>{mascot.name}</strong>
+                    </label>
+                  );
+                })}
+              </div>
+              {streak.rescue.mascots.length < streak.rescue.requiredMascots ? (
+                <p className="notice error">
+                  Bạn chưa có đủ linh vật đã được giao. Có thể đổi thêm trong Cửa hàng phần thưởng.
+                </p>
+              ) : (
+                <button
+                  className="button-danger"
+                  disabled={
+                    selectedMascots.length !== streak.rescue.requiredMascots || rescue.isPending
+                  }
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Hi sinh ${selectedMascots.length} linh vật để giữ Streak? Thao tác này không thể hoàn tác.`,
+                      )
+                    )
+                      rescue.mutate();
+                  }}
+                  type="button"
+                >
+                  {rescue.isPending
+                    ? 'Đang cứu chuỗi…'
+                    : `Hi sinh ${streak.rescue.requiredMascots} linh vật`}
+                </button>
+              )}
+              {rescue.error && <p className="notice error">{rescue.error.message}</p>}
+            </div>
+          )}
         </section>
 
         <div className="student-profile-grid">
@@ -225,6 +409,16 @@ export default function StudentProfilePage() {
       </section>
     </main>
   );
+}
+
+function formatProfileDay(value: string) {
+  return new Intl.DateTimeFormat('vi-VN', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  }).format(new Date(`${value}T12:00:00+07:00`));
 }
 
 function ProfileMetric({

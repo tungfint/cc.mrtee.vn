@@ -27,6 +27,18 @@ const studentSchema = z.object({
 });
 
 type CellValue = string | number | boolean | Date | DateConstructor | null;
+export type EditableStudentImportRow = {
+  row: number;
+  email: string;
+  password: string;
+  fullName: string;
+  displayName: string;
+  codeforcesHandle: string;
+  initialCcLevel: number;
+  classSlug: string;
+  mustChangePassword: boolean;
+  errors: string[];
+};
 
 @Injectable()
 export class StudentImportService {
@@ -44,6 +56,162 @@ export class StudentImportService {
 
   async importGlobal(file: Express.Multer.File, actor: AuthUser) {
     return this.process(file, actor, null, true);
+  }
+
+  async preview(
+    file: Express.Multer.File,
+    actor: AuthUser,
+    organizationId: string | null,
+    useClassSlug: boolean,
+  ) {
+    if (organizationId) {
+      const access = await this.authorization.organizationAccess(organizationId, actor);
+      this.authorization.assertCanTeach(access, actor);
+    }
+    const rows = await this.readRows(file);
+    if (rows.length < 2) throw new BadRequestException('File chưa có dữ liệu học sinh');
+    if (rows.length > 501) throw new BadRequestException('Mỗi lần chỉ import tối đa 500 học sinh');
+    const header = rows[0]!.map((value) => this.normalizeHeader(String(value ?? '')));
+    const required = ['tai_khoan', 'mat_khau', 'ho_va_ten', 'ten_hien_thi'];
+    for (const key of required) {
+      if (!header.includes(key)) throw new BadRequestException(`Thiếu cột bắt buộc: ${key}`);
+    }
+    const slugs = useClassSlug
+      ? new Set(
+          (
+            await this.database.sql<{ slug: string }[]>`
+              SELECT slug FROM organizations WHERE status = 'ACTIVE'
+            `
+          ).map((item) => item.slug),
+        )
+      : new Set<string>();
+    const result: EditableStudentImportRow[] = [];
+    for (const [index, row] of rows.slice(1).entries()) {
+      if (row.every((value) => value === null || String(value).trim() === '')) continue;
+      const record = Object.fromEntries(header.map((key, column) => [key, row[column] ?? '']));
+      const candidate = {
+        email: String(record.tai_khoan ?? '').trim(),
+        password: String(record.mat_khau ?? ''),
+        fullName: String(record.ho_va_ten ?? '').trim(),
+        displayName: String(record.ten_hien_thi ?? '').trim(),
+        codeforcesHandle: String(record.tai_khoan_codeforces ?? '').trim(),
+        initialCcLevel: Number(record.muc_ban_dau === '' ? 800 : record.muc_ban_dau),
+        classSlug: useClassSlug
+          ? String(record.lop_hoc_slug ?? record.slug_lop ?? '')
+              .trim()
+              .toLowerCase()
+          : '',
+        mustChangePassword: this.booleanCell(
+          record.doi_mat_khau_lan_dau ?? record.yeu_cau_doi_mat_khau,
+          true,
+        ),
+      };
+      const parsed = studentSchema.safeParse(candidate);
+      const errors = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+      if (useClassSlug && candidate.classSlug && !slugs.has(candidate.classSlug)) {
+        errors.push(`Không tìm thấy lớp có slug “${candidate.classSlug}”`);
+      }
+      result.push({ row: index + 2, ...candidate, errors });
+    }
+    return {
+      rows: result,
+      total: result.length,
+      valid: result.filter((row) => !row.errors.length).length,
+    };
+  }
+
+  async confirm(
+    rows: EditableStudentImportRow[],
+    actor: AuthUser,
+    fallbackOrganizationId: string | null,
+    useClassSlug: boolean,
+  ) {
+    if (rows.length < 1 || rows.length > 500) {
+      throw new BadRequestException('Danh sách xác nhận phải có từ 1 đến 500 học sinh');
+    }
+    if (fallbackOrganizationId) {
+      const access = await this.authorization.organizationAccess(fallbackOrganizationId, actor);
+      this.authorization.assertCanTeach(access, actor);
+    }
+    const organizations = useClassSlug
+      ? await this.database.sql<{ id: string; slug: string }[]>`
+          SELECT id, slug FROM organizations WHERE status = 'ACTIVE'
+        `
+      : [];
+    const organizationBySlug = new Map(organizations.map((item) => [item.slug, item.id]));
+    const results: { row: number; email: string; success: boolean; message?: string }[] = [];
+    for (const [index, row] of rows.entries()) {
+      const parsed = studentSchema.safeParse(row);
+      if (!parsed.success) {
+        results.push({
+          row: row.row || index + 1,
+          email: row.email,
+          success: false,
+          message: parsed.error.issues.map((issue) => issue.message).join('; '),
+        });
+        continue;
+      }
+      const organizationId = useClassSlug
+        ? parsed.data.classSlug
+          ? organizationBySlug.get(parsed.data.classSlug)
+          : undefined
+        : (fallbackOrganizationId ?? undefined);
+      if (useClassSlug && parsed.data.classSlug && !organizationId) {
+        results.push({
+          row: row.row || index + 1,
+          email: parsed.data.email,
+          success: false,
+          message: `Không tìm thấy lớp có slug “${parsed.data.classSlug}”`,
+        });
+        continue;
+      }
+      try {
+        await this.auth.createUser(
+          {
+            email: parsed.data.email,
+            password: parsed.data.password,
+            fullName: parsed.data.fullName,
+            displayName: parsed.data.displayName,
+            initialCcLevel: parsed.data.initialCcLevel,
+            mustChangePassword: parsed.data.mustChangePassword,
+            verifyCodeforces: useClassSlug && Boolean(parsed.data.codeforcesHandle),
+            ...(organizationId ? { organizationId } : {}),
+            ...(parsed.data.codeforcesHandle
+              ? { codeforcesHandle: parsed.data.codeforcesHandle }
+              : {}),
+          },
+          {
+            actorUserId: actor.userId,
+            after: {
+              source: 'EDITABLE_IMPORT',
+              ...parsed.data,
+              organizationId: organizationId ?? null,
+            },
+          },
+        );
+        results.push({ row: row.row || index + 1, email: parsed.data.email, success: true });
+      } catch (error) {
+        results.push({
+          row: row.row || index + 1,
+          email: parsed.data.email,
+          success: false,
+          message:
+            this.postgresCode(error) === '23505'
+              ? 'Tài khoản hoặc Codeforces handle đã tồn tại'
+              : 'Không thể tạo tài khoản',
+        });
+      }
+    }
+    const created = results.filter((result) => result.success).length;
+    const failed = results.length - created;
+    await this.database.sql`
+      INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after, reason)
+      VALUES (${actor.userId}, 'STUDENTS_IMPORTED', ${useClassSlug ? 'system' : 'organization'},
+        ${fallbackOrganizationId ?? actor.userId},
+        ${JSON.stringify({ created, failed, total: results.length, editablePreview: true })}::jsonb,
+        'Đã xem trước và xác nhận danh sách học sinh')
+    `;
+    return { created, failed, total: results.length, results };
   }
 
   private async process(

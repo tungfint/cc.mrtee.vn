@@ -9,6 +9,15 @@ import { DatabaseService } from '../database/database.service';
 import { ScoringAdjustmentsService, type ManualPointType } from './scoring-adjustments.service';
 
 type CellValue = string | number | boolean | Date | DateConstructor | null;
+export type EditablePointImportRow = {
+  row: number;
+  email: string;
+  operation: string;
+  amount: number;
+  reason: string;
+  affectsSeason: boolean;
+  errors: string[];
+};
 
 const rowSchema = z.object({
   email: z.string().trim().email().max(320),
@@ -137,6 +146,138 @@ export class BulkPointImportService {
         ${JSON.stringify({ applied, replayed, failed, total: results.length, fileHash })}::jsonb,
         'Cộng/trừ CC Point hàng loạt từ file'
       )
+    `;
+    return { applied, replayed, failed, total: results.length, results };
+  }
+
+  async preview(organizationId: string, file: Express.Multer.File, actor: AuthUser) {
+    const access = await this.authorization.organizationAccess(organizationId, actor);
+    this.authorization.assertCanTeach(access, actor);
+    const rows = await this.readRows(file);
+    if (rows.length < 2) throw new BadRequestException('File chưa có dữ liệu cộng hoặc trừ điểm');
+    if (rows.length > 501) throw new BadRequestException('Mỗi lần chỉ import tối đa 500 tài khoản');
+    const header = rows[0]!.map((value) => this.normalize(String(value ?? '')));
+    const required = ['tai_khoan', 'thao_tac', 'cc_point', 'ly_do'];
+    for (const key of required) {
+      if (!header.includes(key)) throw new BadRequestException(`Thiếu cột bắt buộc: ${key}`);
+    }
+    const result: EditablePointImportRow[] = [];
+    for (const [index, row] of rows.slice(1).entries()) {
+      if (row.every((value) => value === null || String(value).trim() === '')) continue;
+      const record = Object.fromEntries(header.map((key, column) => [key, row[column] ?? '']));
+      const type = this.pointType(String(record.thao_tac ?? ''));
+      const affectsSeason = this.booleanValue(record.anh_huong_mua);
+      const candidate = {
+        row: index + 2,
+        email: String(record.tai_khoan ?? '')
+          .trim()
+          .toLowerCase(),
+        operation:
+          type === 'PENALTY' ? 'TRỪ' : type === 'BONUS' ? 'CỘNG' : String(record.thao_tac ?? ''),
+        amount: Number(record.cc_point ?? 0),
+        reason: String(record.ly_do ?? '').trim(),
+        affectsSeason: affectsSeason ?? true,
+      };
+      const parsed = rowSchema.safeParse(candidate);
+      const errors = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
+      if (!type) errors.push('Thao tác phải là CỘNG hoặc TRỪ');
+      if (affectsSeason === null) errors.push('Ảnh hưởng mùa phải là CÓ hoặc KHÔNG');
+      result.push({ ...candidate, errors });
+    }
+    return {
+      rows: result,
+      total: result.length,
+      valid: result.filter((row) => !row.errors.length).length,
+    };
+  }
+
+  async confirm(
+    organizationId: string,
+    rows: EditablePointImportRow[],
+    batchKey: string,
+    actor: AuthUser,
+  ) {
+    const access = await this.authorization.organizationAccess(organizationId, actor);
+    this.authorization.assertCanTeach(access, actor);
+    if (rows.length < 1 || rows.length > 500) {
+      throw new BadRequestException('Danh sách xác nhận phải có từ 1 đến 500 tài khoản');
+    }
+    const seen = new Set<string>();
+    const results: {
+      row: number;
+      email: string;
+      success: boolean;
+      replayed?: boolean;
+      message?: string;
+    }[] = [];
+    for (const [index, row] of rows.entries()) {
+      const email = row.email.trim().toLowerCase();
+      const parsed = rowSchema.safeParse({ email, amount: row.amount, reason: row.reason });
+      const type = this.pointType(row.operation);
+      if (!parsed.success || !type) {
+        results.push({
+          row: row.row || index + 1,
+          email,
+          success: false,
+          message: !type
+            ? 'Thao tác phải là CỘNG hoặc TRỪ'
+            : parsed.success
+              ? 'Dữ liệu không hợp lệ'
+              : parsed.error.issues.map((issue) => issue.message).join('; '),
+        });
+        continue;
+      }
+      if (seen.has(email)) {
+        results.push({ row: row.row, email, success: false, message: 'Tài khoản bị lặp' });
+        continue;
+      }
+      seen.add(email);
+      const [target] = await this.database.sql<{ user_id: string }[]>`
+        SELECT credentials.user_id FROM user_credentials AS credentials
+        JOIN users ON users.id = credentials.user_id AND users.status = 'ACTIVE'
+        JOIN organization_memberships AS memberships
+          ON memberships.user_id = credentials.user_id
+          AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE'
+        WHERE credentials.email = ${email}
+      `;
+      if (!target) {
+        results.push({
+          row: row.row,
+          email,
+          success: false,
+          message: 'Không tìm thấy tài khoản trong lớp',
+        });
+        continue;
+      }
+      try {
+        const adjustment = await this.adjustments.apply({
+          organizationId,
+          targetUserId: target.user_id,
+          type,
+          amount: parsed.data.amount * (type === 'PENALTY' ? -1 : 1),
+          affectsSeason: row.affectsSeason,
+          reason: parsed.data.reason,
+          idempotencyKey: `preview-${batchKey}-${row.row || index + 1}`,
+          actor,
+        });
+        results.push({ row: row.row, email, success: true, replayed: adjustment.replayed });
+      } catch (error) {
+        results.push({
+          row: row.row,
+          email,
+          success: false,
+          message: error instanceof Error ? error.message : 'Không thể ghi giao dịch',
+        });
+      }
+    }
+    const applied = results.filter((result) => result.success && !result.replayed).length;
+    const replayed = results.filter((result) => result.success && result.replayed).length;
+    const failed = results.length - applied - replayed;
+    await this.database.sql`
+      INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after, reason)
+      VALUES (${actor.userId}, 'POINTS_BULK_IMPORTED', 'organization', ${organizationId},
+        ${JSON.stringify({ applied, replayed, failed, total: results.length, editablePreview: true })}::jsonb,
+        'Đã xem trước và xác nhận lệnh CC Point hàng loạt')
     `;
     return { applied, replayed, failed, total: results.length, results };
   }

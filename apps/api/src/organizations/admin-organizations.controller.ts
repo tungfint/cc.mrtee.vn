@@ -15,7 +15,7 @@ import { DatabaseService } from '../database/database.service';
 
 const listSchema = z.object({
   search: z.string().trim().max(200).default(''),
-  status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
 });
 const updateSchema = z
   .object({
@@ -118,6 +118,15 @@ export class AdminOrganizationsController {
         SELECT id, name, slug, visibility, status FROM organizations WHERE id = ${id} FOR UPDATE
       `;
       if (!before) throw new BadRequestException('Không tìm thấy lớp học');
+      await transaction`
+        UPDATE organization_memberships
+        SET status = 'LEFT', left_at = now(), updated_at = now()
+        WHERE organization_id = ${id} AND status = 'ACTIVE'
+      `;
+      await transaction`
+        UPDATE leaderboard_share_links SET active = false
+        WHERE organization_id = ${id} AND active = true
+      `;
       const [updated] = await transaction`
         UPDATE organizations SET status = 'INACTIVE', updated_at = now()
         WHERE id = ${id} RETURNING id, name, slug, visibility, timezone, status, updated_at
@@ -126,11 +135,11 @@ export class AdminOrganizationsController {
         INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
         VALUES (${actor.userId}, 'ORGANIZATION_ARCHIVED', 'organization', ${id},
           ${JSON.stringify(before)}::jsonb, ${JSON.stringify(updated ?? null)}::jsonb,
-          'Lưu trữ lớp học và giữ lại lịch sử')
+          'Xoá lớp khỏi danh sách hoạt động, đưa học sinh ra khỏi lớp và giữ lịch sử')
       `;
       return updated;
     });
-    return { organization };
+    return { organization, deleted: true, archived: true };
   }
 
   private uuid(value: string): string {

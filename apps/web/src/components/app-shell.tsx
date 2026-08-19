@@ -79,6 +79,14 @@ export function AppShell({ user }: { user: SessionUser }) {
               {link.label}
             </NavLink>
           ))}
+          {user.systemRole === 'USER' && (
+            <NavLink
+              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              to={`/students/${user.userId}`}
+            >
+              <span aria-hidden>◎</span>Hồ sơ học sinh
+            </NavLink>
+          )}
           {canAdmin && (
             <NavLink
               className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}

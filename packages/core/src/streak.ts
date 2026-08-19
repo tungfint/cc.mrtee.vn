@@ -25,3 +25,21 @@ export function currentDateStreak(dateKeys: string[], todayKey: string): number 
   }
   return streak;
 }
+
+/**
+ * Thưởng cho một chuỗi đã kết thúc. Công thức theo bậc giúp những mốc dài
+ * đáng giá hơn nhưng vẫn nhỏ hơn phần thưởng từ việc giải đều các bài phù hợp.
+ *
+ * 2-6 ngày: 1 CC/ngày sau ngày đầu tiên
+ * 7-13 ngày: 2 CC/ngày
+ * 14-29 ngày: 3 CC/ngày
+ * Từ 30 ngày: 4 CC/ngày
+ */
+export function calculateStreakBonus(days: number): number {
+  const length = Math.max(0, Math.floor(days));
+  if (length < 2) return 0;
+  if (length <= 6) return length - 1;
+  if (length <= 13) return 5 + (length - 6) * 2;
+  if (length <= 29) return 19 + (length - 13) * 3;
+  return 67 + (length - 29) * 4;
+}

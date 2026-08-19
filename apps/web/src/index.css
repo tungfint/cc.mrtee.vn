@@ -595,10 +595,11 @@ textarea:focus {
   justify-content: space-between;
   overflow: hidden;
   padding: clamp(32px, 5vw, 72px);
-  background: #061019;
+  background: #9d174d;
   background-image:
-    radial-gradient(circle at 20% 75%, rgba(26, 207, 204, 0.18), transparent 28%),
-    linear-gradient(135deg, transparent 0 48%, rgba(255, 255, 255, 0.025) 48% 49%, transparent 49%);
+    radial-gradient(circle at 20% 75%, rgba(251, 207, 232, 0.38), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgba(244, 114, 182, 0.34), transparent 30%),
+    linear-gradient(135deg, #831843 0%, #be185d 48%, #ec4899 100%);
 }
 .login-form-wrap {
   display: grid;
@@ -2316,8 +2317,7 @@ textarea:focus {
 }
 
 .cash-tier-panel {
-  position: sticky;
-  top: 28px;
+  position: static;
   width: 100%;
   border-color: color-mix(in srgb, #16a34a 32%, var(--line));
   background: linear-gradient(
@@ -2326,6 +2326,250 @@ textarea:focus {
     var(--surface)
   );
   box-shadow: 0 22px 60px color-mix(in srgb, #16a34a 10%, transparent);
+}
+
+.import-preview {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 16px;
+  background: var(--surface);
+}
+.import-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.import-preview-heading div {
+  display: grid;
+  gap: 3px;
+}
+.import-preview-heading span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.import-preview-scroll {
+  overflow-x: auto;
+}
+.import-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.import-preview th,
+.import-preview td {
+  border-top: 1px solid var(--line);
+  padding: 9px;
+  text-align: left;
+  vertical-align: middle;
+}
+.import-preview th {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.import-preview input:not([type='checkbox']),
+.import-preview select {
+  width: 100%;
+  min-width: 90px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.import-preview tr.has-error {
+  background: color-mix(in srgb, #ef4444 6%, transparent);
+}
+.import-row-status {
+  min-width: 120px;
+  color: #16a34a;
+  font-weight: 750;
+}
+.has-error .import-row-status {
+  color: #dc2626;
+}
+.import-remove-row {
+  min-width: 34px;
+  padding: 7px 10px;
+}
+
+.class-student-manager {
+  min-width: 0;
+}
+.class-picker {
+  min-width: 230px;
+}
+.class-member-add {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.class-member-list {
+  display: grid;
+  gap: 1px;
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--line);
+}
+.class-member-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 15px;
+  background: var(--surface);
+}
+
+.streak-profile-panel {
+  margin-top: 22px;
+}
+.streak-profile-panel .section-heading > div > p:not(.eyebrow) {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.streak-bonus-summary {
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #f59e0b 11%, var(--surface-2));
+  text-align: right;
+}
+.streak-bonus-summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.streak-bonus-summary strong {
+  color: #d97706;
+  font-size: 18px;
+}
+.streak-milestones {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px;
+  margin: 18px 0;
+}
+.streak-milestones span {
+  display: grid;
+  gap: 3px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+.streak-milestones strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.streak-day-table {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.streak-day-row {
+  display: grid;
+  grid-template-columns: 145px minmax(220px, 1fr) 90px 150px;
+  align-items: center;
+  gap: 12px;
+  min-height: 62px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.streak-day-row.header {
+  min-height: auto;
+  border-top: 0;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.streak-day-row.rescue {
+  background: color-mix(in srgb, #f59e0b 6%, var(--surface));
+}
+.streak-day-main {
+  display: grid;
+  gap: 3px;
+}
+.streak-day-main small {
+  color: var(--muted);
+}
+.streak-rescue-mark {
+  color: #d97706;
+  font-weight: 800;
+}
+.streak-rescue-box {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, #f59e0b 38%, var(--line));
+  border-radius: 16px;
+  background: color-mix(in srgb, #f59e0b 7%, var(--surface));
+}
+.streak-rescue-box h3,
+.streak-rescue-box p {
+  margin: 4px 0 0;
+}
+.streak-mascot-inventory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 10px;
+}
+.streak-mascot-inventory label {
+  display: grid;
+  grid-template-columns: auto 42px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.streak-mascot-inventory label.selected {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px #f59e0b22;
+}
+.streak-mascot-inventory img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+@media (max-width: 760px) {
+  .class-member-add,
+  .class-member-row,
+  .streak-day-row {
+    grid-template-columns: 1fr;
+  }
+  .streak-day-row.header {
+    display: none;
+  }
+  .streak-milestones {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .streak-bonus-summary {
+    text-align: left;
+  }
 }
 
 .cash-tier-heading {

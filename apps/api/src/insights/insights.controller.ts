@@ -9,6 +9,7 @@ import {
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
+import { StreakService } from '../rewards/streak.service';
 
 interface LeaderboardRow {
   user_id: string;
@@ -40,6 +41,7 @@ export class InsightsController {
   constructor(
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
+    private readonly streaks: StreakService,
   ) {}
 
   @Get('me/dashboard')
@@ -102,7 +104,7 @@ export class InsightsController {
         ORDER BY (seasons.organization_id IS NOT NULL) DESC, seasons.start_at DESC
         LIMIT 1
       `,
-        this.streak(user.userId),
+        this.streaks.summary(user.userId),
         this.database.sql`
         SELECT tag, count(DISTINCT solves.problem_key)::int AS solved_count,
           round(avg(solves.rating_snapshot), 2)::text AS average_rating,
@@ -137,14 +139,21 @@ export class InsightsController {
         SELECT rewards.name, rewards.description, rewards.image_url, orders.reviewed_at AS earned_at
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
+        LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
         WHERE orders.user_id = ${user.userId} AND orders.status = 'FULFILLED'
+          AND rescues.id IS NULL
         ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 8
       `,
       ]);
     return {
       profile: profile[0] ?? null,
       season: seasons[0] ?? null,
-      streak: streak ?? { current_streak: 0, longest_streak: 0 },
+      streak: {
+        current_streak: streak.currentStreak,
+        longest_streak: streak.longestStreak,
+        pending_bonus: streak.pendingBonus,
+        settled_bonus: streak.settledBonus,
+      },
       tags,
       activity,
       transactions,
@@ -246,6 +255,9 @@ export class InsightsController {
           SELECT DISTINCT (first_solved_at AT TIME ZONE users.timezone)::date AS day,
             (now() AT TIME ZONE users.timezone)::date AS today
           FROM user_problem_solves WHERE user_id = users.id
+          UNION
+          SELECT rescued_date AS day, (now() AT TIME ZONE users.timezone)::date AS today
+          FROM streak_rescues WHERE user_id = users.id
         ), grouped AS (
           SELECT day, today, day - row_number() OVER (ORDER BY day)::int AS island FROM days
         ), runs AS (
@@ -366,27 +378,6 @@ export class InsightsController {
     };
   }
 
-  private async streak(userId: string) {
-    const [result] = await this.database.sql`
-      WITH days AS (
-        SELECT DISTINCT (solves.first_solved_at AT TIME ZONE users.timezone)::date AS day,
-          (now() AT TIME ZONE users.timezone)::date AS today
-        FROM user_problem_solves AS solves
-        JOIN users ON users.id = solves.user_id
-        WHERE solves.user_id = ${userId}
-      ), grouped AS (
-        SELECT day, today, day - row_number() OVER (ORDER BY day)::int AS island FROM days
-      ), streaks AS (
-        SELECT count(*)::int AS length, max(day) AS end_day, max(today) AS today
-        FROM grouped GROUP BY island
-      )
-      SELECT COALESCE(max(length), 0)::int AS longest_streak,
-        COALESCE(max(length) FILTER (WHERE end_day IN (today, today - 1)), 0)::int AS current_streak
-      FROM streaks
-    `;
-    return result;
-  }
-
   private async recognition(userId: string) {
     const [profiles, streak, awards, rewards, topTags, recognitionQuotes] = await Promise.all([
       this.database.sql`
@@ -444,7 +435,7 @@ export class InsightsController {
               AND staff.role IN ('TEACHER', 'ORG_ADMIN')
           )
       `,
-      this.streak(userId),
+      this.streaks.summary(userId),
       this.database.sql`
         SELECT awards.award_type, awards.title, awards.awarded_at, seasons.name AS season_name
         FROM season_awards AS awards
@@ -457,7 +448,9 @@ export class InsightsController {
           orders.reviewed_at AS earned_at
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
+        LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
         WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
+          AND rescues.id IS NULL
         ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 12
       `,
       this.database.sql`
@@ -483,7 +476,15 @@ export class InsightsController {
     if (!profile) throw new BadRequestException('Không tìm thấy học sinh');
     return {
       profile,
-      streak: streak ?? { current_streak: 0, longest_streak: 0 },
+      streak: {
+        current_streak: streak.currentStreak,
+        longest_streak: streak.longestStreak,
+        pending_bonus: streak.pendingBonus,
+        settled_bonus: streak.settledBonus,
+        timeline: streak.timeline,
+        rescue: streak.rescue,
+        bonus_milestones: streak.bonusMilestones,
+      },
       awards,
       rewards,
       topTags,

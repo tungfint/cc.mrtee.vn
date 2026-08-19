@@ -12,35 +12,40 @@ const metrics = [
     icon: '◆',
     name: 'CC Point',
     detail:
-      'Tổng điểm thành tích bạn đã tích lũy từ bài giải, thử thách và điều chỉnh hợp lệ. CC Point không bị trừ khi đổi quà.',
+      'Tổng thành tích tích luỹ từ bài giải, thưởng Streak và các ghi nhận hợp lệ. Mỗi lần được cộng CC Point, CC Balance cũng tăng tương ứng; CC Point không giảm khi đổi quà.',
   },
   {
     icon: '◈',
     name: 'CC Balance',
     detail:
-      'Số dư hiện có để đổi quà. Khi gửi yêu cầu đổi quà, CC Balance giảm nhưng CC Point vẫn được giữ nguyên.',
+      'Số dư hiện có để đổi quà. Khi gửi yêu cầu đổi quà, CC Balance giảm nhưng CC Point và lịch sử thành tích vẫn được giữ nguyên.',
   },
   {
     icon: '🔥',
     name: 'Streak',
-    detail: 'Số ngày luyện tập liên tiếp có bài giải hợp lệ, tính theo múi giờ Asia/Ho_Chi_Minh.',
+    detail:
+      'Số ngày liên tiếp có bài Accepted đầu tiên được ghi nhận theo múi giờ Việt Nam. Linh vật đã sở hữu có thể cứu tối đa 3 ngày bị thiếu.',
   },
 ];
 
 const steps = [
   ['1', 'Kết nối Codeforces', 'Nhập đúng handle Codeforces trong trang Tài khoản.'],
   ['2', 'Được xác minh', 'Giáo viên hoặc Admin xác nhận handle thuộc về bạn.'],
-  ['3', 'Đồng bộ bài giải', 'Hệ thống đọc submission và thông tin rating từ Codeforces.'],
-  ['4', 'Tích lũy & đổi quà', 'Nâng CC Level, giữ Streak và dùng CC Balance để chọn phần quà.'],
+  ['3', 'Đồng bộ bài giải', 'Hệ thống đọc submission và rating trực tiếp từ Codeforces.'],
+  [
+    '4',
+    'Tích luỹ & đổi quà',
+    'Nâng CC Level, nhận thưởng Streak và dùng CC Balance để đổi quà hoặc sưu tầm linh vật.',
+  ],
 ];
 
 export default function AboutPage() {
   return (
     <>
       <PageTitle
-        eyebrow="WELCOME TO CẦY CODE"
-        title="Biến mỗi bài Accepted thành một bước tiến"
-        detail="Cầy Code MrTee.vn giúp học sinh nhìn thấy năng lực, sự bền bỉ và thành quả luyện tập Codeforces bằng những chỉ số rõ ràng, minh bạch và dễ hiểu."
+        eyebrow="WELCOME TO CẦY CỐT"
+        title="Biến sự bền bỉ thành những cột mốc đáng tự hào"
+        detail="Cầy Cốt MrTee.VN ghi nhận hành trình luyện Codeforces bằng dữ liệu rõ ràng: bài đã giải, năng lực hiện tại, chuỗi ngày bền bỉ, điểm tích luỹ và những phần thưởng đã nhận."
         action={
           <Link className="button-primary" to="/account">
             Kết nối Codeforces
@@ -51,18 +56,21 @@ export default function AboutPage() {
       <section className="about-hero panel">
         <div>
           <p className="eyebrow">MỤC TIÊU</p>
-          <h2>Luyện đúng nhịp, hiểu đúng năng lực, ghi nhận đúng nỗ lực</h2>
+          <h2>Không chỉ đếm bài giải — hệ thống ghi nhận cả năng lực và sự bền bỉ</h2>
           <p>
-            Hệ thống đồng bộ các bài giải cá nhân từ Codeforces và chỉ ghi nhận lần Accepted đầu
-            tiên của mỗi bài. Độ khó bài toán góp phần phản ánh năng lực; điểm thưởng ghi nhận thành
-            tích; chuỗi ngày cho thấy sự đều đặn. Nhờ vậy, học sinh biết mình đang tiến bộ ở đâu và
-            cần duy trì điều gì.
+            Hệ thống đồng bộ bài giải cá nhân từ Codeforces và chỉ tính lần Accepted đầu tiên của
+            mỗi bài. CC Level phản ánh năng lực dài hạn; CC Point ghi nhận toàn bộ thành tích; CC
+            Balance là số dư có thể sử dụng; Streak thể hiện thói quen luyện tập liên tục. Hồ sơ học
+            sinh lưu bài đầu tiên mỗi ngày để mọi chuỗi đều có minh chứng rõ ràng.
           </p>
         </div>
         <div className="about-callout">
           <span>Nguyên tắc</span>
-          <strong>Giải thật · Ghi nhận đúng · Tiến bộ bền vững</strong>
-          <p>Mọi thao tác cộng, trừ, xác minh và đổi quà đều có lịch sử để đối soát.</p>
+          <strong>Dữ liệu thật · Ghi nhận minh bạch · Tiến bộ bền vững</strong>
+          <p>
+            Mọi lần cộng điểm, đổi quà, hi sinh linh vật và điều chỉnh quản trị đều có lịch sử để
+            đối soát.
+          </p>
         </div>
       </section>
 
@@ -93,23 +101,32 @@ export default function AboutPage() {
 
       <section className="about-rules mt-6">
         <article className="panel p-6">
-          <p className="eyebrow">BẠN NÊN BIẾT</p>
-          <h2>Codeforces và màu tài khoản</h2>
+          <p className="eyebrow">CODEFORCES</p>
+          <h2>Mỗi kết quả đều có nguồn kiểm chứng</h2>
           <p>
-            Handle trên trang chủ được tô màu theo rating Codeforces đã đồng bộ. Nếu bạn đổi handle
-            sau khi đã xác minh, yêu cầu mới cần Admin duyệt để bảo vệ dữ liệu thành tích. Bạn vẫn
-            có thể tham gia hệ thống dù chưa được xếp vào lớp nào.
+            Màu tên và handle dựa trên rating Codeforces đã đồng bộ. Khi đổi handle, yêu cầu mới cần
+            Admin duyệt để bảo vệ lịch sử. Học sinh vẫn có thể tham gia dù chưa thuộc lớp nào.
           </p>
         </article>
         <article className="panel p-6">
           <p className="eyebrow">CÔNG BẰNG</p>
-          <h2>Khi dữ liệu cần điều chỉnh</h2>
+          <h2>Ba chỉ số, ba góc nhìn khác nhau</h2>
           <p>
-            CC Level, CC Point và Streak tạo nên ba góc nhìn khác nhau; không một chỉ số đơn lẻ nào
-            quyết định toàn bộ sự tiến bộ. Hãy báo Giáo viên/Admin nếu handle sai hoặc dữ liệu chưa
-            đồng bộ, và không chia sẻ mật khẩu cho người khác.
+            CC Level cho biết năng lực, CC Point cho biết tổng thành tích, còn Streak cho biết sự
+            đều đặn. Không một chỉ số đơn lẻ nào quyết định toàn bộ sự tiến bộ của học sinh.
           </p>
         </article>
+      </section>
+
+      <section className="panel mt-6 p-6">
+        <p className="eyebrow">STREAK & LINH VẬT</p>
+        <h2>Giữ nhịp luyện tập, nhưng vẫn có cơ hội sửa một lần bỏ lỡ</h2>
+        <p>
+          Khi có khoảng trống không quá 3 ngày giữa hai ngày giải bài, học sinh có thể hi sinh một
+          linh vật cho mỗi ngày bị thiếu để nối chuỗi. Linh vật phải là quà đã được Admin xác nhận
+          giao và mỗi cá thể chỉ sử dụng một lần. Khi chuỗi thực sự kết thúc, thưởng Streak được tự
+          động cộng vào cả CC Point và CC Balance; chuỗi càng dài, mức thưởng theo ngày càng cao.
+        </p>
       </section>
     </>
   );

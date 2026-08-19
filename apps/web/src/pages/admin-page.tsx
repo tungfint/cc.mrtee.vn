@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber, formatVnd, useSession } from '../lib/api';
 import {
@@ -11,6 +11,7 @@ import {
   StatusPill,
 } from '../components/ui';
 import { RewardImageUploader } from '../components/reward-image-uploader';
+import { EditableImportTable, type EditableImportRow } from '../components/editable-import-table';
 
 function formText(form: FormData, key: string, fallback = '') {
   const value = form.get(key);
@@ -132,6 +133,66 @@ interface LevelRank {
   active: boolean;
 }
 
+interface StudentImportRow extends EditableImportRow {
+  email: string;
+  password: string;
+  fullName: string;
+  displayName: string;
+  codeforcesHandle: string;
+  initialCcLevel: number;
+  classSlug: string;
+  mustChangePassword: boolean;
+  errors: string[];
+}
+interface PointImportRow extends EditableImportRow {
+  email: string;
+  operation: string;
+  amount: number;
+  reason: string;
+  affectsSeason: boolean;
+  errors: string[];
+}
+interface QuoteImportRow extends EditableImportRow {
+  content: string;
+  author: string;
+  sortOrder: number;
+  active: boolean;
+  errors: string[];
+}
+
+const studentImportColumns = [
+  { key: 'email', label: 'Tài khoản', width: '190px' },
+  { key: 'password', label: 'Mật khẩu', type: 'password' as const, width: '160px' },
+  { key: 'fullName', label: 'Họ và tên', width: '190px' },
+  { key: 'displayName', label: 'Tên hiển thị', width: '160px' },
+  { key: 'codeforcesHandle', label: 'Codeforces', width: '140px' },
+  { key: 'initialCcLevel', label: 'CC Base', type: 'number' as const, width: '100px' },
+  { key: 'classSlug', label: 'Slug lớp', width: '130px' },
+  { key: 'mustChangePassword', label: 'Đổi mật khẩu', type: 'checkbox' as const, width: '100px' },
+];
+const pointImportColumns = [
+  { key: 'email', label: 'Tài khoản', width: '190px' },
+  {
+    key: 'operation',
+    label: 'Thao tác',
+    type: 'select' as const,
+    options: [
+      { value: 'CỘNG', label: 'CỘNG' },
+      { value: 'TRỪ', label: 'TRỪ' },
+    ],
+    width: '105px',
+  },
+  { key: 'amount', label: 'CC Point', type: 'number' as const, width: '110px' },
+  { key: 'reason', label: 'Lý do', width: '240px' },
+  { key: 'affectsSeason', label: 'Tính vào mùa', type: 'checkbox' as const, width: '100px' },
+];
+const quoteImportColumns = [
+  { key: 'content', label: 'Câu châm ngôn', width: '360px' },
+  { key: 'author', label: 'Tác giả', width: '170px' },
+  { key: 'sortOrder', label: 'Thứ tự', type: 'number' as const, width: '100px' },
+  { key: 'active', label: 'Hiển thị', type: 'checkbox' as const, width: '90px' },
+];
+
 interface AuditLog {
   id: string;
   action: string;
@@ -158,6 +219,7 @@ const auditActionLabels: Record<string, string> = {
   USER_PROFILE_UPDATED: 'Cập nhật hồ sơ',
   USER_PASSWORD_CHANGED: 'Đổi mật khẩu',
   USER_PASSWORD_RESET: 'Đặt lại mật khẩu',
+  USER_DELETED: 'Xoá tài khoản',
   USER_AVATAR_UPDATED: 'Cập nhật ảnh đại diện',
   USER_AVATAR_REMOVED: 'Xoá ảnh đại diện',
   STUDENTS_IMPORTED: 'Nhập danh sách học sinh',
@@ -171,6 +233,8 @@ const auditActionLabels: Record<string, string> = {
   REWARD_DELETED: 'Xoá phần thưởng',
   REWARD_ARCHIVED: 'Ẩn phần thưởng đã có lịch sử',
   REWARD_ORDER_STATUS_CHANGED: 'Cập nhật yêu cầu đổi quà',
+  STREAK_RESCUED: 'Hi sinh linh vật cứu Streak',
+  STREAK_BONUS_AWARDED: 'Cộng thưởng Streak',
   QUOTE_CREATED: 'Tạo danh ngôn',
   QUOTE_UPDATED: 'Cập nhật danh ngôn',
   QUOTE_DELETED: 'Xoá danh ngôn',
@@ -290,6 +354,10 @@ export default function AdminPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [pointImportFile, setPointImportFile] = useState<File | null>(null);
   const [quoteImportFile, setQuoteImportFile] = useState<File | null>(null);
+  const [studentImportRows, setStudentImportRows] = useState<StudentImportRow[]>([]);
+  const [pointImportRows, setPointImportRows] = useState<PointImportRow[]>([]);
+  const [quoteImportRows, setQuoteImportRows] = useState<QuoteImportRow[]>([]);
+  const [pointImportBatchKey, setPointImportBatchKey] = useState(() => crypto.randomUUID());
   const [leaderboardScope, setLeaderboardScope] = useState<'ALL' | 'ORGANIZATION'>('ALL');
   const [leaderboardOrganizationId, setLeaderboardOrganizationId] = useState('');
   const [syncScope, setSyncScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>('USER');
@@ -325,7 +393,8 @@ export default function AdminPage() {
     ) ?? [];
   const users = useQuery({
     queryKey: ['admin-users'],
-    queryFn: () => api<{ users: UserAccount[]; total: number }>('/admin/users?pageSize=500'),
+    queryFn: () =>
+      api<{ users: UserAccount[]; total: number }>('/admin/users?pageSize=500&status=ACTIVE'),
     enabled: Boolean(isSystemAdmin),
   });
   const rewards = useQuery({
@@ -386,42 +455,64 @@ export default function AdminPage() {
       setReason('');
     },
   });
-  const importStudents = useMutation({
+  const previewStudents = useMutation({
     mutationFn: async () => {
       if (!importFile) throw new Error('Chọn file CSV hoặc XLSX');
       const form = new FormData();
       form.append('file', importFile);
-      return api<{
-        created: number;
-        failed: number;
-        total: number;
-        results: { row: number; email: string; success: boolean; message?: string }[];
-      }>(
-        isSystemAdmin ? '/admin/users/import' : `/organizations/${organizationId}/students/import`,
+      return api<{ rows: StudentImportRow[]; total: number; valid: number }>(
+        isSystemAdmin
+          ? '/admin/users/import-preview'
+          : `/organizations/${organizationId}/students/import-preview`,
         {
           method: 'POST',
           body: form,
         },
       );
     },
+    onSuccess: (data) => setStudentImportRows(data.rows),
+  });
+  const confirmStudents = useMutation({
+    mutationFn: () =>
+      api<{ created: number; failed: number; total: number }>(
+        isSystemAdmin
+          ? '/admin/users/import-confirm'
+          : `/organizations/${organizationId}/students/import-confirm`,
+        { method: 'POST', body: JSON.stringify({ rows: studentImportRows }) },
+      ),
     onSuccess: async () => {
+      setStudentImportRows([]);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
       ]);
     },
   });
-  const importQuotes = useMutation({
+  const previewQuotes = useMutation({
     mutationFn: async () => {
       if (!quoteImportFile) throw new Error('Chọn file CSV hoặc XLSX');
       const form = new FormData();
       form.append('file', quoteImportFile);
-      return api<{ created: number; failed: number; total: number }>('/admin/quotes/import', {
-        method: 'POST',
-        body: form,
-      });
+      return api<{ rows: QuoteImportRow[]; total: number; valid: number }>(
+        '/admin/quotes/import-preview',
+        {
+          method: 'POST',
+          body: form,
+        },
+      );
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-content'] }),
+    onSuccess: (data) => setQuoteImportRows(data.rows),
+  });
+  const confirmQuotes = useMutation({
+    mutationFn: () =>
+      api<{ created: number; failed: number; total: number }>('/admin/quotes/import-confirm', {
+        method: 'POST',
+        body: JSON.stringify({ rows: quoteImportRows }),
+      }),
+    onSuccess: () => {
+      setQuoteImportRows([]);
+      void queryClient.invalidateQueries({ queryKey: ['admin-content'] });
+    },
   });
   const importPastedQuotes = useMutation({
     mutationFn: () =>
@@ -434,29 +525,33 @@ export default function AdminPage() {
       await queryClient.invalidateQueries({ queryKey: ['admin-content'] });
     },
   });
-  const importPoints = useMutation({
+  const previewPoints = useMutation({
     mutationFn: async () => {
       if (!pointImportFile) throw new Error('Chọn file CSV hoặc XLSX');
       const form = new FormData();
       form.append('file', pointImportFile);
-      return api<{
-        applied: number;
-        replayed: number;
-        failed: number;
-        total: number;
-        results: {
-          row: number;
-          email: string;
-          success: boolean;
-          replayed?: boolean;
-          message?: string;
-        }[];
-      }>(`/admin/organizations/${organizationId}/points/import`, {
-        method: 'POST',
-        body: form,
-      });
+      return api<{ rows: PointImportRow[]; total: number; valid: number }>(
+        `/admin/organizations/${organizationId}/points/import-preview`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      );
     },
+    onSuccess: (data) => setPointImportRows(data.rows),
+  });
+  const confirmPoints = useMutation({
+    mutationFn: () =>
+      api<{ applied: number; replayed: number; failed: number; total: number }>(
+        `/admin/organizations/${organizationId}/points/import-confirm`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ rows: pointImportRows, batchKey: pointImportBatchKey }),
+        },
+      ),
     onSuccess: async () => {
+      setPointImportRows([]);
+      setPointImportBatchKey(crypto.randomUUID());
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
         queryClient.invalidateQueries({ queryKey: ['audits'] }),
@@ -634,7 +729,7 @@ export default function AdminPage() {
     <>
       <PageTitle
         eyebrow="CONTROL ROOM"
-        title="Quản trị Cầy Code"
+        title="Quản trị Cầy Cốt"
         detail="Quản lý tài khoản, lớp học, học sinh và nền kinh tế CC Point trong một nơi."
         action={
           <select
@@ -852,7 +947,7 @@ export default function AdminPage() {
                 className="panel import-panel p-5"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  importStudents.mutate();
+                  previewStudents.mutate();
                 }}
               >
                 <div>
@@ -887,17 +982,28 @@ export default function AdminPage() {
                     type="file"
                   />
                 </label>
-                <button className="button-secondary" disabled={importStudents.isPending}>
-                  {importStudents.isPending ? 'Đang import…' : 'Import tài khoản'}
+                <button className="button-secondary" disabled={previewStudents.isPending}>
+                  {previewStudents.isPending ? 'Đang đọc file…' : 'Đọc và xem trước'}
                 </button>
               </form>
-              {importStudents.error && (
-                <p className="notice error">{importStudents.error.message}</p>
+              {previewStudents.error && (
+                <p className="notice error">{previewStudents.error.message}</p>
               )}
-              {importStudents.data && (
+              <EditableImportTable
+                columns={studentImportColumns}
+                confirmLabel="Xác nhận tạo tài khoản"
+                onChange={setStudentImportRows}
+                onConfirm={() => confirmStudents.mutate()}
+                pending={confirmStudents.isPending}
+                rows={studentImportRows}
+              />
+              {confirmStudents.error && (
+                <p className="notice error">{confirmStudents.error.message}</p>
+              )}
+              {confirmStudents.data && (
                 <p className="notice success">
-                  Đã tạo {importStudents.data.created}/{importStudents.data.total} học sinh; lỗi{' '}
-                  {importStudents.data.failed}.
+                  Đã tạo {confirmStudents.data.created}/{confirmStudents.data.total} học sinh; lỗi{' '}
+                  {confirmStudents.data.failed}.
                 </p>
               )}
               {editingUser && (
@@ -1086,6 +1192,27 @@ export default function AdminPage() {
                       >
                         Sửa
                       </button>
+                      {item.id !== session.data?.user.userId && (
+                        <button
+                          className="button-danger"
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Xoá tài khoản “${item.display_name}”? Tài khoản sẽ bị khoá và được đưa ra khỏi tất cả lớp.`,
+                              )
+                            )
+                              return;
+                            mutation.mutate({
+                              path: `/admin/users/${item.id}`,
+                              method: 'DELETE',
+                              body: { reason: 'Admin xoá tài khoản khỏi hệ thống' },
+                            });
+                          }}
+                          type="button"
+                        >
+                          Xoá tài khoản
+                        </button>
+                      )}
                     </div>
                   ))
                 )}
@@ -1253,6 +1380,13 @@ export default function AdminPage() {
                         Sửa
                       </button>
                       <button
+                        className="button-secondary"
+                        onClick={() => setOrganizationId(item.id)}
+                        type="button"
+                      >
+                        Học sinh
+                      </button>
+                      <button
                         className="button-danger"
                         disabled={item.status === 'INACTIVE'}
                         onClick={() => {
@@ -1271,6 +1405,125 @@ export default function AdminPage() {
                   ))}
                 </div>
               </div>
+              <section className="panel class-student-manager p-6 xl:col-span-2">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">THÀNH VIÊN LỚP HỌC</p>
+                    <h2>Danh sách và điều chuyển học sinh</h2>
+                  </div>
+                  <label className="field class-picker">
+                    <span>Lớp đang quản lý</span>
+                    <select
+                      onChange={(event) => setOrganizationId(event.target.value)}
+                      value={organizationId}
+                    >
+                      <option value="">Chọn lớp học</option>
+                      {organizations.data?.organizations.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {organizationId && (
+                  <>
+                    <form
+                      className="class-member-add"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        mutation.mutate({
+                          path: `/organizations/${organizationId}/members`,
+                          body: { userId: memberUserId, role: 'MEMBER' },
+                        });
+                        setMemberUserId('');
+                      }}
+                    >
+                      <label className="field">
+                        <span>Thêm học sinh vào lớp</span>
+                        <select
+                          onChange={(event) => setMemberUserId(event.target.value)}
+                          required
+                          value={memberUserId}
+                        >
+                          <option value="">Chọn học sinh</option>
+                          {globalStudents
+                            .filter(
+                              (student) =>
+                                !student.memberships.some(
+                                  (item) =>
+                                    item.organizationId === organizationId &&
+                                    item.role === 'MEMBER',
+                                ),
+                            )
+                            .map((student) => (
+                              <option key={student.id} value={student.id}>
+                                {student.display_name} · {student.email}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <button className="button-primary" disabled={!memberUserId} type="submit">
+                        Thêm vào lớp
+                      </button>
+                    </form>
+                    <div className="class-member-list">
+                      {members.isPending ? (
+                        <LoadingState label="Đang tải danh sách lớp…" />
+                      ) : members.data?.members.filter(
+                          (member) => member.role === 'MEMBER' && member.status === 'ACTIVE',
+                        ).length ? (
+                        members.data.members
+                          .filter(
+                            (member) => member.role === 'MEMBER' && member.status === 'ACTIVE',
+                          )
+                          .map((member) => (
+                            <div className="class-member-row" key={member.user_id}>
+                              <div className="member">
+                                <Avatar
+                                  name={member.display_name}
+                                  rating={member.current_rating}
+                                  size="sm"
+                                  url={member.avatar_url}
+                                />
+                                <div>
+                                  <strong>{member.display_name}</strong>
+                                  <p>
+                                    {member.full_name} · {member.email}
+                                  </p>
+                                </div>
+                              </div>
+                              <span>⚡ {formatNumber(member.cc_level, 2)}</span>
+                              <button
+                                className="button-danger"
+                                onClick={() => {
+                                  if (!window.confirm(`Đưa “${member.display_name}” ra khỏi lớp?`))
+                                    return;
+                                  mutation.mutate({
+                                    path: `/organizations/${organizationId}/members/${member.user_id}`,
+                                    method: 'PATCH',
+                                    body: {
+                                      status: 'LEFT',
+                                      reason: 'Admin đưa học sinh ra khỏi lớp',
+                                    },
+                                  });
+                                }}
+                                type="button"
+                              >
+                                Xoá khỏi lớp
+                              </button>
+                            </div>
+                          ))
+                      ) : (
+                        <EmptyState
+                          title="Lớp chưa có học sinh"
+                          detail="Chọn học sinh ở phía trên để thêm vào lớp."
+                        />
+                      )}
+                    </div>
+                  </>
+                )}
+              </section>
             </section>
           )}
           {tab === 'members' && isSystemAdmin && (
@@ -1335,7 +1588,7 @@ export default function AdminPage() {
                   className="panel import-panel p-5"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    importStudents.mutate();
+                    previewStudents.mutate();
                   }}
                 >
                   <div>
@@ -1358,8 +1611,8 @@ export default function AdminPage() {
                       type="file"
                     />
                   </label>
-                  <button className="button-secondary" disabled={importStudents.isPending}>
-                    {importStudents.isPending ? 'Đang import…' : 'Import'}
+                  <button className="button-secondary" disabled={previewStudents.isPending}>
+                    {previewStudents.isPending ? 'Đang import…' : 'Import'}
                   </button>
                 </form>
               )}
@@ -1520,7 +1773,7 @@ export default function AdminPage() {
                 className="panel import-panel p-5"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  importStudents.mutate();
+                  previewStudents.mutate();
                 }}
               >
                 <div>
@@ -1549,33 +1802,31 @@ export default function AdminPage() {
                 </label>
                 <button
                   className="button-primary"
-                  disabled={!organizationId || importStudents.isPending}
+                  disabled={!organizationId || previewStudents.isPending}
                   type="submit"
                 >
-                  {importStudents.isPending ? 'Đang import…' : 'Import vào lớp'}
+                  {previewStudents.isPending ? 'Đang đọc file…' : 'Đọc và xem trước'}
                 </button>
               </form>
-              {importStudents.error && (
-                <p className="notice error">{importStudents.error.message}</p>
+              {previewStudents.error && (
+                <p className="notice error">{previewStudents.error.message}</p>
               )}
-              {importStudents.data && (
-                <div className="notice success import-result">
-                  <strong>
-                    Đã tạo {importStudents.data.created}/{importStudents.data.total} học sinh.
-                  </strong>
-                  {importStudents.data.failed > 0 && (
-                    <ul>
-                      {importStudents.data.results
-                        .filter(({ success }) => !success)
-                        .map((result) => (
-                          <li key={`${result.row}-${result.email}`}>
-                            Dòng {result.row} · {result.email || 'không có tài khoản'}:{' '}
-                            {result.message}
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                </div>
+              <EditableImportTable
+                columns={studentImportColumns.filter((column) => column.key !== 'classSlug')}
+                confirmLabel="Xác nhận import vào lớp"
+                onChange={setStudentImportRows}
+                onConfirm={() => confirmStudents.mutate()}
+                pending={confirmStudents.isPending}
+                rows={studentImportRows}
+              />
+              {confirmStudents.error && (
+                <p className="notice error">{confirmStudents.error.message}</p>
+              )}
+              {confirmStudents.data && (
+                <p className="notice success">
+                  Đã tạo {confirmStudents.data.created}/{confirmStudents.data.total} học sinh; lỗi{' '}
+                  {confirmStudents.data.failed}.
+                </p>
               )}
               {isSystemAdmin && (
                 <form
@@ -1889,7 +2140,7 @@ export default function AdminPage() {
                 id="bulk-cc-point-import"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  importPoints.mutate();
+                  previewPoints.mutate();
                 }}
               >
                 <div>
@@ -1922,27 +2173,30 @@ export default function AdminPage() {
                   </span>
                   <button
                     className="button-primary"
-                    disabled={!pointImportFile || importPoints.isPending}
+                    disabled={!pointImportFile || previewPoints.isPending}
                     type="submit"
                   >
-                    {importPoints.isPending ? 'Đang xử lý…' : 'Thực hiện hàng loạt'}
+                    {previewPoints.isPending ? 'Đang đọc file…' : 'Đọc và xem trước'}
                   </button>
                 </div>
-                {importPoints.error && <p className="notice error">{importPoints.error.message}</p>}
-                {importPoints.data && (
-                  <div className="import-result">
-                    <strong>
-                      Đã ghi {importPoints.data.applied} · Bỏ qua trùng {importPoints.data.replayed}{' '}
-                      · Lỗi {importPoints.data.failed}
-                    </strong>
-                    {importPoints.data.results
-                      .filter((item) => !item.success)
-                      .slice(0, 12)
-                      .map((item) => (
-                        <p key={`${item.row}-${item.email}`}>
-                          Dòng {item.row} · {item.email || 'trống'}: {item.message}
-                        </p>
-                      ))}
+                {previewPoints.error && (
+                  <p className="notice error">{previewPoints.error.message}</p>
+                )}
+                <EditableImportTable
+                  columns={pointImportColumns}
+                  confirmLabel="Xác nhận cộng / trừ điểm"
+                  onChange={setPointImportRows}
+                  onConfirm={() => confirmPoints.mutate()}
+                  pending={confirmPoints.isPending}
+                  rows={pointImportRows}
+                />
+                {confirmPoints.error && (
+                  <p className="notice error">{confirmPoints.error.message}</p>
+                )}
+                {confirmPoints.data && (
+                  <div className="notice success">
+                    Đã ghi {confirmPoints.data.applied} · Bỏ qua trùng {confirmPoints.data.replayed}{' '}
+                    · Lỗi {confirmPoints.data.failed}
                   </div>
                 )}
               </form>
@@ -2547,7 +2801,7 @@ export default function AdminPage() {
                     <textarea
                       onChange={(event) => setQuotePaste(event.target.value)}
                       placeholder={
-                        'Châm ngôn | Tác giả | Thứ tự | Có\nTrên bước đường thành công không có dấu chân của kẻ lười biếng. | Cầy Code MrTee.vn | 1 | Có\nThiên tài 1% là cảm hứng và 99% là mồ hôi. | Cầy Code MrTee.vn | 2 | Không'
+                        'Châm ngôn | Tác giả | Thứ tự | Có\nTrên bước đường thành công không có dấu chân của kẻ lười biếng. | Cầy Cốt MrTee.vn | 1 | Có\nThiên tài 1% là cảm hứng và 99% là mồ hôi. | Cầy Cốt MrTee.vn | 2 | Không'
                       }
                       required
                       rows={7}
@@ -2571,7 +2825,7 @@ export default function AdminPage() {
                   className="quote-import-box"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    importQuotes.mutate();
+                    previewQuotes.mutate();
                   }}
                 >
                   <div>
@@ -2586,15 +2840,28 @@ export default function AdminPage() {
                     required
                     type="file"
                   />
-                  <button className="button-secondary" disabled={importQuotes.isPending}>
-                    {importQuotes.isPending ? 'Đang import…' : 'Import'}
+                  <button className="button-secondary" disabled={previewQuotes.isPending}>
+                    {previewQuotes.isPending ? 'Đang đọc file…' : 'Đọc và xem trước'}
                   </button>
                 </form>
-                {importQuotes.error && <p className="notice error">{importQuotes.error.message}</p>}
-                {importQuotes.data && (
+                {previewQuotes.error && (
+                  <p className="notice error">{previewQuotes.error.message}</p>
+                )}
+                <EditableImportTable
+                  columns={quoteImportColumns}
+                  confirmLabel="Xác nhận nhập danh ngôn"
+                  onChange={setQuoteImportRows}
+                  onConfirm={() => confirmQuotes.mutate()}
+                  pending={confirmQuotes.isPending}
+                  rows={quoteImportRows}
+                />
+                {confirmQuotes.error && (
+                  <p className="notice error">{confirmQuotes.error.message}</p>
+                )}
+                {confirmQuotes.data && (
                   <p className="notice success">
-                    Đã import {importQuotes.data.created}/{importQuotes.data.total} danh ngôn; lỗi{' '}
-                    {importQuotes.data.failed}.
+                    Đã nhập {confirmQuotes.data.created}/{confirmQuotes.data.total} danh ngôn; lỗi{' '}
+                    {confirmQuotes.data.failed}.
                   </p>
                 )}
                 <form

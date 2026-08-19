@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+﻿import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../lib/api';
@@ -48,7 +48,7 @@ describe('RewardsPage', () => {
     );
 
     expect(
-      await screen.findByRole('heading', { name: 'Đồng đội đáng yêu của dân Cầy Code' }),
+      await screen.findByRole('heading', { name: 'Đồng đội đáng yêu của dân Cầy Cốt' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'CC Balance thành tiền' })).toBeInTheDocument();
     expect(screen.getByText('Mèo Mầm Code')).toBeInTheDocument();

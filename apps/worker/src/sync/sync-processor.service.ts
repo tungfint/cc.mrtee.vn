@@ -64,6 +64,7 @@ export class SyncProcessorService {
     for (const submission of ingested) {
       results.push(await this.rewards.process(data.userId, submission, eligibleFrom));
     }
+    await this.rewards.settleExpiredStreaks(data.userId);
     await this.finish(
       data.accountId,
       submissions.map((submission) => submission.id),

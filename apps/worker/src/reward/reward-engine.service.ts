@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { calculateCcLevel, calculateReward } from '@cc/core';
+import { calculateCcLevel, calculateReward, calculateStreakBonus } from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 import type { IngestedSubmission } from '../ingestion/submission-ingestion.service';
 
@@ -185,5 +185,76 @@ export class RewardEngineService {
       `;
       return { firstSolveCreated: true, awarded: rewardEligible, amount };
     });
+  }
+
+  async settleExpiredStreaks(userId: string) {
+    return this.database.sql.begin((transaction) =>
+      this.settleExpiredStreakRuns(transaction, userId),
+    );
+  }
+
+  private async settleExpiredStreakRuns(
+    transaction: import('postgres').TransactionSql,
+    userId: string,
+  ) {
+    const runs = await transaction<{ start_day: string; end_day: string; length: number }[]>`
+      WITH activity_days AS (
+        SELECT DISTINCT (solves.first_solved_at AT TIME ZONE users.timezone)::date AS day,
+          (now() AT TIME ZONE users.timezone)::date AS today
+        FROM user_problem_solves AS solves
+        JOIN users ON users.id = solves.user_id
+        JOIN codeforces_accounts AS accounts ON accounts.user_id = solves.user_id
+        WHERE solves.user_id = ${userId}
+          AND accounts.reward_eligible_from IS NOT NULL
+          AND solves.first_solved_at >= accounts.reward_eligible_from
+        UNION
+        SELECT rescues.rescued_date AS day,
+          (now() AT TIME ZONE users.timezone)::date AS today
+        FROM streak_rescues AS rescues
+        JOIN users ON users.id = rescues.user_id
+        WHERE rescues.user_id = ${userId}
+      ), grouped AS (
+        SELECT day, today, day - row_number() OVER (ORDER BY day)::int AS island
+        FROM activity_days
+      )
+      SELECT min(day)::text AS start_day, max(day)::text AS end_day, count(*)::int AS length
+      FROM grouped
+      GROUP BY island, today
+      HAVING max(day) < today - 4
+      ORDER BY max(day)
+    `;
+    for (const run of runs) {
+      const amount = calculateStreakBonus(run.length);
+      if (amount <= 0) continue;
+      const key = `streak-bonus:${userId}:${run.end_day}`;
+      const [created] = await transaction<{ id: string }[]>`
+        INSERT INTO point_transactions (
+          user_id, type, amount, idempotency_key, affects_wallet, affects_season,
+          description, metadata, event_at
+        ) VALUES (
+          ${userId}, 'BONUS', ${amount}, ${key}, true, false,
+          ${`Thưởng chuỗi Streak ${run.length} ngày`},
+          ${JSON.stringify({
+            source: 'STREAK',
+            streakDays: run.length,
+            startDate: run.start_day,
+            endDate: run.end_day,
+          })}::jsonb,
+          now()
+        ) ON CONFLICT DO NOTHING RETURNING id
+      `;
+      if (!created) continue;
+      await transaction`
+        INSERT INTO user_wallets (user_id, balance) VALUES (${userId}, ${amount})
+        ON CONFLICT (user_id) DO UPDATE SET
+          balance = user_wallets.balance + EXCLUDED.balance, updated_at = now()
+      `;
+      await transaction`
+        INSERT INTO audit_logs (action, entity_type, entity_id, after, reason)
+        VALUES ('STREAK_BONUS_AWARDED', 'point_transaction', ${created.id},
+          ${JSON.stringify({ amount, ...run })}::jsonb,
+          'Tự động cộng CC Point và CC Balance khi chuỗi Streak kết thúc')
+      `;
+    }
   }
 }

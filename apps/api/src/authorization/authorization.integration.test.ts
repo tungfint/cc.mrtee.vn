@@ -1,4 +1,4 @@
-import { basename, join, resolve } from 'node:path';
+﻿import { basename, join, resolve } from 'node:path';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { config } from 'dotenv';
@@ -13,6 +13,7 @@ import type { EnvironmentService } from '../config/environment';
 import { CodeforcesAccountsService } from '../codeforces-accounts/codeforces-accounts.service';
 import { SeasonClosureService } from '../seasons/season-closure.service';
 import { RewardsService } from '../rewards/rewards.service';
+import { StreakService } from '../rewards/streak.service';
 import { RewardsAdminController } from '../rewards/rewards-admin.controller';
 import { RewardImageService } from '../rewards/reward-image.service';
 import { InsightsController } from '../insights/insights.controller';
@@ -57,7 +58,8 @@ const rewardsAdmin = new RewardsAdminController(
     store: () => Promise.resolve('/api/uploads/rewards/test.webp'),
   } as unknown as RewardImageService,
 );
-const insights = new InsightsController({ sql: connection } as DatabaseService, service);
+const streaks = new StreakService({ sql: connection } as DatabaseService);
+const insights = new InsightsController({ sql: connection } as DatabaseService, service, streaks);
 const contentController = new ContentController({ sql: connection } as DatabaseService);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 const bulkPointImport = new BulkPointImportService(service, adjustments, {
@@ -620,7 +622,7 @@ describe('authorization matrix', () => {
       recent_five_average_rating: null,
       recent_five_rated_count: 0,
     });
-    expect(dashboard.streak).toEqual({ longest_streak: 0, current_streak: 0 });
+    expect(dashboard.streak).toMatchObject({ longest_streak: 0, current_streak: 0 });
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
     expect(leaderboard.entries).toHaveLength(1);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
@@ -679,6 +681,63 @@ describe('authorization matrix', () => {
     await expect(
       rewards.redeem(ids.member!, String(created.reward.id), 'mascot-level-ready'),
     ).resolves.toMatchObject({ replayed: false });
+  });
+
+  it('sacrifices one fulfilled mascot for each missing Streak day', async () => {
+    const [mascot] = await connection<{ id: string }[]>`
+      INSERT INTO rewards (name, description, cost, category, image_url)
+      VALUES ('Streak mascot', 'Used by the rescue fixture', 30, 'MASCOT', '/mascots/meo-mam-code.webp')
+      RETURNING id
+    `;
+    if (!mascot) throw new Error('Mascot fixture unavailable');
+    const orders = await connection<{ id: string }[]>`
+      INSERT INTO reward_orders (user_id, reward_id, cost_snapshot, status, idempotency_key, reviewed_at)
+      VALUES
+        (${ids.member!}, ${mascot.id}, 30, 'FULFILLED', 'streak-order-1', now()),
+        (${ids.member!}, ${mascot.id}, 30, 'FULFILLED', 'streak-order-2', now()),
+        (${ids.member!}, ${mascot.id}, 30, 'FULFILLED', 'streak-order-3', now())
+      RETURNING id
+    `;
+    await connection`
+      INSERT INTO cf_problems (problem_key, contest_id, problem_index, name, type, current_rating)
+      VALUES
+        ('2000:A', 2000, 'A', 'Old solve', 'PROGRAMMING', 800),
+        ('2000:B', 2000, 'B', 'Today solve', 'PROGRAMMING', 900)
+    `;
+    await connection`
+      INSERT INTO cf_submissions (
+        cf_submission_id, user_id, problem_key, creation_time, verdict, is_team,
+        problem_rating_observed
+      ) VALUES
+        (900000000001, ${ids.member!}, '2000:A',
+          date_trunc('day', now() AT TIME ZONE 'Asia/Ho_Chi_Minh') AT TIME ZONE 'Asia/Ho_Chi_Minh' - interval '4 days' + interval '9 hours',
+          'OK', false, 800),
+        (900000000002, ${ids.member!}, '2000:B',
+          date_trunc('day', now() AT TIME ZONE 'Asia/Ho_Chi_Minh') AT TIME ZONE 'Asia/Ho_Chi_Minh' + interval '9 hours',
+          'OK', false, 900)
+    `;
+    await connection`
+      INSERT INTO user_problem_solves (
+        user_id, problem_key, first_ok_submission_id, first_solved_at, rating_snapshot
+      )
+      SELECT user_id, problem_key, cf_submission_id, creation_time, problem_rating_observed
+      FROM cf_submissions WHERE user_id = ${ids.member!}
+    `;
+    const before = await streaks.summary(ids.member!);
+    expect(before.rescue).toMatchObject({ available: true, requiredMascots: 3 });
+    await streaks.rescue(
+      ids.member!,
+      orders.map((order) => order.id),
+    );
+    const after = await streaks.summary(ids.member!);
+    expect(after).toMatchObject({ currentStreak: 5, pendingBonus: 4 });
+    expect(after.rescue.mascots).toHaveLength(0);
+    await expect(
+      streaks.rescue(
+        ids.member!,
+        orders.map((order) => order.id),
+      ),
+    ).rejects.toThrow();
   });
 
   it('deletes unused rewards and archives rewards that have historical orders', async () => {
@@ -771,8 +830,8 @@ describe('authorization matrix', () => {
       {
         text: [
           'Châm ngôn | Tác giả | Thứ tự | Có',
-          'Trên bước đường thành công không có dấu chân của kẻ lười biếng. | Cầy Code MrTee.vn | 1 | Có',
-          'Thiên tài 1% là cảm hứng và 99% là mồ hôi. | Cầy Code MrTee.vn | 2 | Không',
+          'Trên bước đường thành công không có dấu chân của kẻ lười biếng. | Cầy Cốt MrTee.vn | 1 | Có',
+          'Thiên tài 1% là cảm hứng và 99% là mồ hôi. | Cầy Cốt MrTee.vn | 2 | Không',
         ].join('\n'),
       },
       actor,

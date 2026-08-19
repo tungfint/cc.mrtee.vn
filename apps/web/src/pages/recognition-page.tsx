@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Avatar, EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 import { api, formatNumber, formatVnd, useSession } from '../lib/api';
@@ -161,7 +161,7 @@ export default function RecognitionPage() {
                 url={recognition.data.profile.avatar_url}
               />
               <div>
-                <p className="eyebrow">HỌC SINH CẦY CODE</p>
+                <p className="eyebrow">HỌC SINH CẦY CỐT</p>
                 <h2>{recognition.data.profile.display_name}</h2>
                 <p>
                   {recognition.data.profile.codeforces_handle
@@ -307,14 +307,14 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     ? (data.profile.level_rank_color ?? '#ec4899')
     : '#ec4899';
   const gradient = context.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, mixHex(accent, '#050816', 0.78));
-  gradient.addColorStop(0.55, mixHex(accent, '#111827', 0.68));
-  gradient.addColorStop(1, mixHex(accent, '#020617', 0.82));
+  gradient.addColorStop(0, mixHex(accent, '#fff1f7', 0.3));
+  gradient.addColorStop(0.55, mixHex(accent, '#f9a8d4', 0.28));
+  gradient.addColorStop(1, mixHex(accent, '#fce7f3', 0.42));
   context.fillStyle = gradient;
   context.fillRect(0, 0, width, height);
 
-  context.globalAlpha = 0.18;
-  context.fillStyle = accent;
+  context.globalAlpha = 0.3;
+  context.fillStyle = '#ffffff';
   context.beginPath();
   context.arc(1060, 120, 310, 0, Math.PI * 2);
   context.fill();
@@ -338,7 +338,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     1088,
     1396,
     40,
-    'rgba(10, 24, 34, 0.83)',
+    'rgba(88, 28, 72, 0.76)',
     mixHex(accent, '#ffffff', 0.58),
   );
   const portraitSource = sameOriginAsset(data.profile.avatar_url) ?? '/brand/cay-code-logo.webp';
@@ -354,7 +354,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     context.restore();
   }
 
-  centerText(context, 'CẦY CODE · MRTEE.VN', 600, 310, `700 26px ${VI_FONT}`, accent);
+  centerText(context, 'CẦY CỐT · MRTEE.VN', 600, 310, `700 26px ${VI_FONT}`, accent);
   centerText(context, 'VINH DANH CÁ NHÂN', 600, 365, `900 48px ${VI_FONT}`, '#ffffff');
   centerText(context, data.profile.display_name, 600, 445, `900 64px ${VI_FONT}`, '#ffffff');
   centerText(
@@ -392,7 +392,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
       190,
       142,
       22,
-      'rgba(18, 24, 45, 0.92)',
+      'rgba(255, 255, 255, 0.16)',
       mixHex(accent, '#ffffff', 0.7),
     );
     context.fillStyle = '#829ca8';
@@ -410,7 +410,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     1032,
     112,
     22,
-    'rgba(18, 24, 45, 0.92)',
+    'rgba(255, 255, 255, 0.16)',
     mixHex(accent, '#ffffff', 0.7),
   );
   context.fillStyle = '#829ca8';

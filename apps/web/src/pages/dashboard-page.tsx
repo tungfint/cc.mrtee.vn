@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { api, formatDate, formatNumber } from '../lib/api';
 import { recommendedRange } from './dashboard-recommendation';
 import {
@@ -528,10 +529,10 @@ function MiniLeaderboard({
                 size="sm"
                 url={row.avatarUrl}
               />
-              <div className="mini-rank-identity">
+              <Link className="mini-rank-identity" to={`/students/${row.userId}`}>
                 <StudentName name={row.displayName} rating={row.currentRating} />
                 <LevelRankBadge rank={row.levelRank} />
-              </div>
+              </Link>
               <b>{value(row)}</b>
             </div>
           ))}
