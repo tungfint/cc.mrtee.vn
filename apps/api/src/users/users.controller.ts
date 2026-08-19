@@ -192,6 +192,7 @@ export class UsersController {
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank,
+        accounts.sync_status, accounts.last_sync_at,
         COALESCE(wallet.balance, 0)::text AS cc_balance,
         COALESCE(points.cc_point, 0)::text AS cc_point,
         COALESCE(jsonb_agg(jsonb_build_object(
@@ -217,6 +218,7 @@ export class UsersController {
       GROUP BY users.id, credentials.email, credentials.must_change_password,
         skill.cc_base, skill.cc_level, accounts.handle,
         accounts.pending_handle, accounts.verification_status, accounts.current_rating, accounts.rank,
+        accounts.sync_status, accounts.last_sync_at,
         wallet.balance, points.cc_point
       ORDER BY users.created_at DESC
       LIMIT ${input.pageSize} OFFSET ${offset}

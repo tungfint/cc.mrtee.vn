@@ -19,7 +19,7 @@ const adminSyncSchema = z
     targetUserId: z.string().uuid().optional(),
   })
   .superRefine((value, context) => {
-    if (value.scope !== 'ALL' && !value.organizationId) {
+    if (value.scope === 'ORGANIZATION' && !value.organizationId) {
       context.addIssue({ code: 'custom', message: 'Chọn lớp cần đồng bộ' });
     }
     if (value.scope === 'USER' && !value.targetUserId) {

@@ -38,6 +38,7 @@ interface Recognition {
     cash_value_vnd: number | null;
   }[];
   topTags: { tag: string; solved_count: number; max_rating: number | null }[];
+  quote: { content: string; author: string | null } | null;
   generatedAt: string;
 }
 
@@ -82,12 +83,14 @@ export default function RecognitionPage() {
       api<Recognition>(isAdmin ? `/admin/users/${studentId}/recognition` : '/me/recognition'),
     enabled: Boolean(session.data) && (!isAdmin || Boolean(studentId)),
   });
-  useEffect(() => setHasImage(false), [studentId, recognition.dataUpdatedAt]);
+  useEffect(() => setHasImage(false), [studentId]);
 
   const createImage = async () => {
     if (!canvasRef.current || !recognition.data) return;
+    const refreshed = await recognition.refetch();
+    const data = refreshed.data ?? recognition.data;
     await document.fonts.ready;
-    await drawRecognition(canvasRef.current, recognition.data);
+    await drawRecognition(canvasRef.current, data);
     setHasImage(true);
   };
   const downloadImage = () => {
@@ -434,14 +437,18 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     accent,
   );
 
-  centerText(
+  context.font = `700 22px ${VI_FONT}`;
+  context.fillStyle = accent;
+  context.textAlign = 'center';
+  fitText(
     context,
-    'Mỗi bài Accepted là một bước tiến có thật.',
+    `“${data.quote?.content ?? 'Mỗi bài toán hôm nay là một bước tiến ngày mai.'}”`,
     600,
     1374,
-    `700 22px ${VI_FONT}`,
-    accent,
+    1020,
+    22,
   );
+  context.textAlign = 'start';
   centerText(
     context,
     new Intl.DateTimeFormat('vi-VN', { dateStyle: 'long' }).format(new Date(data.generatedAt)),

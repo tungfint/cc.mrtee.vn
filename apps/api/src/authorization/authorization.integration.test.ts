@@ -409,6 +409,31 @@ describe('authorization matrix', () => {
       skipped: 0,
     });
     expect(syncQueueCalls).toHaveLength(1);
+    const [unassigned] = await connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Unassigned Sync', 'Unassigned Sync')
+      RETURNING id
+    `;
+    if (!unassigned) throw new Error('Failed to create unassigned sync fixture');
+    await codeforcesAccounts.link(authUser(unassigned.id), 'Unassigned_Sync');
+    await codeforcesAccounts.verify({
+      targetUserId: unassigned.id,
+      actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      reason: 'Verify unassigned student before sync',
+    });
+    await expect(
+      codeforcesAccounts.requestAdminSync({
+        scope: 'USER',
+        targetUserId: unassigned.id,
+        actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+      }),
+    ).resolves.toMatchObject({ matched: 1, queued: 1 });
+    await expect(
+      codeforcesAccounts.requestAdminSync({
+        scope: 'USER',
+        targetUserId: unassigned.id,
+        actor: authUser(ids.teacher!),
+      }),
+    ).rejects.toThrow('Chọn lớp');
     await expect(
       codeforcesAccounts.requestAdminSync({ scope: 'ALL', actor: authUser(ids.teacher!) }),
     ).rejects.toThrow('System Admin');
@@ -417,7 +442,7 @@ describe('authorization matrix', () => {
         scope: 'ALL',
         actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
       }),
-    ).resolves.toMatchObject({ matched: 1, queued: 1 });
+    ).resolves.toMatchObject({ matched: 2, queued: 2 });
   });
 
   it('validates, normalizes, and stores cropped avatars', async () => {
@@ -583,8 +608,18 @@ describe('authorization matrix', () => {
   });
 
   it('returns bounded dashboard analytics and privacy-safe leaderboard rows', async () => {
+    await connection`DELETE FROM motivational_quotes`;
+    await connection`
+      INSERT INTO motivational_quotes (content, author, active, sort_order)
+      VALUES ('Danh ngôn dùng cho ảnh vinh danh.', 'Test suite', true, 1)
+    `;
     const dashboard = await insights.dashboard(authUser(ids.member!));
-    expect(dashboard.profile).toMatchObject({ id: ids.member!, display_name: 'member' });
+    expect(dashboard.profile).toMatchObject({
+      id: ids.member!,
+      display_name: 'member',
+      recent_five_average_rating: null,
+      recent_five_rated_count: 0,
+    });
     expect(dashboard.streak).toEqual({ longest_streak: 0, current_streak: 0 });
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
     expect(leaderboard.entries).toHaveLength(1);
@@ -606,6 +641,7 @@ describe('authorization matrix', () => {
     expect(recognition).toHaveProperty('awards');
     expect(recognition).toHaveProperty('rewards');
     expect(recognition).toHaveProperty('topTags');
+    expect(recognition.quote).toMatchObject({ content: 'Danh ngôn dùng cho ảnh vinh danh.' });
     const publicProfile = await insights.studentProfile(ids.member!);
     expect(publicProfile.profile).toMatchObject({ id: ids.member!, classes: ['privateOrg'] });
   });
