@@ -243,9 +243,16 @@ export default function RecognitionPage() {
                 <h3>🎁 Quà đã nhận</h3>
                 {recognition.data.rewards.length ? (
                   recognition.data.rewards.slice(0, 6).map((reward) => (
-                    <p key={reward.name}>
-                      <strong>{reward.name}</strong> · {reward.description}
-                    </p>
+                    <div className="recognition-reward-item" key={reward.name}>
+                      {reward.image_url ? (
+                        <img alt={reward.name} src={reward.image_url} />
+                      ) : (
+                        <span>🎁</span>
+                      )}
+                      <p>
+                        <strong>{reward.name}</strong> · {reward.description}
+                      </p>
+                    </div>
                   ))
                 ) : (
                   <p>Chưa có quà đã hoàn thành.</p>
@@ -426,13 +433,13 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     'Chưa có danh hiệu mùa giải',
     accent,
   );
-  drawList(
+  await drawRewardList(
     context,
     604,
     910,
     512,
     '🎁  QUÀ ĐÃ NHẬN',
-    data.rewards.slice(0, 6).map((reward) => reward.name),
+    data.rewards.slice(0, 6),
     'Chưa có quà đã nhận',
     accent,
   );
@@ -495,6 +502,48 @@ function drawList(
       19,
     );
   });
+}
+
+async function drawRewardList(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  title: string,
+  rewards: Recognition['rewards'],
+  empty: string,
+  accent: string,
+) {
+  roundRect(
+    context,
+    x,
+    y,
+    width,
+    400,
+    24,
+    'rgba(18, 43, 55, 0.88)',
+    mixHex(accent, '#ffffff', 0.68),
+  );
+  context.fillStyle = accent;
+  context.font = `800 21px ${VI_FONT}`;
+  context.fillText(title, x + 26, y + 48);
+  if (!rewards.length) {
+    context.fillStyle = '#829ca8';
+    context.font = `500 19px ${VI_FONT}`;
+    context.fillText(`— ${empty}`, x + 26, y + 94);
+    return;
+  }
+  for (const [index, reward] of rewards.entries()) {
+    const rowY = y + 70 + index * 48;
+    const source = sameOriginAsset(reward.image_url);
+    if (source) {
+      const mascot = await loadImage(source).catch(() => null);
+      if (mascot) context.drawImage(mascot, x + 24, rowY, 38, 38);
+    }
+    context.fillStyle = '#edf7f8';
+    context.font = `700 19px ${VI_FONT}`;
+    fitText(context, reward.name, x + 72, rowY + 27, width - 98, 19);
+  }
 }
 
 function roundRect(

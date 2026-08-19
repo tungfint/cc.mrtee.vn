@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, formatNumber, formatVnd } from '../lib/api';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
+import { api, formatNumber, formatVnd } from '../lib/api';
 
 interface Reward {
   id: string;
@@ -10,6 +10,8 @@ interface Reward {
   stock: number | null;
   image_url: string | null;
   cash_value_vnd: number | null;
+  category: 'STANDARD' | 'MASCOT';
+  required_cc_level: number;
 }
 
 export default function RewardsPage() {
@@ -32,12 +34,20 @@ export default function RewardsPage() {
   });
   const cashRewards =
     rewards.data?.rewards.filter((reward) => reward.cash_value_vnd !== null) ?? [];
+  const mascotRewards =
+    rewards.data?.rewards.filter(
+      (reward) => reward.cash_value_vnd === null && reward.category === 'MASCOT',
+    ) ?? [];
   const regularRewards =
-    rewards.data?.rewards.filter((reward) => reward.cash_value_vnd === null) ?? [];
+    rewards.data?.rewards.filter(
+      (reward) => reward.cash_value_vnd === null && reward.category !== 'MASCOT',
+    ) ?? [];
   const redeemReward = (reward: Reward) => {
-    if (window.confirm(`Đổi “${reward.name}” với ${formatNumber(reward.cost, 2)} CC Balance?`))
+    if (window.confirm(`Đổi “${reward.name}” với ${formatNumber(reward.cost)} CC Balance?`)) {
       redeem.mutate(reward.id);
+    }
   };
+
   return (
     <>
       <PageTitle
@@ -58,82 +68,134 @@ export default function RewardsPage() {
       ) : !rewards.data?.rewards.length ? (
         <EmptyState title="Cửa hàng đang trống" detail="Quản trị viên chưa mở phần thưởng nào." />
       ) : (
-        <div className="space-y-6">
+        <div className={`reward-store-layout ${cashRewards.length ? '' : 'without-cash'}`}>
+          <div className="reward-catalog-column">
+            {mascotRewards.length > 0 && (
+              <RewardSection
+                detail="Mở khóa theo CC Level, đổi bằng CC Balance và trưng bày trong hồ sơ cá nhân."
+                eyebrow="BỘ SƯU TẬP LINH VẬT"
+                rewards={mascotRewards}
+                title="Đồng đội đáng yêu của dân Cầy Code"
+                onRedeem={redeemReward}
+                pending={redeem.isPending}
+              />
+            )}
+            {regularRewards.length > 0 && (
+              <RewardSection
+                detail="Các trải nghiệm và phần quà khác đang có trong cửa hàng."
+                eyebrow="PHẦN THƯỞNG KHÁC"
+                rewards={regularRewards}
+                title="Chọn món quà phù hợp với bạn"
+                onRedeem={redeemReward}
+                pending={redeem.isPending}
+              />
+            )}
+          </div>
+
           {cashRewards.length > 0 && (
-            <section className="panel cash-exchange-panel cash-tier-panel overflow-hidden">
-              <div className="management-header">
+            <aside className="panel cash-tier-panel overflow-hidden">
+              <div className="cash-tier-heading">
+                <span className="cash-tier-icon">₫</span>
                 <div>
                   <p className="eyebrow">QUY ĐỔI TIỀN MẶT</p>
-                  <strong>Bảng đổi CC Balance thành tiền</strong>
+                  <h2>CC Balance thành tiền</h2>
+                  <p>Chọn một mức phù hợp với số dư hiện có.</p>
                 </div>
-                <span>Chọn mức phù hợp với CC Balance hiện có</span>
               </div>
-              <div className="cash-exchange-table cash-exchange-header">
-                <span>CC Balance</span>
-                <span>Tiền nhận</span>
-                <span></span>
-              </div>
-              {cashRewards.map((reward) => (
-                <div className="cash-exchange-table" key={reward.id}>
-                  <strong data-label="CC Balance">◈ {formatNumber(reward.cost)}</strong>
-                  <strong className="cash-money" data-label="Tiền nhận">
-                    {formatVnd(reward.cash_value_vnd)}
-                  </strong>
-                  <button
-                    className="button-primary"
-                    disabled={redeem.isPending}
-                    onClick={() => redeemReward(reward)}
-                    type="button"
-                  >
-                    Đổi tiền
-                  </button>
-                </div>
-              ))}
-            </section>
-          )}
-          {regularRewards.length > 0 && (
-            <div className="reward-grid">
-              {regularRewards.map((reward, index) => (
-                <article className="reward-card" key={reward.id}>
-                  <div className={`reward-visual visual-${index % 4}`}>
-                    {reward.image_url ? (
-                      <img alt="" src={reward.image_url} />
-                    ) : (
-                      <span>{['✦', '⌁', '◈', '⚡'][index % 4]}</span>
-                    )}
-                    <small>
-                      {reward.stock === null ? 'Không giới hạn' : `Còn ${reward.stock}`}
-                    </small>
-                  </div>
-                  <div className="p-5">
-                    <p className="eyebrow">PHẦN THƯỞNG</p>
-                    <h2 className="mt-1 text-xl font-black">{reward.name}</h2>
-                    {reward.cash_value_vnd !== null && (
-                      <p className="cash-reward-value">Nhận {formatVnd(reward.cash_value_vnd)}</p>
-                    )}
-                    <p className="min-h-12 text-sm leading-6 text-[var(--muted)]">
-                      {reward.description}
-                    </p>
-                    <div className="mt-5 flex items-center justify-between">
-                      <strong className="text-xl text-[var(--accent)]">
-                        {formatNumber(reward.cost, 2)} <small className="text-xs">CC Balance</small>
-                      </strong>
-                      <button
-                        className="button-primary"
-                        disabled={redeem.isPending}
-                        onClick={() => redeemReward(reward)}
-                        type="button"
-                      >
-                        Đổi ngay
-                      </button>
+              <div className="cash-tier-list">
+                {cashRewards.map((reward) => (
+                  <div className="cash-tier-row" key={reward.id}>
+                    <div>
+                      <span>◈ {formatNumber(reward.cost)}</span>
+                      <strong>{formatVnd(reward.cash_value_vnd)}</strong>
                     </div>
+                    <button
+                      className="button-primary"
+                      disabled={redeem.isPending}
+                      onClick={() => redeemReward(reward)}
+                      type="button"
+                    >
+                      Đổi
+                    </button>
                   </div>
-                </article>
-              ))}
-            </div>
+                ))}
+              </div>
+              <p className="cash-tier-note">Admin sẽ xác nhận khi quà tiền đã được gửi.</p>
+            </aside>
           )}
         </div>
       )}
     </>
+  );
+}
+
+function RewardSection({
+  eyebrow,
+  title,
+  detail,
+  rewards,
+  pending,
+  onRedeem,
+}: {
+  eyebrow: string;
+  title: string;
+  detail: string;
+  rewards: Reward[];
+  pending: boolean;
+  onRedeem: (reward: Reward) => void;
+}) {
+  return (
+    <section className="reward-section">
+      <div className="reward-section-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2>{title}</h2>
+          <p>{detail}</p>
+        </div>
+        <span>{rewards.length} lựa chọn</span>
+      </div>
+      <div className="reward-grid">
+        {rewards.map((reward, index) => (
+          <article
+            className={`reward-card ${reward.category === 'MASCOT' ? 'mascot-card' : ''}`}
+            key={reward.id}
+          >
+            <div className={`reward-visual visual-${index % 4}`}>
+              {reward.image_url ? (
+                <img alt={reward.name} src={reward.image_url} />
+              ) : (
+                <span>{['✦', '⌁', '◈', '⚡'][index % 4]}</span>
+              )}
+              <small>{reward.stock === null ? 'Không giới hạn' : `Còn ${reward.stock}`}</small>
+              {reward.required_cc_level > 0 && (
+                <b className="reward-level-lock">
+                  ⚡ CC Level {formatNumber(reward.required_cc_level)}
+                </b>
+              )}
+            </div>
+            <div className="reward-card-body">
+              <p className="eyebrow">
+                {reward.category === 'MASCOT' ? 'LINH VẬT SƯU TẦM' : 'PHẦN THƯỞNG'}
+              </p>
+              <h3>{reward.name}</h3>
+              <p className="reward-description">{reward.description}</p>
+              <div className="reward-card-action">
+                <strong>
+                  ◈ {formatNumber(reward.cost)} <small>CC Balance</small>
+                </strong>
+                <button
+                  className="button-primary"
+                  disabled={pending}
+                  onClick={() => onRedeem(reward)}
+                  type="button"
+                >
+                  Đổi ngay
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }

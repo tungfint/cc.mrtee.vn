@@ -63,8 +63,8 @@ export function AppShell({ user }: { user: SessionUser }) {
         <NavLink className="brand" to="/">
           <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
-            <strong>Cầy Code</strong>
-            <small>MrTee.vn</small>
+            <strong>Cầy Cốt</strong>
+            <small>MrTee.VN</small>
           </span>
         </NavLink>
         <nav className="nav-list" aria-label="Điều hướng chính">

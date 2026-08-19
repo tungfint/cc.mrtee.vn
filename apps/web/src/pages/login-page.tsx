@@ -35,8 +35,8 @@ export default function LoginPage() {
         <div className="brand text-white">
           <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
-            <strong>Cầy Code</strong>
-            <small>MrTee.vn</small>
+            <strong>Cầy Cốt</strong>
+            <small>MrTee.VN</small>
           </span>
         </div>
         <div className="max-w-xl">

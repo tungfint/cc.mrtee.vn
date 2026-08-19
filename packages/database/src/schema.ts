@@ -499,6 +499,8 @@ export const rewards = pgTable(
     active: boolean('active').default(true).notNull(),
     imageUrl: text('image_url'),
     cashValueVnd: integer('cash_value_vnd'),
+    category: varchar('category', { length: 20 }).default('STANDARD').notNull(),
+    requiredCcLevel: integer('required_cc_level').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -510,6 +512,8 @@ export const rewards = pgTable(
       'rewards_cash_value_check',
       sql`${table.cashValueVnd} IS NULL OR ${table.cashValueVnd} > 0`,
     ),
+    check('rewards_category_check', sql`${table.category} IN ('STANDARD', 'MASCOT')`),
+    check('rewards_required_cc_level_check', sql`${table.requiredCcLevel} >= 0`),
   ],
 );
 

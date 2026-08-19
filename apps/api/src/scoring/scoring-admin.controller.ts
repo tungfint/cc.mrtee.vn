@@ -99,22 +99,30 @@ export class ScoringAdminController {
     if (!organizationId.success || !limit.success) {
       throw new BadRequestException('Dữ liệu không hợp lệ');
     }
-    const access = await this.authorization.organizationAccess(organizationId.data, actor);
-    this.authorization.assertCanTeach(access, actor);
+    if (actor.systemRole !== 'SYSTEM_ADMIN') {
+      const access = await this.authorization.organizationAccess(organizationId.data, actor);
+      this.authorization.assertCanTeach(access, actor);
+    }
+    const scope =
+      actor.systemRole === 'SYSTEM_ADMIN'
+        ? this.database.sql``
+        : this.database.sql`
+          WHERE logs.entity_id = ${organizationId.data}
+            OR logs.after->>'organizationId' = ${organizationId.data}
+            OR logs.after->>'organization_id' = ${organizationId.data}
+            OR logs.before->>'organization_id' = ${organizationId.data}
+            OR EXISTS (
+              SELECT 1 FROM organization_memberships AS memberships
+              WHERE memberships.organization_id = ${organizationId.data}
+                AND (memberships.id::text = logs.entity_id OR memberships.user_id::text = logs.entity_id)
+            )
+        `;
     const logs = await this.database.sql`
       SELECT logs.id, logs.actor_user_id, actors.display_name AS actor_name, logs.action,
         logs.entity_type, logs.entity_id, logs.before, logs.after, logs.reason, logs.created_at
       FROM audit_logs AS logs
       LEFT JOIN users AS actors ON actors.id = logs.actor_user_id
-      WHERE logs.entity_id = ${organizationId.data}
-        OR logs.after->>'organizationId' = ${organizationId.data}
-        OR logs.after->>'organization_id' = ${organizationId.data}
-        OR logs.before->>'organization_id' = ${organizationId.data}
-        OR EXISTS (
-          SELECT 1 FROM organization_memberships AS memberships
-          WHERE memberships.organization_id = ${organizationId.data}
-            AND (memberships.id::text = logs.entity_id OR memberships.user_id::text = logs.entity_id)
-        )
+      ${scope}
       ORDER BY logs.created_at DESC LIMIT ${limit.data}
     `;
     return { logs };

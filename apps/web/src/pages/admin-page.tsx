@@ -92,6 +92,9 @@ interface Reward {
   active: boolean;
   image_url: string | null;
   cash_value_vnd: number | null;
+  category: 'STANDARD' | 'MASCOT';
+  required_cc_level: number;
+  order_count: number;
 }
 interface RewardOrder {
   id: string;
@@ -129,6 +132,108 @@ interface LevelRank {
   active: boolean;
 }
 
+interface AuditLog {
+  id: string;
+  action: string;
+  actor_name: string | null;
+  entity_type: string;
+  entity_id: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  reason: string | null;
+  created_at: string;
+}
+
+const auditActionLabels: Record<string, string> = {
+  CC_BASE_RECALIBRATED: 'Hiệu chỉnh CC Base',
+  POINT_BONUS: 'Cộng hoặc trừ CC Point',
+  POINTS_BULK_IMPORTED: 'Nhập lệnh CC Point hàng loạt',
+  CODEFORCES_ACCOUNT_VERIFIED: 'Xác thực tài khoản Codeforces',
+  CODEFORCES_HANDLE_CHANGE_APPROVED: 'Duyệt đổi tài khoản Codeforces',
+  CODEFORCES_HANDLE_CHANGE_REJECTED: 'Từ chối đổi tài khoản Codeforces',
+  CODEFORCES_HANDLE_CHANGE_REQUESTED: 'Yêu cầu đổi tài khoản Codeforces',
+  CODEFORCES_SYNC_BATCH_REQUESTED: 'Yêu cầu đồng bộ Codeforces',
+  USER_CREATED: 'Tạo tài khoản',
+  USER_UPDATED: 'Cập nhật tài khoản',
+  USER_PROFILE_UPDATED: 'Cập nhật hồ sơ',
+  USER_PASSWORD_CHANGED: 'Đổi mật khẩu',
+  USER_PASSWORD_RESET: 'Đặt lại mật khẩu',
+  USER_AVATAR_UPDATED: 'Cập nhật ảnh đại diện',
+  USER_AVATAR_REMOVED: 'Xoá ảnh đại diện',
+  STUDENTS_IMPORTED: 'Nhập danh sách học sinh',
+  ORGANIZATION_CREATED: 'Tạo lớp học',
+  ORGANIZATION_UPDATED: 'Cập nhật lớp học',
+  ORGANIZATION_ARCHIVED: 'Lưu trữ lớp học',
+  ORGANIZATION_MEMBER_ADDED: 'Thêm thành viên vào lớp',
+  ORGANIZATION_MEMBER_UPDATED: 'Cập nhật thành viên lớp',
+  REWARD_CREATED: 'Tạo phần thưởng',
+  REWARD_UPDATED: 'Cập nhật phần thưởng',
+  REWARD_DELETED: 'Xoá phần thưởng',
+  REWARD_ARCHIVED: 'Ẩn phần thưởng đã có lịch sử',
+  REWARD_ORDER_STATUS_CHANGED: 'Cập nhật yêu cầu đổi quà',
+  QUOTE_CREATED: 'Tạo danh ngôn',
+  QUOTE_UPDATED: 'Cập nhật danh ngôn',
+  QUOTE_DELETED: 'Xoá danh ngôn',
+  CC_LEVEL_RANK_CREATED: 'Tạo cấp bậc CC Level',
+  CC_LEVEL_RANK_UPDATED: 'Cập nhật cấp bậc CC Level',
+  CC_LEVEL_RANK_DELETED: 'Xoá cấp bậc CC Level',
+  LEADERBOARD_LINK_GENERATED: 'Tạo liên kết bảng xếp hạng',
+  LEADERBOARD_LINK_REVOKED: 'Thu hồi liên kết bảng xếp hạng',
+  SEASON_CREATED: 'Tạo mùa giải',
+  SEASON_STATUS_CHANGED: 'Đổi trạng thái mùa giải',
+  SEASON_CLOSED: 'Đóng mùa giải',
+};
+
+const auditFieldLabels: Record<string, string> = {
+  name: 'Tên',
+  display_name: 'Tên hiển thị',
+  full_name: 'Họ và tên',
+  email: 'Email',
+  status: 'Trạng thái',
+  role: 'Vai trò',
+  cc_base: 'CC Base',
+  cc_level: 'CC Level',
+  amount: 'Số điểm',
+  balance: 'CC Balance',
+  cost: 'Chi phí',
+  stock: 'Số lượng',
+  active: 'Đang hoạt động',
+  handle: 'Tài khoản CF',
+  pending_handle: 'Tài khoản CF chờ duyệt',
+  verification_status: 'Xác thực CF',
+  cash_value_vnd: 'Giá trị tiền',
+  category: 'Loại quà',
+  required_cc_level: 'CC Level yêu cầu',
+};
+
+function auditValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'trống';
+  if (typeof value === 'boolean') return value ? 'Có' : 'Không';
+  if (Array.isArray(value)) return value.map(auditValue).join(', ') || 'trống';
+  if (['string', 'number', 'bigint'].includes(typeof value))
+    return `${value as string | number | bigint}`;
+  return JSON.stringify(value);
+}
+
+function auditTarget(log: AuditLog) {
+  const data = log.after ?? log.before ?? {};
+  const label = data.display_name ?? data.name ?? data.email ?? data.handle;
+  return typeof label === 'string' || typeof label === 'number'
+    ? `${label}`
+    : `${log.entity_type} · ${log.entity_id.slice(0, 8)}`;
+}
+
+function auditChanges(log: AuditLog) {
+  const before = log.before ?? {};
+  const after = log.after ?? {};
+  return Object.keys(auditFieldLabels)
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .slice(0, 5)
+    .map(
+      (key) => `${auditFieldLabels[key]}: ${auditValue(before[key])} → ${auditValue(after[key])}`,
+    );
+}
+
 export default function AdminPage() {
   const queryClient = useQueryClient();
   const session = useSession();
@@ -149,6 +254,8 @@ export default function AdminPage() {
   const [rewardImageUrl, setRewardImageUrl] = useState('');
   const [rewardActive, setRewardActive] = useState(true);
   const [rewardCashValue, setRewardCashValue] = useState('');
+  const [rewardCategory, setRewardCategory] = useState<'STANDARD' | 'MASCOT'>('STANDARD');
+  const [rewardRequiredLevel, setRewardRequiredLevel] = useState('0');
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
   const rewardFormRef = useRef<HTMLFormElement>(null);
   const [quoteContent, setQuoteContent] = useState('');
@@ -245,15 +352,11 @@ export default function AdminPage() {
     queryKey: ['audits', organizationId],
     queryFn: () =>
       api<{
-        logs: {
-          id: string;
-          action: string;
-          actor_name: string | null;
-          reason: string | null;
-          created_at: string;
-        }[];
-      }>(`/admin/users/organization/${organizationId}/audit-logs`),
-    enabled: Boolean(organizationId) && tab === 'audit',
+        logs: AuditLog[];
+      }>(
+        `/admin/users/organization/${organizationId || '00000000-0000-4000-8000-000000000000'}/audit-logs`,
+      ),
+    enabled: (Boolean(organizationId) || Boolean(isSystemAdmin)) && tab === 'audit',
   });
   const mutation = useMutation({
     mutationFn: ({
@@ -419,7 +522,7 @@ export default function AdminPage() {
   const canApproveHandle = isSystemAdmin || selectedOrganization?.role === 'ORG_ADMIN';
   const noOrganizationSelected =
     !organizationId &&
-    (['points', 'sync', 'audit'].includes(tab) || (!isSystemAdmin && tab === 'members'));
+    (['points', 'sync'].includes(tab) || (!isSystemAdmin && ['members', 'audit'].includes(tab)));
   const globalStudents =
     users.data?.users.filter((item) => {
       if (item.system_role !== 'USER') return false;
@@ -487,13 +590,21 @@ export default function AdminPage() {
     setRewardStock(reward.stock === null ? '' : String(reward.stock));
     setRewardImageUrl(reward.image_url ?? '');
     setRewardCashValue(reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd));
+    setRewardCategory(reward.category);
+    setRewardRequiredLevel(String(reward.required_cc_level));
     setRewardActive(reward.active);
     window.requestAnimationFrame(() =>
       rewardFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     );
   };
-  const archiveReward = (reward: Reward) => {
-    if (!reward.active || !window.confirm(`Ẩn phần thưởng “${reward.name}” khỏi danh mục?`)) return;
+  const deleteReward = (reward: Reward) => {
+    if (!reward.active) return;
+    const action = reward.order_count > 0 ? 'Ẩn' : 'Xoá';
+    const detail =
+      reward.order_count > 0
+        ? 'Quà đã có lịch sử đổi nên sẽ được ẩn và giữ nguyên dữ liệu học sinh.'
+        : 'Quà chưa phát sinh yêu cầu đổi và sẽ được xoá khỏi hệ thống.';
+    if (!window.confirm(`${action} phần thưởng “${reward.name}”?\n\n${detail}`)) return;
     mutation.mutate({
       path: `/admin/rewards/${reward.id}`,
       method: 'DELETE',
@@ -560,7 +671,7 @@ export default function AdminPage() {
           </div>
           {mutation.error && <p className="notice error">{mutation.error.message}</p>}
           {mutation.isSuccess && (
-            <p className="notice success">Thao tác đã hoàn tất và được audit.</p>
+            <p className="notice success">Thao tác đã hoàn tất và được ghi vào nhật ký.</p>
           )}
           {noOrganizationSelected && (
             <EmptyState
@@ -2046,26 +2157,48 @@ export default function AdminPage() {
             </section>
           )}
           {tab === 'audit' && !noOrganizationSelected && (
-            <div className="panel overflow-hidden">
+            <div className="panel audit-panel overflow-hidden">
+              <div className="management-header">
+                <div>
+                  <p className="eyebrow">NHẬT KÝ HỆ THỐNG</p>
+                  <strong>Ai đã làm gì, vào lúc nào</strong>
+                </div>
+                <span>Hiển thị tối đa 50 hoạt động gần nhất</span>
+              </div>
               {audits.isPending ? (
-                <LoadingState label="Đang tải audit…" />
+                <LoadingState label="Đang tải nhật ký…" />
               ) : audits.error ? (
                 <ErrorState error={audits.error} />
               ) : !audits.data?.logs.length ? (
                 <EmptyState
-                  title="Chưa có audit log"
-                  detail="Các lệnh đặc quyền sẽ xuất hiện tại đây."
+                  title="Chưa có hoạt động quản trị"
+                  detail="Các thay đổi quan trọng sẽ được ghi chi tiết tại đây."
                 />
               ) : (
                 audits.data.logs.map((log) => (
                   <div className="audit-row" key={log.id}>
-                    <div>
-                      <strong>{log.action.replaceAll('_', ' ')}</strong>
-                      <p>{log.reason ?? 'Không có ghi chú'}</p>
+                    <div className="audit-main">
+                      <div className="audit-title-line">
+                        <strong>
+                          {auditActionLabels[log.action] ?? log.action.replaceAll('_', ' ')}
+                        </strong>
+                        <span>{auditTarget(log)}</span>
+                      </div>
+                      <p>
+                        <b>{log.actor_name ?? 'Hệ thống'}</b> đã thực hiện thao tác này.
+                        {log.reason ? ` Lý do: ${log.reason}.` : ''}
+                      </p>
+                      {auditChanges(log).length > 0 && (
+                        <div className="audit-changes">
+                          {auditChanges(log).map((change) => (
+                            <span key={change}>{change}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right text-xs text-[var(--muted)]">
-                      <p>{log.actor_name ?? 'System'}</p>
-                      <p>{formatDate(log.created_at)}</p>
+                    <div className="audit-time">
+                      <span>Thời gian</span>
+                      <strong>{formatDate(log.created_at)}</strong>
                     </div>
                   </div>
                 ))
@@ -2091,6 +2224,8 @@ export default function AdminPage() {
                         active: rewardActive,
                         imageUrl: rewardImageUrl || null,
                         cashValueVnd: rewardCashValue === '' ? null : Number(rewardCashValue),
+                        category: rewardCategory,
+                        requiredCcLevel: Number(rewardRequiredLevel),
                       },
                     });
                   }}
@@ -2111,6 +2246,8 @@ export default function AdminPage() {
                           setRewardStock('');
                           setRewardImageUrl('');
                           setRewardCashValue('');
+                          setRewardCategory('STANDARD');
+                          setRewardRequiredLevel('0');
                           setRewardActive(true);
                         }}
                         type="button"
@@ -2159,6 +2296,30 @@ export default function AdminPage() {
                   </label>
                   <div className="form-grid mt-4">
                     <label className="field">
+                      <span>Loại phần thưởng</span>
+                      <select
+                        onChange={(event) =>
+                          setRewardCategory(event.target.value as 'STANDARD' | 'MASCOT')
+                        }
+                        value={rewardCategory}
+                      >
+                        <option value="STANDARD">Quà thông thường</option>
+                        <option value="MASCOT">Linh vật sưu tầm</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>CC Level tối thiểu</span>
+                      <input
+                        min="0"
+                        onChange={(event) => setRewardRequiredLevel(event.target.value)}
+                        step="1"
+                        type="number"
+                        value={rewardRequiredLevel}
+                      />
+                    </label>
+                  </div>
+                  <div className="form-grid mt-4">
+                    <label className="field">
                       <span>Số lượng (trống = không giới hạn)</span>
                       <input
                         min="0"
@@ -2195,6 +2356,11 @@ export default function AdminPage() {
                           <p className="m-0 text-xs text-[var(--muted)]">
                             {formatNumber(reward.cost, 2)} CC Balance · {reward.stock ?? '∞'} suất
                           </p>
+                          {reward.category === 'MASCOT' && (
+                            <p className="m-0 text-xs text-[var(--accent)]">
+                              Linh vật · cần CC Level {formatNumber(reward.required_cc_level)}
+                            </p>
+                          )}
                           {reward.cash_value_vnd !== null && (
                             <p className="cash-reward-value">
                               Nhận {formatVnd(reward.cash_value_vnd)}
@@ -2213,10 +2379,10 @@ export default function AdminPage() {
                           <button
                             className="button-danger"
                             disabled={!reward.active}
-                            onClick={() => archiveReward(reward)}
+                            onClick={() => deleteReward(reward)}
                             type="button"
                           >
-                            {reward.active ? 'Xoá' : 'Đã lưu trữ'}
+                            {reward.active ? (reward.order_count > 0 ? 'Ẩn' : 'Xoá') : 'Đã ẩn'}
                           </button>
                         </div>
                       </div>
@@ -2257,10 +2423,10 @@ export default function AdminPage() {
                         <button
                           className="button-danger"
                           disabled={!reward.active}
-                          onClick={() => archiveReward(reward)}
+                          onClick={() => deleteReward(reward)}
                           type="button"
                         >
-                          {reward.active ? 'Ẩn' : 'Đã ẩn'}
+                          {reward.active ? (reward.order_count > 0 ? 'Ẩn' : 'Xoá') : 'Đã ẩn'}
                         </button>
                       </div>
                     </div>

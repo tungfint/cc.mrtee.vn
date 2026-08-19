@@ -646,11 +646,60 @@ describe('authorization matrix', () => {
     expect(publicProfile.profile).toMatchObject({ id: ids.member!, classes: ['privateOrg'] });
   });
 
-  it('archives classes and rewards without deleting historical rows', async () => {
+  it('requires the configured CC Level before redeeming a mascot', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const created = await rewardsAdmin.create(
+      {
+        name: 'Level mascot',
+        description: 'Collectible mascot with a level gate',
+        cost: 30,
+        stock: null,
+        active: true,
+        imageUrl: '/mascots/meo-mam-code.webp',
+        category: 'MASCOT',
+        requiredCcLevel: 1200,
+      },
+      actor,
+    );
+    await connection`
+      INSERT INTO user_wallets (user_id, balance) VALUES (${ids.member!}, 100)
+      ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance
+    `;
+    await connection`
+      INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
+      VALUES (${ids.member!}, 800, 0, 800)
+      ON CONFLICT (user_id) DO UPDATE SET cc_level = 800
+    `;
+    await expect(
+      rewards.redeem(ids.member!, String(created.reward.id), 'mascot-level-low'),
+    ).rejects.toThrow('Cần đạt CC Level 1200');
+    await connection`
+      UPDATE user_skill_state SET cc_level = 1200 WHERE user_id = ${ids.member!}
+    `;
+    await expect(
+      rewards.redeem(ids.member!, String(created.reward.id), 'mascot-level-ready'),
+    ).resolves.toMatchObject({ replayed: false });
+  });
+
+  it('deletes unused rewards and archives rewards that have historical orders', async () => {
     const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
     const archivedClass = await adminOrganizations.archive(ids.publicOrg!, actor);
     expect(archivedClass.organization).toMatchObject({ status: 'INACTIVE' });
-    const created = await rewardsAdmin.create(
+    const unused = await rewardsAdmin.create(
+      {
+        name: 'Delete me',
+        description: 'Unused reward can be deleted',
+        cost: 100,
+        stock: null,
+        active: true,
+        imageUrl: '/api/uploads/rewards/test.webp',
+      },
+      actor,
+    );
+    const deletedReward = await rewardsAdmin.archive(String(unused.reward.id), actor);
+    expect(deletedReward).toMatchObject({ deleted: true, archived: false });
+
+    const historical = await rewardsAdmin.create(
       {
         name: 'Archive me',
         description: 'Reward retained for history',
@@ -661,14 +710,23 @@ describe('authorization matrix', () => {
       },
       actor,
     );
-    const archivedReward = await rewardsAdmin.archive(String(created.reward.id), actor);
+    await connection`
+      INSERT INTO reward_orders (user_id, reward_id, cost_snapshot, idempotency_key)
+      VALUES (${ids.member!}, ${String(historical.reward.id)}, 100, 'archive-history-test')
+    `;
+    const archivedReward = await rewardsAdmin.archive(String(historical.reward.id), actor);
+    expect(archivedReward).toMatchObject({ deleted: false, archived: true });
     expect(archivedReward.reward).toMatchObject({ active: false });
-    const [counts] = await connection<{ organizations: string; rewards: string }[]>`
+    const [counts] = await connection<
+      { organizations: string; unused_rewards: string; historical_rewards: string }[]
+    >`
       SELECT
         (SELECT count(*)::text FROM organizations WHERE id = ${ids.publicOrg!}) AS organizations,
-        (SELECT count(*)::text FROM rewards WHERE id = ${String(created.reward.id)}) AS rewards
+        (SELECT count(*)::text FROM rewards WHERE id = ${String(unused.reward.id)}) AS unused_rewards,
+        (SELECT count(*)::text FROM rewards WHERE id = ${String(historical.reward.id)})
+          AS historical_rewards
     `;
-    expect(counts).toEqual({ organizations: '1', rewards: '1' });
+    expect(counts).toEqual({ organizations: '1', unused_rewards: '0', historical_rewards: '1' });
   });
 
   it('manages rotating quotes and configurable CC Level ranks', async () => {

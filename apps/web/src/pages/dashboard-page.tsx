@@ -256,7 +256,15 @@ export default function DashboardPage() {
             ))}
             {data.fulfilledRewards.map((reward) => (
               <article className="achievement-card reward-achievement" key={reward.name}>
-                <span className="achievement-icon">🎁</span>
+                {reward.image_url ? (
+                  <img
+                    className="achievement-reward-image"
+                    alt={reward.name}
+                    src={reward.image_url}
+                  />
+                ) : (
+                  <span className="achievement-icon">🎁</span>
+                )}
                 <div>
                   <strong>{reward.name}</strong>
                   <p>{reward.description}</p>
@@ -323,11 +331,6 @@ export default function DashboardPage() {
                   CF {recommendation.min}–{recommendation.max}
                 </strong>
                 <small>Vùng luyện tập cân bằng quanh phong độ gần đây</small>
-                <small className="recommendation-explain">
-                  Trung bình {profile.recent_five_rated_count} bài có rating gần nhất là{' '}
-                  {formatNumber(recommendation.average)}; làm tròn theo mốc 100 rồi khuyến nghị từ
-                  −100 đến +100 rating.
-                </small>
               </>
             ) : (
               <>

@@ -16,6 +16,8 @@ export interface RewardRow {
   active: boolean;
   image_url: string | null;
   cash_value_vnd: number | null;
+  category: 'STANDARD' | 'MASCOT';
+  required_cc_level: number;
 }
 
 export interface OrderRow {
@@ -35,7 +37,8 @@ export class RewardsService {
 
   async catalog() {
     return this.database.sql<RewardRow[]>`
-      SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd
+      SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd,
+        category, required_cc_level
       FROM rewards
       WHERE active = true AND (stock IS NULL OR stock > 0)
       ORDER BY cost, name
@@ -93,12 +96,24 @@ export class RewardsService {
         SELECT balance FROM user_wallets WHERE user_id = ${userId} FOR UPDATE
       `;
       const [reward] = await transaction<RewardRow[]>`
-        SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd
+        SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd,
+          category, required_cc_level
         FROM rewards WHERE id = ${rewardId} FOR UPDATE
       `;
       if (!reward || !reward.active) throw new NotFoundException('Phần thưởng không khả dụng');
       if (reward.stock !== null && reward.stock <= 0) {
         throw new BadRequestException('Phần thưởng đã hết');
+      }
+      if (reward.required_cc_level > 0) {
+        const [skill] = await transaction<{ cc_level: string }[]>`
+          SELECT cc_level::text FROM user_skill_state WHERE user_id = ${userId}
+        `;
+        const currentLevel = Number(skill?.cc_level ?? 800);
+        if (currentLevel < reward.required_cc_level) {
+          throw new BadRequestException(
+            `Cần đạt CC Level ${reward.required_cc_level} để đổi linh vật này`,
+          );
+        }
       }
       const cost = Number(reward.cost);
       if (!wallet || Number(wallet.balance) < cost) {
