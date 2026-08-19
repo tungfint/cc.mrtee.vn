@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber } from '../lib/api';
+import { recommendedRange } from './dashboard-recommendation';
 import {
   Avatar,
   CodeforcesHandle,
@@ -29,6 +30,8 @@ interface Dashboard {
     total_solves: number;
     highest_problem_rating: number | null;
     highest_problem_name: string | null;
+    recent_five_average_rating: number | null;
+    recent_five_rated_count: number;
   };
   season: { name: string; score: string; qualifying_solves: number } | null;
   streak: { current_streak: number; longest_streak: number };
@@ -128,7 +131,7 @@ export default function DashboardPage() {
     return <ErrorState error={dashboard.error} retry={() => void dashboard.refetch()} />;
   const data = dashboard.data;
   const profile = data.profile;
-  const recommendation = recommendedRange(profile.cc_level, profile.highest_problem_rating);
+  const recommendation = recommendedRange(profile.recent_five_average_rating);
   const submitHandle = (event: FormEvent) => {
     event.preventDefault();
     link.mutate();
@@ -314,15 +317,26 @@ export default function DashboardPage() {
           </div>
           <div>
             <span>Khuyến nghị tiếp theo</span>
-            <strong>
-              CF {recommendation.min}–{recommendation.max}
-            </strong>
-            <small>Ưu tiên bài cao hơn vùng quen thuộc một bước</small>
-            <small className="recommendation-explain">
-              Dựa trên mốc cao hơn giữa CC Level ({formatNumber(profile.cc_level)}) và bài khó nhất
-              đã giải ({profile.highest_problem_rating ?? 'chưa có'}); làm tròn theo 100 và mở rộng
-              thêm 200 rating.
-            </small>
+            {recommendation ? (
+              <>
+                <strong>
+                  CF {recommendation.min}–{recommendation.max}
+                </strong>
+                <small>Vùng luyện tập cân bằng quanh phong độ gần đây</small>
+                <small className="recommendation-explain">
+                  Trung bình {profile.recent_five_rated_count} bài có rating gần nhất là{' '}
+                  {formatNumber(recommendation.average)}; làm tròn theo mốc 100 rồi khuyến nghị từ
+                  −100 đến +100 rating.
+                </small>
+              </>
+            ) : (
+              <>
+                <strong>Chưa đủ dữ liệu</strong>
+                <small className="recommendation-explain">
+                  Hãy hoàn thành bài Codeforces có rating để hệ thống tính khuyến nghị.
+                </small>
+              </>
+            )}
           </div>
         </div>
         {data.activity.length === 0 ? (
@@ -384,12 +398,6 @@ export default function DashboardPage() {
   );
 }
 
-function recommendedRange(ccLevel: string, highestRating: number | null) {
-  const anchor = Math.max(800, Number(ccLevel) || 800, highestRating ?? 0);
-  const min = Math.min(3300, Math.max(800, Math.floor(anchor / 100) * 100));
-  return { min, max: Math.min(3500, min + 200) };
-}
-
 function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
   const fallback = {
     id: 'fallback',
@@ -442,6 +450,7 @@ function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
       <div className="quote-actions" aria-label="Tương tác với danh ngôn">
         <button
           aria-label="Xem danh ngôn trước"
+          className="quote-arrow-button"
           disabled={available.length < 2}
           onClick={previous}
           title="Câu trước"
@@ -462,6 +471,7 @@ function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
         </button>
         <button
           aria-label="Xem danh ngôn tiếp theo"
+          className="quote-arrow-button"
           disabled={available.length < 2}
           onClick={next}
           title="Câu tiếp theo"

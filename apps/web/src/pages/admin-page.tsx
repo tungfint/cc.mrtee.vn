@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, formatDate, formatNumber, formatVnd, useSession } from '../lib/api';
 import {
   Avatar,
@@ -55,6 +55,8 @@ interface UserAccount {
   verification_status: string | null;
   current_rating: number | null;
   rank: string | null;
+  sync_status: string | null;
+  last_sync_at: string | null;
   cc_point: string;
   cc_balance: string;
   must_change_password: boolean;
@@ -69,6 +71,17 @@ interface Organization {
   status: string;
   member_count: number;
   active_seasons: number;
+}
+interface SyncAccount {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+  codeforces_handle: string | null;
+  verification_status: string | null;
+  current_rating: number | null;
+  sync_status: string | null;
+  last_sync_at: string | null;
+  class_label: string;
 }
 interface Reward {
   id: string;
@@ -137,6 +150,7 @@ export default function AdminPage() {
   const [rewardActive, setRewardActive] = useState(true);
   const [rewardCashValue, setRewardCashValue] = useState('');
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
+  const rewardFormRef = useRef<HTMLFormElement>(null);
   const [quoteContent, setQuoteContent] = useState('');
   const [quoteAuthor, setQuoteAuthor] = useState('');
   const [quoteOrder, setQuoteOrder] = useState('0');
@@ -198,10 +212,6 @@ export default function AdminPage() {
     queryFn: () => api<{ members: Member[] }>(`/organizations/${organizationId}/members`),
     enabled: Boolean(organizationId),
   });
-  const syncEligibleMembers =
-    members.data?.members.filter(
-      (member) => member.verification_status && member.verification_status !== 'UNVERIFIED',
-    ) ?? [];
   const verifiableMembers =
     members.data?.members.filter(
       (member) => member.codeforces_handle && member.verification_status === 'UNVERIFIED',
@@ -358,7 +368,7 @@ export default function AdminPage() {
           method: 'POST',
           body: JSON.stringify({
             scope: syncScope,
-            ...(syncScope !== 'ALL' ? { organizationId } : {}),
+            ...(syncScope === 'ORGANIZATION' || !isSystemAdmin ? { organizationId } : {}),
             ...(syncScope === 'USER'
               ? {
                   targetUserId: syncUserId || syncEligibleMembers[0]?.user_id || '',
@@ -426,6 +436,32 @@ export default function AdminPage() {
   const verifiableStudents = globalStudents.filter(
     (item) => item.codeforces_handle && item.verification_status === 'UNVERIFIED',
   );
+  const syncAccounts: SyncAccount[] =
+    isSystemAdmin && syncScope !== 'ORGANIZATION'
+      ? globalStudents.map((item) => ({
+          user_id: item.id,
+          display_name: item.display_name,
+          avatar_url: item.avatar_url,
+          codeforces_handle: item.codeforces_handle,
+          verification_status: item.verification_status,
+          current_rating: item.current_rating,
+          sync_status: item.sync_status,
+          last_sync_at: item.last_sync_at,
+          class_label:
+            item.memberships
+              .filter(({ role }) => role === 'MEMBER')
+              .map(({ organizationName }) => organizationName)
+              .join(' · ') || 'Không thuộc lớp',
+        }))
+      : (members.data?.members
+          .filter((member) => member.role === 'MEMBER' && member.status === 'ACTIVE')
+          .map((member) => ({
+            ...member,
+            class_label: selectedOrganization?.organization_name ?? '',
+          })) ?? []);
+  const syncEligibleMembers = syncAccounts.filter(
+    (member) => member.verification_status && member.verification_status !== 'UNVERIFIED',
+  );
   const selectTarget = targetId || members.data?.members[0]?.user_id || '';
   const selectSyncTarget = syncUserId || syncEligibleMembers[0]?.user_id || '';
   const submitPoints = (event: FormEvent) => {
@@ -441,6 +477,27 @@ export default function AdminPage() {
         reason: pointReason,
         idempotencyKey: crypto.randomUUID(),
       },
+    });
+  };
+  const beginRewardEdit = (reward: Reward) => {
+    setEditingReward(reward);
+    setRewardName(reward.name);
+    setRewardDescription(reward.description);
+    setRewardCost(reward.cost);
+    setRewardStock(reward.stock === null ? '' : String(reward.stock));
+    setRewardImageUrl(reward.image_url ?? '');
+    setRewardCashValue(reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd));
+    setRewardActive(reward.active);
+    window.requestAnimationFrame(() =>
+      rewardFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    );
+  };
+  const archiveReward = (reward: Reward) => {
+    if (!reward.active || !window.confirm(`Ẩn phần thưởng “${reward.name}” khỏi danh mục?`)) return;
+    mutation.mutate({
+      path: `/admin/rewards/${reward.id}`,
+      method: 'DELETE',
+      body: null,
     });
   };
   const tabs = [
@@ -1587,6 +1644,17 @@ export default function AdminPage() {
                     Điều chỉnh đồng thời CC Point và CC Balance. Mỗi lệnh có khóa chống ghi trùng và
                     được lưu trong nhật ký.
                   </p>
+                  <button
+                    className="template-link mt-3"
+                    onClick={() =>
+                      document
+                        .getElementById('bulk-cc-point-import')
+                        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }
+                    type="button"
+                  >
+                    ⇩ Import hàng loạt bằng CSV / Excel (.xlsx)
+                  </button>
                   <label className="field mt-5">
                     <span>Học sinh</span>
                     <select onChange={(e) => setTargetId(e.target.value)} value={selectTarget}>
@@ -1707,6 +1775,7 @@ export default function AdminPage() {
 
               <form
                 className="panel import-panel p-6"
+                id="bulk-cc-point-import"
                 onSubmit={(event) => {
                   event.preventDefault();
                   importPoints.mutate();
@@ -1716,9 +1785,9 @@ export default function AdminPage() {
                   <p className="eyebrow">BULK CC POINT</p>
                   <h2 className="mt-2 text-xl font-black">Cộng / trừ hàng loạt</h2>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    Nhận CSV hoặc XLSX, tối đa 500 tài khoản. Cột thao tác dùng CỘNG/TRỪ; CC Point
-                    luôn nhập số dương. Tải lại cùng một file sẽ không ghi trùng giao dịch đã thành
-                    công.
+                    Nhận file CSV hoặc Excel (.xlsx), tối đa 500 tài khoản. Cột thao tác dùng
+                    CỘNG/TRỪ; CC Point luôn nhập số dương. Tải lại cùng một file sẽ không ghi trùng
+                    giao dịch đã thành công.
                   </p>
                 </div>
                 <div className="import-actions">
@@ -1732,7 +1801,7 @@ export default function AdminPage() {
                   <label className="button-secondary avatar-file-button">
                     Chọn CSV / XLSX
                     <input
-                      accept=".csv,.xlsx"
+                      accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={(event) => setPointImportFile(event.target.files?.[0] ?? null)}
                       type="file"
                     />
@@ -1811,7 +1880,7 @@ export default function AdminPage() {
                     </select>
                   </label>
                 )}
-                {syncScope !== 'ALL' && (
+                {syncScope !== 'ALL' && (!isSystemAdmin || syncScope === 'ORGANIZATION') && (
                   <p className="notice pending mt-4">
                     Lớp: <strong>{selectedOrganization?.organization_name}</strong>
                   </p>
@@ -1837,10 +1906,14 @@ export default function AdminPage() {
               </form>
               <div className="panel overflow-hidden">
                 <div className="management-header">
-                  <strong>Trạng thái lớp</strong>
-                  <span>{selectedOrganization?.organization_name}</span>
+                  <strong>Trạng thái đồng bộ</strong>
+                  <span>
+                    {isSystemAdmin && syncScope !== 'ORGANIZATION'
+                      ? 'Tất cả học sinh, kể cả chưa xếp lớp'
+                      : selectedOrganization?.organization_name}
+                  </span>
                 </div>
-                {members.data?.members.map((member) => (
+                {syncAccounts.map((member) => (
                   <div className="sync-account-row" key={member.user_id}>
                     <div className="member">
                       <Avatar
@@ -1852,6 +1925,7 @@ export default function AdminPage() {
                       <div>
                         <strong>{member.display_name}</strong>
                         <p>@{member.codeforces_handle ?? 'Chưa liên kết Codeforces'}</p>
+                        <small>{member.class_label}</small>
                       </div>
                     </div>
                     <div className="text-right">
@@ -2003,6 +2077,7 @@ export default function AdminPage() {
               <div className="grid gap-6 lg:grid-cols-[0.7fr_1.3fr]">
                 <form
                   className="panel p-6"
+                  ref={rewardFormRef}
                   onSubmit={(event) => {
                     event.preventDefault();
                     mutation.mutate({
@@ -2130,18 +2205,7 @@ export default function AdminPage() {
                         <div className="student-actions">
                           <button
                             className="button-secondary"
-                            onClick={() => {
-                              setEditingReward(reward);
-                              setRewardName(reward.name);
-                              setRewardDescription(reward.description);
-                              setRewardCost(reward.cost);
-                              setRewardStock(reward.stock === null ? '' : String(reward.stock));
-                              setRewardImageUrl(reward.image_url ?? '');
-                              setRewardCashValue(
-                                reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd),
-                              );
-                              setRewardActive(reward.active);
-                            }}
+                            onClick={() => beginRewardEdit(reward)}
                             type="button"
                           >
                             Sửa
@@ -2149,14 +2213,7 @@ export default function AdminPage() {
                           <button
                             className="button-danger"
                             disabled={!reward.active}
-                            onClick={() => {
-                              if (!window.confirm(`Lưu trữ phần thưởng “${reward.name}”?`)) return;
-                              mutation.mutate({
-                                path: `/admin/rewards/${reward.id}`,
-                                method: 'DELETE',
-                                body: null,
-                              });
-                            }}
+                            onClick={() => archiveReward(reward)}
                             type="button"
                           >
                             {reward.active ? 'Xoá' : 'Đã lưu trữ'}
@@ -2192,16 +2249,7 @@ export default function AdminPage() {
                       <div className="student-actions">
                         <button
                           className="button-secondary"
-                          onClick={() => {
-                            setEditingReward(reward);
-                            setRewardName(reward.name);
-                            setRewardDescription(reward.description);
-                            setRewardCost(reward.cost);
-                            setRewardStock(reward.stock === null ? '' : String(reward.stock));
-                            setRewardImageUrl(reward.image_url ?? '');
-                            setRewardCashValue(String(reward.cash_value_vnd));
-                            setRewardActive(reward.active);
-                          }}
+                          onClick={() => beginRewardEdit(reward)}
                           type="button"
                         >
                           Sửa
@@ -2209,13 +2257,7 @@ export default function AdminPage() {
                         <button
                           className="button-danger"
                           disabled={!reward.active}
-                          onClick={() =>
-                            mutation.mutate({
-                              path: `/admin/rewards/${reward.id}`,
-                              method: 'DELETE',
-                              body: null,
-                            })
-                          }
+                          onClick={() => archiveReward(reward)}
                           type="button"
                         >
                           {reward.active ? 'Ẩn' : 'Đã ẩn'}

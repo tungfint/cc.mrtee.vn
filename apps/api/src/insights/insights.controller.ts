@@ -57,6 +57,16 @@ export class InsightsController {
           (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves,
           (SELECT max(rating_snapshot)::int FROM user_problem_solves WHERE user_id = users.id)
             AS highest_problem_rating,
+          (SELECT round(avg(recent.rating_snapshot))::int FROM (
+            SELECT rating_snapshot FROM user_problem_solves
+            WHERE user_id = users.id AND rating_snapshot IS NOT NULL
+            ORDER BY first_solved_at DESC LIMIT 5
+          ) AS recent) AS recent_five_average_rating,
+          (SELECT count(*)::int FROM (
+            SELECT 1 FROM user_problem_solves
+            WHERE user_id = users.id AND rating_snapshot IS NOT NULL
+            ORDER BY first_solved_at DESC LIMIT 5
+          ) AS recent) AS recent_five_rated_count,
           (SELECT problems.name FROM user_problem_solves AS solves
             JOIN cf_problems AS problems ON problems.problem_key = solves.problem_key
             WHERE solves.user_id = users.id
@@ -378,7 +388,7 @@ export class InsightsController {
   }
 
   private async recognition(userId: string) {
-    const [profiles, streak, awards, rewards, topTags] = await Promise.all([
+    const [profiles, streak, awards, rewards, topTags, recognitionQuotes] = await Promise.all([
       this.database.sql`
         SELECT users.id, users.full_name, users.display_name, users.avatar_url,
           accounts.handle AS codeforces_handle, accounts.current_rating, accounts.max_rating,
@@ -461,6 +471,13 @@ export class InsightsController {
         ORDER BY solved_count DESC, max_rating DESC NULLS LAST, tags.tag
         LIMIT 8
       `,
+      this.database.sql`
+        SELECT content, author
+        FROM motivational_quotes
+        WHERE active = true
+        ORDER BY random()
+        LIMIT 1
+      `,
     ]);
     const profile = profiles[0];
     if (!profile) throw new BadRequestException('Không tìm thấy học sinh');
@@ -470,6 +487,7 @@ export class InsightsController {
       awards,
       rewards,
       topTags,
+      quote: recognitionQuotes[0] ?? null,
       generatedAt: new Date().toISOString(),
     };
   }

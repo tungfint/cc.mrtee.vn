@@ -233,12 +233,23 @@ export class CodeforcesAccountsService {
         WHERE accounts.verification_status <> 'UNVERIFIED' AND users.status = 'ACTIVE'
         ORDER BY accounts.created_at
       `;
-    } else {
-      if (!input.organizationId) throw new BadRequestException('Chọn lớp cần đồng bộ');
-      const access = await this.authorization.organizationAccess(input.organizationId, input.actor);
-      this.authorization.assertCanTeach(access, input.actor);
-      if (input.scope === 'USER') {
-        if (!input.targetUserId) throw new BadRequestException('Chọn tài khoản cần đồng bộ');
+    } else if (input.scope === 'USER') {
+      if (!input.targetUserId) throw new BadRequestException('Chọn tài khoản cần đồng bộ');
+      if (input.actor.systemRole === 'SYSTEM_ADMIN') {
+        accounts = await this.database.sql<AccountRow[]>`
+          SELECT accounts.* FROM codeforces_accounts AS accounts
+          JOIN users ON users.id = accounts.user_id
+          WHERE accounts.user_id = ${input.targetUserId}
+            AND accounts.verification_status <> 'UNVERIFIED'
+            AND users.status = 'ACTIVE'
+        `;
+      } else {
+        if (!input.organizationId) throw new BadRequestException('Chọn lớp cần đồng bộ');
+        const access = await this.authorization.organizationAccess(
+          input.organizationId,
+          input.actor,
+        );
+        this.authorization.assertCanTeach(access, input.actor);
         accounts = await this.database.sql<AccountRow[]>`
           SELECT accounts.* FROM codeforces_accounts AS accounts
           JOIN users ON users.id = accounts.user_id
@@ -250,18 +261,21 @@ export class CodeforcesAccountsService {
             AND accounts.verification_status <> 'UNVERIFIED'
             AND users.status = 'ACTIVE'
         `;
-      } else {
-        accounts = await this.database.sql<AccountRow[]>`
-          SELECT accounts.* FROM codeforces_accounts AS accounts
-          JOIN users ON users.id = accounts.user_id
-          JOIN organization_memberships AS memberships
-            ON memberships.user_id = accounts.user_id
-            AND memberships.organization_id = ${input.organizationId}
-            AND memberships.status = 'ACTIVE'
-          WHERE accounts.verification_status <> 'UNVERIFIED' AND users.status = 'ACTIVE'
-          ORDER BY accounts.created_at
-        `;
       }
+    } else {
+      if (!input.organizationId) throw new BadRequestException('Chọn lớp cần đồng bộ');
+      const access = await this.authorization.organizationAccess(input.organizationId, input.actor);
+      this.authorization.assertCanTeach(access, input.actor);
+      accounts = await this.database.sql<AccountRow[]>`
+        SELECT accounts.* FROM codeforces_accounts AS accounts
+        JOIN users ON users.id = accounts.user_id
+        JOIN organization_memberships AS memberships
+          ON memberships.user_id = accounts.user_id
+          AND memberships.organization_id = ${input.organizationId}
+          AND memberships.status = 'ACTIVE'
+        WHERE accounts.verification_status <> 'UNVERIFIED' AND users.status = 'ACTIVE'
+        ORDER BY accounts.created_at
+      `;
     }
 
     let queued = 0;
@@ -274,12 +288,19 @@ export class CodeforcesAccountsService {
       queued,
       skipped: accounts.length - queued,
     };
+    const auditEntityType =
+      input.scope === 'ALL' ? 'system' : input.scope === 'USER' ? 'user' : 'organization';
+    const auditEntityId =
+      input.scope === 'ALL'
+        ? 'all'
+        : input.scope === 'USER'
+          ? input.targetUserId!
+          : input.organizationId!;
     await this.database.sql`
       INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after, reason)
       VALUES (
         ${input.actor.userId}, 'CODEFORCES_SYNC_BATCH_REQUESTED',
-        ${input.scope === 'ALL' ? 'system' : 'organization'},
-        ${input.scope === 'ALL' ? 'all' : input.organizationId!},
+        ${auditEntityType}, ${auditEntityId},
         ${JSON.stringify({ ...result, targetUserId: input.targetUserId ?? null })}::jsonb,
         ${`Yêu cầu đồng bộ Codeforces phạm vi ${input.scope}`}
       )

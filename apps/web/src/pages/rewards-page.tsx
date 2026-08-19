@@ -60,18 +60,17 @@ export default function RewardsPage() {
       ) : (
         <div className="space-y-6">
           {cashRewards.length > 0 && (
-            <section className="panel cash-exchange-panel overflow-hidden">
+            <section className="panel cash-exchange-panel cash-tier-panel overflow-hidden">
               <div className="management-header">
                 <div>
                   <p className="eyebrow">QUY ĐỔI TIỀN MẶT</p>
                   <strong>Bảng đổi CC Balance thành tiền</strong>
                 </div>
-                <span>Gọn, rõ mức nhận và số dư cần dùng</span>
+                <span>Chọn mức phù hợp với CC Balance hiện có</span>
               </div>
               <div className="cash-exchange-table cash-exchange-header">
                 <span>CC Balance</span>
                 <span>Tiền nhận</span>
-                <span>Mô tả</span>
                 <span></span>
               </div>
               {cashRewards.map((reward) => (
@@ -80,7 +79,6 @@ export default function RewardsPage() {
                   <strong className="cash-money" data-label="Tiền nhận">
                     {formatVnd(reward.cash_value_vnd)}
                   </strong>
-                  <span data-label="Mô tả">{reward.description}</span>
                   <button
                     className="button-primary"
                     disabled={redeem.isPending}
