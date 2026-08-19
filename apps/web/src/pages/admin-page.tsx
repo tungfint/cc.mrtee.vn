@@ -12,6 +12,11 @@ import {
 } from '../components/ui';
 import { RewardImageUploader } from '../components/reward-image-uploader';
 
+function formText(form: FormData, key: string, fallback = '') {
+  const value = form.get(key);
+  return typeof value === 'string' ? value : fallback;
+}
+
 interface Membership {
   organization_id: string;
   organization_name: string;
@@ -100,6 +105,7 @@ interface MotivationalQuote {
   author: string | null;
   active: boolean;
   sort_order: number;
+  heart_count: number;
 }
 interface LevelRank {
   id: string;
@@ -135,6 +141,7 @@ export default function AdminPage() {
   const [quoteAuthor, setQuoteAuthor] = useState('');
   const [quoteOrder, setQuoteOrder] = useState('0');
   const [quoteActive, setQuoteActive] = useState(true);
+  const [quotePaste, setQuotePaste] = useState('');
   const [editingQuote, setEditingQuote] = useState<MotivationalQuote | null>(null);
   const [rankMinLevel, setRankMinLevel] = useState('800');
   const [rankName, setRankName] = useState('');
@@ -155,6 +162,7 @@ export default function AdminPage() {
   const [resetMustChangePassword, setResetMustChangePassword] = useState(true);
   const [organizationName, setOrganizationName] = useState('');
   const [organizationSlug, setOrganizationSlug] = useState('');
+  const [editingOrganization, setEditingOrganization] = useState<Organization | null>(null);
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState('MEMBER');
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
@@ -301,6 +309,17 @@ export default function AdminPage() {
       });
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-content'] }),
+  });
+  const importPastedQuotes = useMutation({
+    mutationFn: () =>
+      api<{ created: number; failed: number; total: number }>('/admin/quotes/import-text', {
+        method: 'POST',
+        body: JSON.stringify({ text: quotePaste }),
+      }),
+    onSuccess: async () => {
+      setQuotePaste('');
+      await queryClient.invalidateQueries({ queryKey: ['admin-content'] });
+    },
   });
   const importPoints = useMutation({
     mutationFn: async () => {
@@ -672,8 +691,17 @@ export default function AdminPage() {
                   <p className="eyebrow">BULK IMPORT</p>
                   <h2 className="mt-2 text-lg font-black">Import tài khoản học sinh</h2>
                   <p className="text-sm text-[var(--muted)]">
-                    Điền slug lớp cho từng học sinh; để trống nếu học sinh chưa thuộc lớp nào.
+                    File có đủ cột lớp học và yêu cầu đổi mật khẩu lần đầu. Slug lớp được phép để
+                    trống.
                   </p>
+                  <div className="import-column-guide">
+                    <span>
+                      <strong>lop_hoc_slug</strong> Slug lớp học, có thể để trống
+                    </span>
+                    <span>
+                      <strong>doi_mat_khau_lan_dau</strong> Nhập YES hoặc NO
+                    </span>
+                  </div>
                   <a
                     className="template-link"
                     download
@@ -938,77 +966,142 @@ export default function AdminPage() {
                   Tạo lớp học
                 </button>
               </form>
-              <div className="panel overflow-hidden">
-                {organizations.data?.organizations.map((item) => (
-                  <div className="organization-row" key={item.id}>
-                    <div>
-                      <input
-                        aria-label={`Tên tổ chức ${item.name}`}
-                        className="inline-name-input"
-                        defaultValue={item.name}
-                        onBlur={(event) => {
-                          if (event.target.value === item.name) return;
+              <div className="space-y-4">
+                {editingOrganization && (
+                  <form
+                    className="panel p-6"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const form = new FormData(event.currentTarget);
+                      mutation.mutate({
+                        path: `/admin/organizations/${editingOrganization.id}`,
+                        method: 'PATCH',
+                        body: {
+                          name: formText(form, 'name'),
+                          slug: formText(form, 'slug'),
+                          visibility: formText(form, 'visibility', 'PRIVATE'),
+                          status: formText(form, 'status', 'ACTIVE'),
+                          reason: 'Admin sửa thông tin lớp học',
+                        },
+                      });
+                      setEditingOrganization(null);
+                    }}
+                  >
+                    <div className="section-heading">
+                      <div>
+                        <p className="eyebrow">EDIT CLASS</p>
+                        <h2>Sửa lớp học</h2>
+                      </div>
+                      <button
+                        className="button-secondary"
+                        onClick={() => setEditingOrganization(null)}
+                        type="button"
+                      >
+                        Huỷ
+                      </button>
+                    </div>
+                    <div className="form-grid mt-4">
+                      <label className="field">
+                        <span>Tên lớp học</span>
+                        <input defaultValue={editingOrganization.name} name="name" required />
+                      </label>
+                      <label className="field">
+                        <span>Slug lớp học</span>
+                        <input
+                          defaultValue={editingOrganization.slug}
+                          name="slug"
+                          pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Phạm vi hiển thị</span>
+                        <select defaultValue={editingOrganization.visibility} name="visibility">
+                          <option>PUBLIC</option>
+                          <option>CLOSED</option>
+                          <option>PRIVATE</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Trạng thái</span>
+                        <select defaultValue={editingOrganization.status} name="status">
+                          <option>ACTIVE</option>
+                          <option>INACTIVE</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button className="button-primary mt-4" type="submit">
+                      Lưu lớp học
+                    </button>
+                  </form>
+                )}
+                <div className="panel overflow-hidden">
+                  {organizations.data?.organizations.map((item) => (
+                    <div className="organization-row" key={item.id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <p>
+                          @{item.slug} · {item.member_count} thành viên · {item.active_seasons} mùa
+                          active
+                        </p>
+                      </div>
+                      <select
+                        aria-label={`Hiển thị ${item.name}`}
+                        onChange={(e) =>
                           mutation.mutate({
                             path: `/admin/organizations/${item.id}`,
                             method: 'PATCH',
                             body: {
-                              name: event.target.value,
-                              reason: 'Cập nhật tên tổ chức',
+                              visibility: e.target.value,
+                              reason: 'Cập nhật hiển thị tổ chức',
                             },
+                          })
+                        }
+                        value={item.visibility}
+                      >
+                        <option>PUBLIC</option>
+                        <option>CLOSED</option>
+                        <option>PRIVATE</option>
+                      </select>
+                      <select
+                        aria-label={`Trạng thái ${item.name}`}
+                        onChange={(e) =>
+                          mutation.mutate({
+                            path: `/admin/organizations/${item.id}`,
+                            method: 'PATCH',
+                            body: { status: e.target.value, reason: 'Cập nhật trạng thái tổ chức' },
+                          })
+                        }
+                        value={item.status}
+                      >
+                        <option>ACTIVE</option>
+                        <option>INACTIVE</option>
+                      </select>
+                      <button
+                        className="button-secondary"
+                        onClick={() => setEditingOrganization(item)}
+                        type="button"
+                      >
+                        Sửa
+                      </button>
+                      <button
+                        className="button-danger"
+                        disabled={item.status === 'INACTIVE'}
+                        onClick={() => {
+                          if (!window.confirm(`Lưu trữ lớp “${item.name}”?`)) return;
+                          mutation.mutate({
+                            path: `/admin/organizations/${item.id}`,
+                            method: 'DELETE',
+                            body: null,
                           });
                         }}
-                      />
-                      <p>
-                        @{item.slug} · {item.member_count} thành viên · {item.active_seasons} mùa
-                        active
-                      </p>
+                        type="button"
+                      >
+                        {item.status === 'INACTIVE' ? 'Đã lưu trữ' : 'Xoá'}
+                      </button>
                     </div>
-                    <select
-                      aria-label={`Hiển thị ${item.name}`}
-                      onChange={(e) =>
-                        mutation.mutate({
-                          path: `/admin/organizations/${item.id}`,
-                          method: 'PATCH',
-                          body: { visibility: e.target.value, reason: 'Cập nhật hiển thị tổ chức' },
-                        })
-                      }
-                      value={item.visibility}
-                    >
-                      <option>PUBLIC</option>
-                      <option>CLOSED</option>
-                      <option>PRIVATE</option>
-                    </select>
-                    <select
-                      aria-label={`Trạng thái ${item.name}`}
-                      onChange={(e) =>
-                        mutation.mutate({
-                          path: `/admin/organizations/${item.id}`,
-                          method: 'PATCH',
-                          body: { status: e.target.value, reason: 'Cập nhật trạng thái tổ chức' },
-                        })
-                      }
-                      value={item.status}
-                    >
-                      <option>ACTIVE</option>
-                      <option>INACTIVE</option>
-                    </select>
-                    <button
-                      className="button-danger"
-                      disabled={item.status === 'INACTIVE'}
-                      onClick={() => {
-                        if (!window.confirm(`Lưu trữ lớp “${item.name}”?`)) return;
-                        mutation.mutate({
-                          path: `/admin/organizations/${item.id}`,
-                          method: 'DELETE',
-                          body: null,
-                        });
-                      }}
-                      type="button"
-                    >
-                      {item.status === 'INACTIVE' ? 'Đã lưu trữ' : 'Xoá'}
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </section>
           )}
@@ -2018,19 +2111,83 @@ export default function AdminPage() {
                   </button>
                 </form>
                 <div className="panel overflow-hidden">
-                  {rewards.data?.rewards.map((reward) => (
-                    <div className="admin-row reward-admin-row" key={reward.id}>
-                      <div>
-                        <strong>{reward.name}</strong>
-                        <p className="m-0 text-xs text-[var(--muted)]">
-                          {formatNumber(reward.cost, 2)} CC Balance · {reward.stock ?? '∞'} suất
-                        </p>
-                        {reward.cash_value_vnd !== null && (
-                          <p className="cash-reward-value">
-                            Nhận {formatVnd(reward.cash_value_vnd)}
+                  {rewards.data?.rewards
+                    .filter((reward) => reward.cash_value_vnd === null)
+                    .map((reward) => (
+                      <div className="admin-row reward-admin-row" key={reward.id}>
+                        <div>
+                          <strong>{reward.name}</strong>
+                          <p className="m-0 text-xs text-[var(--muted)]">
+                            {formatNumber(reward.cost, 2)} CC Balance · {reward.stock ?? '∞'} suất
                           </p>
-                        )}
+                          {reward.cash_value_vnd !== null && (
+                            <p className="cash-reward-value">
+                              Nhận {formatVnd(reward.cash_value_vnd)}
+                            </p>
+                          )}
+                        </div>
+                        <StatusPill value={reward.active ? 'ACTIVE' : 'INACTIVE'} />
+                        <div className="student-actions">
+                          <button
+                            className="button-secondary"
+                            onClick={() => {
+                              setEditingReward(reward);
+                              setRewardName(reward.name);
+                              setRewardDescription(reward.description);
+                              setRewardCost(reward.cost);
+                              setRewardStock(reward.stock === null ? '' : String(reward.stock));
+                              setRewardImageUrl(reward.image_url ?? '');
+                              setRewardCashValue(
+                                reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd),
+                              );
+                              setRewardActive(reward.active);
+                            }}
+                            type="button"
+                          >
+                            Sửa
+                          </button>
+                          <button
+                            className="button-danger"
+                            disabled={!reward.active}
+                            onClick={() => {
+                              if (!window.confirm(`Lưu trữ phần thưởng “${reward.name}”?`)) return;
+                              mutation.mutate({
+                                path: `/admin/rewards/${reward.id}`,
+                                method: 'DELETE',
+                                body: null,
+                              });
+                            }}
+                            type="button"
+                          >
+                            {reward.active ? 'Xoá' : 'Đã lưu trữ'}
+                          </button>
+                        </div>
                       </div>
+                    ))}
+                </div>
+              </div>
+              <div className="panel cash-exchange-panel overflow-hidden">
+                <div className="management-header">
+                  <div>
+                    <p className="eyebrow">CASH REWARDS</p>
+                    <strong>Bảng quy đổi tiền mặt</strong>
+                  </div>
+                  <span>Sửa từng mức bằng nút Sửa</span>
+                </div>
+                <div className="cash-exchange-table cash-admin-table cash-exchange-header">
+                  <span>CC Balance</span>
+                  <span>Tiền nhận</span>
+                  <span>Trạng thái</span>
+                  <span>Thao tác</span>
+                </div>
+                {rewards.data?.rewards
+                  .filter((reward) => reward.cash_value_vnd !== null)
+                  .map((reward) => (
+                    <div className="cash-exchange-table cash-admin-table" key={reward.id}>
+                      <strong data-label="CC Balance">◈ {formatNumber(reward.cost)}</strong>
+                      <strong className="cash-money" data-label="Tiền nhận">
+                        {formatVnd(reward.cash_value_vnd)}
+                      </strong>
                       <StatusPill value={reward.active ? 'ACTIVE' : 'INACTIVE'} />
                       <div className="student-actions">
                         <button
@@ -2042,9 +2199,7 @@ export default function AdminPage() {
                             setRewardCost(reward.cost);
                             setRewardStock(reward.stock === null ? '' : String(reward.stock));
                             setRewardImageUrl(reward.image_url ?? '');
-                            setRewardCashValue(
-                              reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd),
-                            );
+                            setRewardCashValue(String(reward.cash_value_vnd));
                             setRewardActive(reward.active);
                           }}
                           type="button"
@@ -2054,22 +2209,20 @@ export default function AdminPage() {
                         <button
                           className="button-danger"
                           disabled={!reward.active}
-                          onClick={() => {
-                            if (!window.confirm(`Lưu trữ phần thưởng “${reward.name}”?`)) return;
+                          onClick={() =>
                             mutation.mutate({
                               path: `/admin/rewards/${reward.id}`,
                               method: 'DELETE',
                               body: null,
-                            });
-                          }}
+                            })
+                          }
                           type="button"
                         >
-                          {reward.active ? 'Xoá' : 'Đã lưu trữ'}
+                          {reward.active ? 'Ẩn' : 'Đã ẩn'}
                         </button>
                       </div>
                     </div>
                   ))}
-                </div>
               </div>
               <div className="panel overflow-hidden">
                 <div className="management-header">
@@ -2175,6 +2328,38 @@ export default function AdminPage() {
                   )}
                 </div>
                 <form
+                  className="quote-paste-box"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    importPastedQuotes.mutate();
+                  }}
+                >
+                  <label className="field">
+                    <span>Dán hàng loạt — mỗi câu một dòng</span>
+                    <textarea
+                      onChange={(event) => setQuotePaste(event.target.value)}
+                      placeholder={
+                        'Châm ngôn | Tác giả | Thứ tự | Có\nTrên bước đường thành công không có dấu chân của kẻ lười biếng. | Cầy Code MrTee.vn | 1 | Có\nThiên tài 1% là cảm hứng và 99% là mồ hôi. | Cầy Code MrTee.vn | 2 | Không'
+                      }
+                      required
+                      rows={7}
+                      value={quotePaste}
+                    />
+                  </label>
+                  <button className="button-secondary" disabled={importPastedQuotes.isPending}>
+                    {importPastedQuotes.isPending ? 'Đang nhập…' : 'Nhập danh sách đã dán'}
+                  </button>
+                </form>
+                {importPastedQuotes.error && (
+                  <p className="notice error">{importPastedQuotes.error.message}</p>
+                )}
+                {importPastedQuotes.data && (
+                  <p className="notice success">
+                    Đã nhập {importPastedQuotes.data.created}/{importPastedQuotes.data.total} câu;
+                    lỗi {importPastedQuotes.data.failed}.
+                  </p>
+                )}
+                <form
                   className="quote-import-box"
                   onSubmit={(event) => {
                     event.preventDefault();
@@ -2268,7 +2453,8 @@ export default function AdminPage() {
                       <div>
                         <blockquote>“{quote.content}”</blockquote>
                         <p>
-                          {quote.author || 'Không ghi nguồn'} · thứ tự {quote.sort_order}
+                          {quote.author || 'Không ghi nguồn'} · thứ tự {quote.sort_order} · ♥{' '}
+                          {quote.heart_count}
                         </p>
                       </div>
                       <StatusPill value={quote.active ? 'ACTIVE' : 'INACTIVE'} />

@@ -20,6 +20,13 @@ const listSchema = z.object({
 const updateSchema = z
   .object({
     name: z.string().trim().min(2).max(200).optional(),
+    slug: z
+      .string()
+      .trim()
+      .min(2)
+      .max(100)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .optional(),
     visibility: z.enum(['PUBLIC', 'CLOSED', 'PRIVATE']).optional(),
     timezone: z.string().trim().min(1).max(100).optional(),
     status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
@@ -70,14 +77,16 @@ export class AdminOrganizationsController {
   ) {
     const id = this.uuid(idInput);
     const input = this.parse(updateSchema, body);
-    const organization = await this.database.sql.begin(async (transaction) => {
-      const [before] = await transaction`
-        SELECT name, visibility, timezone, status FROM organizations WHERE id = ${id} FOR UPDATE
+    try {
+      const organization = await this.database.sql.begin(async (transaction) => {
+        const [before] = await transaction`
+        SELECT name, slug, visibility, timezone, status FROM organizations WHERE id = ${id} FOR UPDATE
       `;
-      if (!before) throw new BadRequestException('Không tìm thấy tổ chức');
-      const [updated] = await transaction`
+        if (!before) throw new BadRequestException('Không tìm thấy tổ chức');
+        const [updated] = await transaction`
         UPDATE organizations SET
           name = COALESCE(${input.name ?? null}, name),
+          slug = COALESCE(${input.slug ?? null}, slug),
           visibility = COALESCE(${input.visibility ?? null}::organization_visibility, visibility),
           timezone = COALESCE(${input.timezone ?? null}, timezone),
           status = COALESCE(${input.status ?? null}::organization_status, status),
@@ -85,14 +94,20 @@ export class AdminOrganizationsController {
         WHERE id = ${id}
         RETURNING id, name, slug, visibility, timezone, status, updated_at
       `;
-      await transaction`
+        await transaction`
         INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
         VALUES (${actor.userId}, 'ORGANIZATION_UPDATED', 'organization', ${id},
           ${JSON.stringify(before)}::jsonb, ${JSON.stringify(updated ?? null)}::jsonb, ${input.reason})
       `;
-      return updated;
-    });
-    return { organization };
+        return updated;
+      });
+      return { organization };
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new BadRequestException('Slug lớp học đã tồn tại');
+      }
+      throw error;
+    }
   }
 
   @Delete(':id')

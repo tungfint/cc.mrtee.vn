@@ -77,7 +77,13 @@ interface TopBoard {
 }
 
 interface DashboardContent {
-  quotes: { id: string; content: string; author: string | null; sort_order: number }[];
+  quotes: {
+    id: string;
+    content: string;
+    author: string | null;
+    sort_order: number;
+    heart_count: number;
+  }[];
 }
 
 export default function DashboardPage() {
@@ -86,19 +92,22 @@ export default function DashboardPage() {
   const dashboard = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => api<Dashboard>('/me/dashboard'),
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
   });
   const topLevel = useQuery({
     queryKey: ['dashboard-top', 'CC_LEVEL'],
     queryFn: () => api<TopBoard>('/leaderboards?sort=CC_LEVEL&pageSize=10'),
+    refetchInterval: 15_000,
   });
   const topPoint = useQuery({
     queryKey: ['dashboard-top', 'CC_POINT'],
     queryFn: () => api<TopBoard>('/leaderboards?sort=CC_POINT&pageSize=10'),
+    refetchInterval: 15_000,
   });
   const topStreak = useQuery({
     queryKey: ['dashboard-top', 'STREAK'],
     queryFn: () => api<TopBoard>('/leaderboards?sort=STREAK&pageSize=10'),
+    refetchInterval: 15_000,
   });
   const dashboardContent = useQuery({
     queryKey: ['dashboard-content'],
@@ -309,6 +318,11 @@ export default function DashboardPage() {
               CF {recommendation.min}–{recommendation.max}
             </strong>
             <small>Ưu tiên bài cao hơn vùng quen thuộc một bước</small>
+            <small className="recommendation-explain">
+              Dựa trên mốc cao hơn giữa CC Level ({formatNumber(profile.cc_level)}) và bài khó nhất
+              đã giải ({profile.highest_problem_rating ?? 'chưa có'}); làm tròn theo 100 và mở rộng
+              thêm 200 rating.
+            </small>
           </div>
         </div>
         {data.activity.length === 0 ? (
@@ -381,11 +395,27 @@ function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
     id: 'fallback',
     content: 'Một lát cắt gọn về năng lực, nhịp luyện tập và thành tích hiện tại của bạn.',
     author: null,
+    heart_count: 0,
   };
+  const queryClient = useQueryClient();
   const available = quotes.length ? quotes : [fallback];
   const [index, setIndex] = useState(0);
-  const [loved, setLoved] = useState(false);
-  const [liked, setLiked] = useState(false);
+  const heart = useMutation({
+    mutationFn: (id: string) =>
+      api<{ heartCount: number }>(`/content/quotes/${id}/heart`, { method: 'POST' }),
+    onSuccess: ({ heartCount }, id) => {
+      queryClient.setQueryData<DashboardContent>(['dashboard-content'], (current) =>
+        current
+          ? {
+              ...current,
+              quotes: current.quotes.map((quote) =>
+                quote.id === id ? { ...quote, heart_count: heartCount } : quote,
+              ),
+            }
+          : current,
+      );
+    },
+  });
 
   useEffect(() => {
     if (index >= available.length) setIndex(0);
@@ -394,8 +424,6 @@ function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
     if (available.length < 2) return;
     const timer = window.setInterval(() => {
       setIndex((current) => (current + 1) % available.length);
-      setLoved(false);
-      setLiked(false);
     }, 20_000);
     return () => window.clearInterval(timer);
   }, [available.length]);
@@ -403,9 +431,8 @@ function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
   const quote = available[index] ?? fallback;
   const next = () => {
     setIndex((current) => (current + 1) % available.length);
-    setLoved(false);
-    setLiked(false);
   };
+  const previous = () => setIndex((current) => (current - 1 + available.length) % available.length);
   return (
     <div className="dashboard-quote">
       <div>
@@ -414,22 +441,24 @@ function QuoteRotator({ quotes }: { quotes: DashboardContent['quotes'] }) {
       </div>
       <div className="quote-actions" aria-label="Tương tác với danh ngôn">
         <button
-          aria-label="Yêu thích câu này"
-          className={loved ? 'active' : ''}
-          onClick={() => setLoved((value) => !value)}
-          title="Yêu thích"
+          aria-label="Xem danh ngôn trước"
+          disabled={available.length < 2}
+          onClick={previous}
+          title="Câu trước"
           type="button"
         >
-          ♥
+          ←
         </button>
         <button
-          aria-label="Thích câu này"
-          className={liked ? 'active' : ''}
-          onClick={() => setLiked((value) => !value)}
-          title="Thích"
+          aria-label="Thả tim câu này"
+          className="quote-heart-button"
+          disabled={quote.id === 'fallback' || heart.isPending}
+          onClick={() => heart.mutate(quote.id)}
+          title="Thả tim"
           type="button"
         >
-          👍
+          <span>♥</span>
+          <small>{Math.min(999999, quote.heart_count)}</small>
         </button>
         <button
           aria-label="Xem danh ngôn tiếp theo"

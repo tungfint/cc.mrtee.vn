@@ -35,6 +35,8 @@ export default function OrdersPage() {
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
+  const cashOrders = orders.data?.orders.filter((order) => order.cash_value_vnd !== null) ?? [];
+  const regularOrders = orders.data?.orders.filter((order) => order.cash_value_vnd === null) ?? [];
   return (
     <>
       <PageTitle
@@ -64,7 +66,44 @@ export default function OrdersPage() {
             </div>
             <p>Chỉ các quà tiền đã được Admin xác nhận gửi mới được cộng vào tổng này.</p>
           </section>
-          {orders.data.orders.map((order) => (
+          {cashOrders.length > 0 && (
+            <section className="panel cash-exchange-panel overflow-hidden">
+              <div className="management-header">
+                <strong>Lịch sử đổi tiền</strong>
+                <span>{cashOrders.length} yêu cầu</span>
+              </div>
+              <div className="cash-order-table cash-order-header">
+                <span>Ngày tạo</span>
+                <span>CC Balance</span>
+                <span>Tiền nhận</span>
+                <span>Trạng thái</span>
+                <span></span>
+              </div>
+              {cashOrders.map((order) => (
+                <div className="cash-order-table" key={order.id}>
+                  <span data-label="Ngày tạo">{formatDate(order.created_at)}</span>
+                  <strong data-label="CC Balance">◈ {formatNumber(order.cost_snapshot)}</strong>
+                  <strong className="cash-money" data-label="Tiền nhận">
+                    {formatVnd(order.cash_value_vnd)}
+                  </strong>
+                  <StatusPill value={order.status} />
+                  {['REQUESTED', 'APPROVED'].includes(order.status) ? (
+                    <button
+                      className="button-secondary"
+                      disabled={cancel.isPending}
+                      onClick={() => cancel.mutate(order.id)}
+                      type="button"
+                    >
+                      Hủy
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
+          {regularOrders.map((order) => (
             <article
               className="panel flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"
               key={order.id}

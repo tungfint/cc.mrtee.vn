@@ -521,12 +521,17 @@ export const motivationalQuotes = pgTable(
     author: varchar('author', { length: 160 }),
     active: boolean('active').default(true).notNull(),
     sortOrder: integer('sort_order').default(0).notNull(),
+    heartCount: integer('heart_count').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index('motivational_quotes_active_order_idx').on(table.active, table.sortOrder),
     check('motivational_quotes_sort_order_check', sql`${table.sortOrder} >= 0`),
+    check(
+      'motivational_quotes_heart_count_check',
+      sql`${table.heartCount} >= 0 AND ${table.heartCount} <= 999999`,
+    ),
   ],
 );
 

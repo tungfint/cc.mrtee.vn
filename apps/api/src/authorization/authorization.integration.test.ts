@@ -201,10 +201,13 @@ describe('authorization matrix', () => {
     expect(updatedUser.user).toMatchObject({ status: 'SUSPENDED' });
     const updatedOrganization = await adminOrganizations.update(
       ids.privateOrg!,
-      { visibility: 'CLOSED', reason: 'Visibility fixture' },
+      { slug: 'private-class-edited', visibility: 'CLOSED', reason: 'Visibility fixture' },
       systemAdmin,
     );
-    expect(updatedOrganization.organization).toMatchObject({ visibility: 'CLOSED' });
+    expect(updatedOrganization.organization).toMatchObject({
+      slug: 'private-class-edited',
+      visibility: 'CLOSED',
+    });
     const [{ count } = { count: 0 }] = await connection<{ count: number }[]>`
       SELECT count(*)::int AS count FROM audit_logs
       WHERE action IN ('USER_PROFILE_UPDATED', 'USER_UPDATED', 'ORGANIZATION_UPDATED')
@@ -325,6 +328,40 @@ describe('authorization matrix', () => {
       handle: 'import_cf',
       organization_id: ids.privateOrg,
     });
+  });
+
+  it('imports global students with optional class slug and first-login password flag', async () => {
+    const csv = [
+      'tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau,lop_hoc_slug,doi_mat_khau_lan_dau',
+      'global-class@example.com,Temporary!2026,Global Class,Global Class,,800,privateorg,YES',
+      'global-free@example.com,Temporary!2026,Global Free,Global Free,,800,,NO',
+    ].join('\n');
+    const result = await studentImport.importGlobal(
+      {
+        originalname: 'students.csv',
+        buffer: Buffer.from(`\uFEFF${csv}`, 'utf8'),
+      } as Express.Multer.File,
+      authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+    );
+    expect(result).toMatchObject({ created: 2, failed: 0, total: 2 });
+    const imported = await connection<
+      { email: string; must_change_password: boolean; organization_id: string | null }[]
+    >`
+      SELECT credentials.email, credentials.must_change_password,
+        memberships.organization_id
+      FROM user_credentials AS credentials
+      LEFT JOIN organization_memberships AS memberships ON memberships.user_id = credentials.user_id
+      WHERE credentials.email IN ('global-class@example.com', 'global-free@example.com')
+      ORDER BY credentials.email
+    `;
+    expect(imported).toEqual([
+      {
+        email: 'global-class@example.com',
+        must_change_password: true,
+        organization_id: ids.privateOrg,
+      },
+      { email: 'global-free@example.com', must_change_password: false, organization_id: null },
+    ]);
   });
 
   it('imports signed CC Point commands idempotently for students in the class', async () => {
@@ -554,6 +591,12 @@ describe('authorization matrix', () => {
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
     expect(leaderboard.total).toBe(1);
+    const balanceLeaderboard = await insights.leaderboard({
+      page: '1',
+      pageSize: '2',
+      sort: 'CC_BALANCE',
+    });
+    expect(balanceLeaderboard.entries[0]).toHaveProperty('ccBalance');
     const recognition = await insights.ownRecognition(authUser(ids.member!));
     expect(recognition.profile).toMatchObject({
       id: ids.member!,
@@ -562,6 +605,9 @@ describe('authorization matrix', () => {
     });
     expect(recognition).toHaveProperty('awards');
     expect(recognition).toHaveProperty('rewards');
+    expect(recognition).toHaveProperty('topTags');
+    const publicProfile = await insights.studentProfile(ids.member!);
+    expect(publicProfile.profile).toMatchObject({ id: ids.member!, classes: ['privateOrg'] });
   });
 
   it('archives classes and rewards without deleting historical rows', async () => {
@@ -617,6 +663,27 @@ describe('authorization matrix', () => {
     expect(dashboardContent.ranks).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: createdRank.rank.id })]),
     );
+    const firstHeart = await contentController.heartQuote(String(createdQuote.quote.id));
+    const secondHeart = await contentController.heartQuote(String(createdQuote.quote.id));
+    expect(firstHeart).toEqual({ heartCount: 1 });
+    expect(secondHeart).toEqual({ heartCount: 2 });
+    await connection`
+      UPDATE motivational_quotes SET heart_count = 999999 WHERE id = ${String(createdQuote.quote.id)}
+    `;
+    await expect(contentController.heartQuote(String(createdQuote.quote.id))).resolves.toEqual({
+      heartCount: 999999,
+    });
+    const pasted = await contentController.importPastedQuotes(
+      {
+        text: [
+          'Châm ngôn | Tác giả | Thứ tự | Có',
+          'Trên bước đường thành công không có dấu chân của kẻ lười biếng. | Cầy Code MrTee.vn | 1 | Có',
+          'Thiên tài 1% là cảm hứng và 99% là mồ hôi. | Cầy Code MrTee.vn | 2 | Không',
+        ].join('\n'),
+      },
+      actor,
+    );
+    expect(pasted).toMatchObject({ created: 2, failed: 0, total: 2 });
     await contentController.deleteQuote(String(createdQuote.quote.id), actor);
     await contentController.deleteRank(String(createdRank.rank.id), actor);
   });

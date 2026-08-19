@@ -1,0 +1,2 @@
+ALTER TABLE "motivational_quotes" ADD COLUMN "heart_count" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "motivational_quotes" ADD CONSTRAINT "motivational_quotes_heart_count_check" CHECK ("motivational_quotes"."heart_count" >= 0 AND "motivational_quotes"."heart_count" <= 999999);

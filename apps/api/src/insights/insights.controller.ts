@@ -29,7 +29,7 @@ interface LeaderboardRow {
 const leaderboardQuery = z.object({
   organizationId: z.string().uuid().optional(),
   seasonId: z.string().uuid().optional(),
-  sort: z.enum(['CC_LEVEL', 'CC_POINT', 'STREAK']).default('CC_LEVEL'),
+  sort: z.enum(['CC_LEVEL', 'CC_POINT', 'CC_BALANCE', 'STREAK']).default('CC_LEVEL'),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
   shareKey: z.string().trim().min(20).max(180).optional(),
@@ -148,6 +148,14 @@ export class InsightsController {
     return this.recognition(user.userId);
   }
 
+  @OptionalAuth()
+  @Get('students/:userId/profile')
+  async studentProfile(@Param('userId') userIdInput: string) {
+    const userId = z.string().uuid().safeParse(userIdInput);
+    if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
+    return this.recognition(userId.data);
+  }
+
   @RequireSystemRole('SYSTEM_ADMIN')
   @Get('admin/users/:userId/recognition')
   async adminRecognition(@Param('userId') userIdInput: string) {
@@ -254,6 +262,7 @@ export class InsightsController {
       ORDER BY
         CASE WHEN ${input.sort} = 'CC_LEVEL' THEN COALESCE(skill.cc_level, 800) END DESC,
         CASE WHEN ${input.sort} = 'CC_POINT' THEN COALESCE(points.cc_point, 0) END DESC,
+        CASE WHEN ${input.sort} = 'CC_BALANCE' THEN COALESCE(wallet.balance, 0) END DESC,
         CASE WHEN ${input.sort} = 'STREAK' THEN COALESCE(streak.current_streak, 0) END DESC,
         COALESCE(skill.cc_level, 800) DESC, users.id
       LIMIT ${input.pageSize} OFFSET ${offset}
@@ -369,15 +378,28 @@ export class InsightsController {
   }
 
   private async recognition(userId: string) {
-    const [profiles, streak, awards, rewards] = await Promise.all([
+    const [profiles, streak, awards, rewards, topTags] = await Promise.all([
       this.database.sql`
         SELECT users.id, users.full_name, users.display_name, users.avatar_url,
-          accounts.handle AS codeforces_handle, accounts.current_rating,
-          accounts.rank AS codeforces_rank,
+          accounts.handle AS codeforces_handle, accounts.current_rating, accounts.max_rating,
+          accounts.rank AS codeforces_rank, accounts.max_rank AS codeforces_max_rank,
+          COALESCE(skill.cc_base, 800)::text AS cc_base,
           COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(wallet.balance, 0)::text AS cc_balance,
           COALESCE(points.cc_point, 0)::text AS cc_point,
+          COALESCE(cash.fulfilled_vnd, 0)::text AS cash_received_vnd,
+          level_rank.name AS level_rank_name, level_rank.icon AS level_rank_icon,
+          level_rank.color AS level_rank_color, level_rank.min_level AS level_rank_min_level,
+          ARRAY(SELECT organizations.name
+            FROM organization_memberships AS memberships
+            JOIN organizations ON organizations.id = memberships.organization_id
+            WHERE memberships.user_id = users.id AND memberships.status = 'ACTIVE'
+              AND memberships.role = 'MEMBER'
+            ORDER BY organizations.name) AS classes,
           (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves,
+          (SELECT count(*)::int FROM user_problem_solves
+            WHERE user_id = users.id AND first_solved_at >= now() - interval '30 days')
+            AS solves_last_30_days,
           (SELECT max(rating_snapshot)::int FROM user_problem_solves WHERE user_id = users.id)
             AS highest_problem_rating,
           (SELECT problems.name FROM user_problem_solves AS solves
@@ -393,7 +415,24 @@ export class InsightsController {
           SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
           FROM point_transactions WHERE user_id = users.id
         ) AS points ON true
-        WHERE users.id = ${userId} AND users.status = 'ACTIVE'
+        LEFT JOIN LATERAL (
+          SELECT sum(rewards.cash_value_vnd) AS fulfilled_vnd
+          FROM reward_orders AS orders
+          JOIN rewards ON rewards.id = orders.reward_id
+          WHERE orders.user_id = users.id AND orders.status = 'FULFILLED'
+            AND rewards.cash_value_vnd IS NOT NULL
+        ) AS cash ON true
+        LEFT JOIN LATERAL (
+          SELECT min_level, name, icon, color FROM cc_level_ranks
+          WHERE active = true AND min_level <= COALESCE(skill.cc_level, 800)
+          ORDER BY min_level DESC LIMIT 1
+        ) AS level_rank ON true
+        WHERE users.id = ${userId} AND users.status = 'ACTIVE' AND users.system_role = 'USER'
+          AND NOT EXISTS (
+            SELECT 1 FROM organization_memberships AS staff
+            WHERE staff.user_id = users.id AND staff.status = 'ACTIVE'
+              AND staff.role IN ('TEACHER', 'ORG_ADMIN')
+          )
       `,
       this.streak(userId),
       this.database.sql`
@@ -404,11 +443,23 @@ export class InsightsController {
         ORDER BY awards.awarded_at DESC LIMIT 12
       `,
       this.database.sql`
-        SELECT rewards.name, rewards.description, rewards.image_url, orders.reviewed_at AS earned_at
+        SELECT rewards.name, rewards.description, rewards.image_url, rewards.cash_value_vnd,
+          orders.reviewed_at AS earned_at
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
         ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 12
+      `,
+      this.database.sql`
+        SELECT tags.tag, count(DISTINCT solves.problem_key)::int AS solved_count,
+          max(solves.rating_snapshot)::int AS max_rating
+        FROM user_problem_solves AS solves
+        JOIN cf_problems AS problems ON problems.problem_key = solves.problem_key
+        CROSS JOIN LATERAL unnest(problems.tags) AS tags(tag)
+        WHERE solves.user_id = ${userId}
+        GROUP BY tags.tag
+        ORDER BY solved_count DESC, max_rating DESC NULLS LAST, tags.tag
+        LIMIT 8
       `,
     ]);
     const profile = profiles[0];
@@ -418,6 +469,7 @@ export class InsightsController {
       streak: streak ?? { current_streak: 0, longest_streak: 0 },
       awards,
       rewards,
+      topTags,
       generatedAt: new Date().toISOString(),
     };
   }
