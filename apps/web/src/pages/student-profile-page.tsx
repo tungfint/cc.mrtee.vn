@@ -42,6 +42,7 @@ interface StudentProfile {
   rewards: {
     name: string;
     description: string;
+    image_url: string | null;
     cash_value_vnd: number | null;
     earned_at: string;
   }[];
@@ -76,8 +77,8 @@ export default function StudentProfilePage() {
         <Link className="brand" to="/">
           <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
-            <strong>Cầy Code</strong>
-            <small>MrTee.vn</small>
+            <strong>Cầy Cốt</strong>
+            <small>MrTee.VN</small>
           </span>
         </Link>
         <Link className="button-secondary" to="/leaderboard">
@@ -193,7 +194,15 @@ export default function StudentProfilePage() {
               ))}
               {rewards.map((reward) => (
                 <article key={`${reward.name}-${reward.earned_at}`}>
-                  <span>{reward.cash_value_vnd ? '💵' : '🎁'}</span>
+                  {reward.image_url ? (
+                    <img
+                      className="student-reward-image"
+                      alt={reward.name}
+                      src={reward.image_url}
+                    />
+                  ) : (
+                    <span>{reward.cash_value_vnd ? '💵' : '🎁'}</span>
+                  )}
                   <div>
                     <strong>{reward.name}</strong>
                     <p>

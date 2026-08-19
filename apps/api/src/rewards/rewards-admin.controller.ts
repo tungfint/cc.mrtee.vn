@@ -24,7 +24,9 @@ const rewardImageUrlSchema = z
   .max(2000)
   .refine(
     (value) =>
-      value.startsWith('/api/uploads/rewards/') || z.string().url().safeParse(value).success,
+      value.startsWith('/api/uploads/rewards/') ||
+      value.startsWith('/mascots/') ||
+      z.string().url().safeParse(value).success,
   );
 
 const rewardSchema = z.object({
@@ -35,6 +37,8 @@ const rewardSchema = z.object({
   active: z.boolean().default(true),
   imageUrl: rewardImageUrlSchema.nullable().default(null),
   cashValueVnd: z.coerce.number().int().positive().max(100_000_000).nullable().default(null),
+  category: z.enum(['STANDARD', 'MASCOT']).default('STANDARD'),
+  requiredCcLevel: z.coerce.number().int().min(0).max(10_000).default(0),
 });
 
 @RequireSystemRole('SYSTEM_ADMIN')
@@ -47,7 +51,15 @@ export class RewardsAdminController {
 
   @Get()
   async list() {
-    return { rewards: await this.database.sql`SELECT * FROM rewards ORDER BY created_at DESC` };
+    return {
+      rewards: await this.database.sql`
+        SELECT rewards.*, count(orders.id)::int AS order_count
+        FROM rewards
+        LEFT JOIN reward_orders AS orders ON orders.reward_id = rewards.id
+        GROUP BY rewards.id
+        ORDER BY rewards.created_at DESC
+      `,
+    };
   }
 
   @Get('orders')
@@ -101,6 +113,19 @@ export class RewardsAdminController {
     const reward = await this.database.sql.begin(async (transaction) => {
       const [before] = await transaction`SELECT * FROM rewards WHERE id = ${id.data} FOR UPDATE`;
       if (!before) throw new BadRequestException('Không tìm thấy phần thưởng');
+      const [usage] = await transaction<{ order_count: number }[]>`
+        SELECT count(*)::int AS order_count FROM reward_orders WHERE reward_id = ${id.data}
+      `;
+      if ((usage?.order_count ?? 0) === 0) {
+        await transaction`DELETE FROM rewards WHERE id = ${id.data}`;
+        await transaction`
+          INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, before, after, reason)
+          VALUES (${actor.userId}, 'REWARD_DELETED', 'reward', ${id.data},
+            ${JSON.stringify(before)}::jsonb, null,
+            'Xoá phần thưởng chưa phát sinh yêu cầu đổi quà')
+        `;
+        return { reward: before, deleted: true, archived: false };
+      }
       const [updated] = await transaction`
         UPDATE rewards SET active = false, updated_at = now()
         WHERE id = ${id.data} RETURNING *
@@ -111,9 +136,9 @@ export class RewardsAdminController {
           ${JSON.stringify(before)}::jsonb, ${JSON.stringify(updated ?? null)}::jsonb,
           'Lưu trữ phần thưởng khỏi danh mục')
       `;
-      return updated;
+      return { reward: updated, deleted: false, archived: true };
     });
-    return { reward };
+    return reward;
   }
 
   private persist(id: string | null, input: z.infer<typeof rewardSchema>, actor: AuthUser) {
@@ -127,16 +152,19 @@ export class RewardsAdminController {
               name = ${input.name}, description = ${input.description}, cost = ${input.cost},
               stock = ${input.stock}, active = ${input.active}, image_url = ${input.imageUrl},
               cash_value_vnd = ${input.cashValueVnd},
+              category = ${input.category}, required_cc_level = ${input.requiredCcLevel},
               updated_at = now()
             WHERE id = ${id} RETURNING *
           `
         : await transaction`
             INSERT INTO rewards (
-              name, description, cost, stock, active, image_url, cash_value_vnd
+              name, description, cost, stock, active, image_url, cash_value_vnd,
+              category, required_cc_level
             )
             VALUES (
               ${input.name}, ${input.description}, ${input.cost}, ${input.stock},
-              ${input.active}, ${input.imageUrl}, ${input.cashValueVnd}
+              ${input.active}, ${input.imageUrl}, ${input.cashValueVnd},
+              ${input.category}, ${input.requiredCcLevel}
             ) RETURNING *
           `;
       if (!reward) throw new BadRequestException('Không tìm thấy phần thưởng');

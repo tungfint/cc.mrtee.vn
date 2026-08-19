@@ -57,8 +57,8 @@ export default function PublicLeaderboardPage() {
         <Link className="brand" to="/login">
           <img alt="" className="brand-logo" src="/brand/cay-code-logo.webp" />
           <span>
-            <strong>Cầy Code</strong>
-            <small>MrTee.vn</small>
+            <strong>Cầy Cốt</strong>
+            <small>MrTee.VN</small>
           </span>
         </Link>
         <Link className="button-secondary" to="/login">

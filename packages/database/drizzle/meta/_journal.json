@@ -71,6 +71,13 @@
       "when": 1787143988370,
       "tag": "0009_old_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787166451366,
+      "tag": "0010_friendly_anita_blake",
+      "breakpoints": true
     }
   ]
 }
