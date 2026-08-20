@@ -653,7 +653,14 @@ export class InsightsController {
         FROM point_transactions
         WHERE user_id = ${userId} AND type = 'EARN'
       ), details AS (
-        SELECT history.id, history.type, history.amount::text, history.description,
+        SELECT history.id, history.type, history.amount::text,
+          CASE
+            WHEN history.id = '5511a5bf-d077-4f1d-b0a0-3965a8844162'::uuid
+              THEN 'Điểm demo hành trình S-Admin'
+            WHEN history.type = 'REDEEM' AND rewards.name IS NOT NULL
+              THEN 'Đổi thưởng: ' || rewards.name
+            ELSE history.description
+          END AS description,
           history.event_at, history.created_at, history.source_submission_id::text,
           history.source_reward_order_id::text, history.problem_rating_snapshot,
           submissions.programming_language,

@@ -41,6 +41,43 @@ async function main() {
     if (emailOwner && emailOwner.user_id !== USER_ID) {
       throw new Error(`Email ${DEMO_EMAIL} is already assigned to another account`);
     }
+    if (emailOwner?.user_id === USER_ID) {
+      const [existing] = await transaction<
+        {
+          cc_level: string;
+          cc_point: string;
+          cc_balance: string;
+          solves: number;
+          reward_orders: number;
+        }[]
+      >`
+        SELECT COALESCE(skill.cc_level, 800)::text AS cc_level,
+          COALESCE(points.cc_point, 0)::text AS cc_point,
+          COALESCE(wallet.balance, 0)::text AS cc_balance,
+          (SELECT count(*)::int FROM user_problem_solves WHERE user_id = ${USER_ID}) AS solves,
+          (SELECT count(*)::int FROM reward_orders WHERE user_id = ${USER_ID}) AS reward_orders
+        FROM users
+        LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
+        LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
+        LEFT JOIN LATERAL (
+          SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+          FROM point_transactions WHERE user_id = users.id
+        ) AS points ON true
+        WHERE users.id = ${USER_ID}
+      `;
+      return {
+        userId: USER_ID,
+        email: DEMO_EMAIL,
+        solves: existing?.solves ?? 0,
+        ccBase: 800,
+        ccLevel: Number(existing?.cc_level ?? 800),
+        ccPoint: Number(existing?.cc_point ?? 0),
+        ccBalance: Number(existing?.cc_balance ?? 0),
+        streak: existing?.solves ?? 0,
+        rewardOrders: existing?.reward_orders ?? 0,
+        existing: true,
+      };
+    }
 
     await transaction`
       INSERT INTO users (
@@ -72,18 +109,6 @@ async function main() {
         updated_at = now()
     `;
 
-    await transaction`DELETE FROM auth_sessions WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM point_transactions WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM streak_rescues WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM user_achievements WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM reward_orders WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM season_awards WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM season_user_snapshots WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM season_user_totals WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM user_problem_solves WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM cf_submissions WHERE user_id = ${USER_ID}`;
-    await transaction`DELETE FROM codeforces_accounts WHERE user_id = ${USER_ID}`;
-
     await transaction`
       INSERT INTO rewards (
         id, name, description, cost, stock, active, image_url, category,
@@ -110,21 +135,6 @@ async function main() {
         required_cc_level = EXCLUDED.required_cc_level,
         requires_approval = EXCLUDED.requires_approval,
         updated_at = now()
-    `;
-    await transaction`
-      UPDATE point_transactions SET description = CASE id
-        WHEN '5511a5bf-d077-4f1d-b0a0-3965a8844162'::uuid
-          THEN 'Điểm demo hành trình S-Admin'
-        WHEN '689e2b19-b311-4631-9b98-73e6e44f5798'::uuid
-          THEN 'Đổi Linh vật Cáo Hồng Công Nghệ'
-        WHEN 'fe7462b6-781c-464b-9193-28e76d1e26ba'::uuid
-          THEN 'Đổi Hộp quà Cầy Cốt Bí ẩn'
-        ELSE description END
-      WHERE id IN (
-        '5511a5bf-d077-4f1d-b0a0-3965a8844162'::uuid,
-        '689e2b19-b311-4631-9b98-73e6e44f5798'::uuid,
-        'fe7462b6-781c-464b-9193-28e76d1e26ba'::uuid
-      )
     `;
     await transaction`
       UPDATE reward_orders
