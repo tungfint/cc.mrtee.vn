@@ -580,11 +580,12 @@ textarea:focus {
   justify-content: space-between;
   overflow: hidden;
   padding: clamp(32px, 5vw, 72px);
-  background: #9d174d;
+  background: #172033;
   background-image:
-    radial-gradient(circle at 20% 75%, rgba(251, 207, 232, 0.38), transparent 32%),
-    radial-gradient(circle at 82% 18%, rgba(244, 114, 182, 0.34), transparent 30%),
-    linear-gradient(135deg, #831843 0%, #be185d 48%, #ec4899 100%);
+    radial-gradient(circle at 18% 78%, rgba(125, 211, 252, 0.12), transparent 34%),
+    radial-gradient(circle at 82% 16%, rgba(196, 181, 253, 0.14), transparent 31%),
+    linear-gradient(135deg, #101827 0%, #1e293b 54%, #3b2940 100%);
+  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.06);
 }
 .login-form-wrap {
   display: grid;
