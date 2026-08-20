@@ -466,9 +466,9 @@ Mô phỏng với `CC_Base = 800`:
 |---|---:|
 | Bài 800 đầu tiên | +1.79 |
 | Bài 900 đầu tiên | +2.08 |
-| Bài 800 thứ 10 | +0.55 |
-| Bài 800 thứ 40 | +0.18 |
-| Bài 800 thứ 100 | +0.08 |
+| Bài 800 tiếp theo sau khi đã có 10 bài | +0.55 |
+| Bài 800 tiếp theo sau khi đã có 40 bài | +0.18 |
+| Bài 800 tiếp theo sau khi đã có 100 bài | +0.08 |
 
 Mặc định:
 
