@@ -656,8 +656,10 @@ export default function AdminPage() {
     (['points', 'sync'].includes(tab) || (!isSystemAdmin && ['members', 'audit'].includes(tab)));
   const globalStudents =
     users.data?.users.filter((item) => {
-      if (item.system_role !== 'USER') return false;
-      if (item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))) {
+      if (
+        item.system_role !== 'SYSTEM_ADMIN' &&
+        item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))
+      ) {
         return false;
       }
       const memberClasses = item.memberships.filter(({ role }) => role === 'MEMBER');
@@ -687,8 +689,8 @@ export default function AdminPage() {
     }) ?? [];
   const selectableAccountStudents = accountRows.filter(
     (item) =>
-      item.system_role === 'USER' &&
-      !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role)) &&
+      (item.system_role === 'SYSTEM_ADMIN' ||
+        !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))) &&
       Boolean(item.codeforces_handle) &&
       item.verification_status === 'UNVERIFIED',
   );
@@ -1241,7 +1243,7 @@ export default function AdminPage() {
                 ) : (
                   accountRows.map((item) => {
                     const isStudent =
-                      item.system_role === 'USER' &&
+                      item.system_role === 'SYSTEM_ADMIN' ||
                       !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
                     const canVerify =
                       isStudent &&

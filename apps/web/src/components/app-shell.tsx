@@ -34,7 +34,7 @@ export function AppShell({ user }: { user: SessionUser }) {
     profile.data?.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
   const accountRoleLabel =
     user.systemRole === 'SYSTEM_ADMIN'
-      ? 'System admin'
+      ? 'System Admin · Học sinh'
       : profile.data?.memberships.some(({ role }) => role === 'ORG_ADMIN')
         ? 'Quản trị lớp học'
         : profile.data?.memberships.some(({ role }) => role === 'TEACHER')
@@ -79,14 +79,12 @@ export function AppShell({ user }: { user: SessionUser }) {
               {link.label}
             </NavLink>
           ))}
-          {user.systemRole === 'USER' && (
-            <NavLink
-              className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              to={`/students/${user.userId}`}
-            >
-              <span aria-hidden>◎</span>Hồ sơ học sinh
-            </NavLink>
-          )}
+          <NavLink
+            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+            to={`/students/${user.userId}`}
+          >
+            <span aria-hidden>◎</span>Hồ sơ học sinh
+          </NavLink>
           {canAdmin && (
             <NavLink
               className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}

@@ -678,10 +678,10 @@ describe('authorization matrix', () => {
     });
     expect(dashboard.streak).toMatchObject({ longest_streak: 0, current_streak: 0 });
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
-    expect(leaderboard.entries).toHaveLength(1);
+    expect(leaderboard.entries).toHaveLength(2);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
-    expect(leaderboard.total).toBe(1);
+    expect(leaderboard.total).toBe(2);
     const balanceLeaderboard = await insights.leaderboard({
       page: '1',
       pageSize: '2',
@@ -704,6 +704,12 @@ describe('authorization matrix', () => {
     expect(publicProfile.pointHistory).toEqual([]);
     const ownerProfile = await insights.studentProfile(ids.member!, authUser(ids.member!));
     expect(ownerProfile).toHaveProperty('pointHistory');
+    const adminProfile = await insights.studentProfile(
+      ids.systemAdmin!,
+      authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+    );
+    expect(adminProfile.profile).toMatchObject({ id: ids.systemAdmin! });
+    expect(adminProfile).toHaveProperty('pointHistory');
   });
 
   it('requires the configured CC Level before redeeming a mascot', async () => {

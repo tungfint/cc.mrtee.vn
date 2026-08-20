@@ -100,6 +100,22 @@ export class RewardEngineService {
       `;
       if (!policy) throw new Error('Scoring policy is unavailable');
 
+      const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
+        SELECT problem_key, rating_snapshot FROM user_problem_solves
+        WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
+      `;
+      const nextLevel = calculateCcLevel(
+        solves.map((solve) => ({
+          problemKey: solve.problem_key,
+          rating: Number(solve.rating_snapshot),
+        })),
+        {
+          decay: Number(policy.level_decay),
+          denominator: Number(policy.level_denominator),
+          base: Number(state.cc_base),
+        },
+      );
+
       let amount = 0;
       if (rewardEligible && canonical.problem_rating_observed !== null) {
         amount = calculateReward(
@@ -133,11 +149,15 @@ export class RewardEngineService {
           INSERT INTO point_transactions (
             user_id, type, amount, season_id, source_submission_id, idempotency_key,
             cc_level_before, problem_rating_snapshot, scoring_policy_version,
-            affects_wallet, affects_season, event_at
+            affects_wallet, affects_season, metadata, event_at
           ) VALUES (
             ${userId}, 'EARN', ${amount}, ${season?.id ?? null}, ${canonical.cf_submission_id},
             ${`earn:submission:${canonical.cf_submission_id}`}, ${state.cc_level},
             ${canonical.problem_rating_observed}, ${policy.version}, true, ${Boolean(season)},
+            ${JSON.stringify({
+              ccLevelAfter: nextLevel.level,
+              ccLevelDelta: nextLevel.level - Number(state.cc_level),
+            })}::jsonb,
             ${solvedAt.toISOString()}
           )
         `;
@@ -163,21 +183,6 @@ export class RewardEngineService {
         }
       }
 
-      const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
-        SELECT problem_key, rating_snapshot FROM user_problem_solves
-        WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
-      `;
-      const nextLevel = calculateCcLevel(
-        solves.map((solve) => ({
-          problemKey: solve.problem_key,
-          rating: Number(solve.rating_snapshot),
-        })),
-        {
-          decay: Number(policy.level_decay),
-          denominator: Number(policy.level_denominator),
-          base: Number(state.cc_base),
-        },
-      );
       await transaction`
         UPDATE user_skill_state
         SET cc_calculated = ${nextLevel.calculated}, cc_level = ${nextLevel.level}, updated_at = now()

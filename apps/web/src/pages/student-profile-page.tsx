@@ -82,6 +82,15 @@ interface StudentProfile {
     amount: string;
     description: string | null;
     event_at: string;
+    source_submission_id: string | null;
+    problem_rating_snapshot: number | null;
+    programming_language: string | null;
+    problem_key: string | null;
+    contest_id: string | null;
+    problem_index: string | null;
+    problem_name: string | null;
+    cc_level_before: string | null;
+    cc_level_after: string | null;
     cc_point_delta: string;
     cc_balance_delta: string;
     cc_point_after: string;
@@ -423,7 +432,10 @@ export default function StudentProfilePage() {
               <div>
                 <p className="eyebrow">LỊCH SỬ ĐIỂM</p>
                 <h2>Biến động CC Point và CC Balance</h2>
-                <p>Mỗi thay đổi được lưu thành một giao dịch riêng, không sửa đè lịch sử.</p>
+                <p>
+                  Bài first-solve có rating có thể tăng CC Level; bài đủ điều kiện thưởng sẽ cộng
+                  đồng thời CC Point và CC Balance. Bài unrated chỉ ghi nhận hoạt động/Streak.
+                </p>
               </div>
               <strong>{pointHistory.length} giao dịch gần nhất</strong>
             </div>
@@ -431,16 +443,65 @@ export default function StudentProfilePage() {
               <div className="point-history-table">
                 <div className="point-history-row header">
                   <span>Thời gian</span>
-                  <span>Hoạt động</span>
+                  <span>Bài giải / hoạt động</span>
+                  <span>CC Level</span>
                   <span>CC Point</span>
                   <span>CC Balance</span>
                 </div>
                 {pointHistory.map((transaction) => (
                   <div className="point-history-row" key={transaction.id}>
                     <time>{formatDate(transaction.event_at)}</time>
+                    <span className="point-history-activity">
+                      {transaction.problem_name ? (
+                        <a
+                          href={codeforcesSubmissionUrl(transaction)}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <strong>
+                            {transaction.problem_index ? `${transaction.problem_index}. ` : ''}
+                            {transaction.problem_name}
+                          </strong>
+                          <small>Mở bài nộp trên Codeforces ↗</small>
+                        </a>
+                      ) : (
+                        <>
+                          <strong>{pointTransactionLabel(transaction.type)}</strong>
+                          <small>{transaction.description ?? 'Thay đổi điểm trong hệ thống'}</small>
+                        </>
+                      )}
+                      {transaction.problem_name && (
+                        <small>
+                          Rating {transaction.problem_rating_snapshot ?? 'Unrated'}
+                          {transaction.programming_language
+                            ? ` · ${transaction.programming_language}`
+                            : ''}
+                          {transaction.source_submission_id
+                            ? ` · Submission #${transaction.source_submission_id}`
+                            : ''}
+                        </small>
+                      )}
+                    </span>
                     <span>
-                      <strong>{pointTransactionLabel(transaction.type)}</strong>
-                      <small>{transaction.description ?? 'Thay đổi điểm trong hệ thống'}</small>
+                      {transaction.cc_level_before && transaction.cc_level_after ? (
+                        <>
+                          <b>
+                            {formatNumber(transaction.cc_level_before, 2)} →{' '}
+                            {formatNumber(transaction.cc_level_after, 2)}
+                          </b>
+                          <small>
+                            Thay đổi:{' '}
+                            {signedPoint(
+                              String(
+                                Number(transaction.cc_level_after) -
+                                  Number(transaction.cc_level_before),
+                              ),
+                            )}
+                          </small>
+                        </>
+                      ) : (
+                        <b>—</b>
+                      )}
                     </span>
                     <span>
                       <b
@@ -476,6 +537,16 @@ export default function StudentProfilePage() {
       </section>
     </main>
   );
+}
+
+function codeforcesSubmissionUrl(transaction: StudentProfile['pointHistory'][number]) {
+  if (transaction.contest_id && transaction.source_submission_id) {
+    return `https://codeforces.com/contest/${transaction.contest_id}/submission/${transaction.source_submission_id}`;
+  }
+  if (transaction.contest_id && transaction.problem_index) {
+    return `https://codeforces.com/problemset/problem/${transaction.contest_id}/${transaction.problem_index}`;
+  }
+  return 'https://codeforces.com/problemset';
 }
 
 function signedPoint(value: string) {

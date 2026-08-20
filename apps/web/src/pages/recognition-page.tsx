@@ -71,15 +71,18 @@ export default function RecognitionPage() {
     () =>
       students.data?.users.filter(
         (student) =>
-          student.system_role === 'USER' &&
           student.status === 'ACTIVE' &&
-          !student.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role)),
+          (student.system_role === 'SYSTEM_ADMIN' ||
+            !student.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))),
       ) ?? [],
     [students.data],
   );
   useEffect(() => {
-    if (isAdmin && !studentId && studentOptions[0]) setStudentId(studentOptions[0].id);
-  }, [isAdmin, studentId, studentOptions]);
+    if (isAdmin && !studentId) {
+      const ownProfile = studentOptions.find(({ id }) => id === session.data?.user.userId);
+      setStudentId(ownProfile?.id ?? studentOptions[0]?.id ?? '');
+    }
+  }, [isAdmin, session.data?.user.userId, studentId, studentOptions]);
   const recognition = useQuery({
     queryKey: ['recognition', isAdmin ? studentId : 'me'],
     queryFn: () =>
@@ -410,281 +413,477 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   const accent = /^#[0-9a-f]{6}$/i.test(data.profile.level_rank_color ?? '')
     ? (data.profile.level_rank_color ?? '#ec4899')
     : '#ec4899';
-  const gradient = context.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, '#fff7fc');
-  gradient.addColorStop(0.42, mixHex(accent, '#ffffff', 0.84));
-  gradient.addColorStop(0.72, '#e9fbff');
-  gradient.addColorStop(1, mixHex(accent, '#fdf2f8', 0.72));
-  context.fillStyle = gradient;
+  const cyan = '#06b6d4';
+  const violet = '#8b5cf6';
+  const ink = '#172033';
+  const muted = '#64748b';
+  context.clearRect(0, 0, width, height);
+  const background = context.createLinearGradient(0, 0, width, height);
+  background.addColorStop(0, '#fff9fd');
+  background.addColorStop(0.38, mixHex(accent, '#ffffff', 0.87));
+  background.addColorStop(0.7, '#ecfeff');
+  background.addColorStop(1, '#f5f3ff');
+  context.fillStyle = background;
   context.fillRect(0, 0, width, height);
 
-  context.globalAlpha = 0.48;
-  context.fillStyle = mixHex(accent, '#ffffff', 0.66);
-  context.beginPath();
-  context.arc(1060, 120, 310, 0, Math.PI * 2);
-  context.fill();
-  context.beginPath();
-  context.arc(40, 1360, 330, 0, Math.PI * 2);
-  context.fill();
-  context.globalAlpha = 1;
+  drawGlow(context, 1040, 120, 420, accent, 0.22);
+  drawGlow(context, 80, 1410, 460, cyan, 0.18);
+  drawGlow(context, 630, 690, 330, violet, 0.08);
+  drawTechPattern(context, width, height, accent, cyan);
+  roundRect(context, 38, 34, 1124, 1432, 46, 'rgba(255,255,255,0.82)', '#ffffff');
+  roundRect(
+    context,
+    54,
+    50,
+    1092,
+    1400,
+    38,
+    'rgba(255,255,255,0.5)',
+    mixHex(accent, '#ffffff', 0.45),
+  );
 
+  roundRect(context, 78, 72, 350, 54, 27, mixHex(accent, '#ffffff', 0.86));
+  context.fillStyle = accent;
+  context.font = `900 20px ${VI_FONT}`;
+  context.fillText('✦  CẦY CỐT · MRTEE.VN', 106, 107);
+  context.fillStyle = muted;
+  context.font = `700 15px ${VI_FONT}`;
+  context.textAlign = 'right';
+  context.fillText('ACHIEVEMENT CARD  /  01', 1110, 105);
+  context.textAlign = 'start';
+
+  const rankGradient = context.createLinearGradient(78, 148, 1122, 432);
+  rankGradient.addColorStop(0, mixHex(accent, '#ffffff', 0.9));
+  rankGradient.addColorStop(0.56, '#ffffff');
+  rankGradient.addColorStop(1, '#ecfeff');
+  roundRect(context, 78, 148, 1044, 284, 34, rankGradient, mixHex(accent, '#ffffff', 0.45));
+
+  const portraitSource = sameOriginAsset(data.profile.avatar_url) ?? '/brand/cay-code-logo.webp';
+  const portrait = await loadImage(portraitSource).catch(() =>
+    loadImage('/brand/cay-code-logo.webp').catch(() => null),
+  );
   context.save();
-  context.globalAlpha = 0.13;
+  context.shadowColor = mixHex(accent, '#000000', 0.18);
+  context.shadowBlur = 34;
+  context.fillStyle = '#ffffff';
+  context.beginPath();
+  context.arc(248, 290, 116, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+  context.strokeStyle = accent;
+  context.lineWidth = 9;
+  context.beginPath();
+  context.arc(248, 290, 105, 0, Math.PI * 2);
+  context.stroke();
+  context.strokeStyle = cyan;
+  context.lineWidth = 3;
+  context.setLineDash([12, 12]);
+  context.beginPath();
+  context.arc(248, 290, 124, 0, Math.PI * 2);
+  context.stroke();
+  context.setLineDash([]);
+  if (portrait) {
+    context.save();
+    context.beginPath();
+    context.arc(248, 290, 92, 0, Math.PI * 2);
+    context.clip();
+    drawImageCover(context, portrait, 156, 198, 184, 184);
+    context.restore();
+  }
+
+  context.fillStyle = accent;
+  context.font = `900 18px ${VI_FONT}`;
+  context.fillText('VINH DANH HÀNH TRÌNH CẦY CỐT', 410, 194);
+  context.fillStyle = ink;
+  context.font = `950 58px ${VI_FONT}`;
+  fitText(context, data.profile.display_name, 410, 260, 650, 58);
+  context.fillStyle = muted;
+  context.font = `650 21px ${VI_FONT}`;
+  fitText(
+    context,
+    data.profile.codeforces_handle
+      ? `@${data.profile.codeforces_handle}  ·  ${data.profile.codeforces_rank ?? 'Unrated'}  ·  ${data.profile.classes.join(' · ') || 'Tự do'}`
+      : `${data.profile.full_name}  ·  ${data.profile.classes.join(' · ') || 'Tự do'}`,
+    410,
+    304,
+    650,
+    21,
+  );
+  roundRect(context, 410, 334, 410, 58, 29, accent);
+  context.fillStyle = '#ffffff';
+  context.font = `900 23px ${VI_FONT}`;
+  context.fillText(
+    `${data.profile.level_rank_icon ?? '✦'}  ${data.profile.level_rank_name ?? 'KHỞI ĐẦU'}`,
+    438,
+    371,
+  );
+  context.fillStyle = accent;
+  context.font = `950 82px ${VI_FONT}`;
+  context.textAlign = 'right';
+  context.fillText(formatNumber(data.profile.cc_level, 2), 1070, 375);
+  context.fillStyle = muted;
+  context.font = `800 15px ${VI_FONT}`;
+  context.fillText('CC LEVEL', 1070, 401);
+  context.textAlign = 'start';
+
+  const stats = [
+    ['◆', 'CC POINT', formatNumber(data.profile.cc_point, 2), accent],
+    ['◈', 'CC BALANCE', formatNumber(data.profile.cc_balance, 2), violet],
+    ['🔥', 'STREAK', `${data.streak.current_streak} ngày`, '#f97316'],
+    ['✓', 'BÀI ĐÃ GIẢI', `${data.profile.total_solves}`, cyan],
+  ];
+  stats.forEach(([icon, label, value, color], index) => {
+    const x = 78 + index * 267;
+    drawMetricCard(
+      context,
+      x,
+      462,
+      243,
+      132,
+      icon ?? '✦',
+      label ?? '',
+      value ?? '',
+      color ?? accent,
+    );
+  });
+
+  roundRect(context, 78, 624, 1044, 142, 28, '#172033');
+  const facts = [
+    [
+      'BÀI KHÓ NHẤT',
+      data.profile.highest_problem_name ?? 'Đang chờ',
+      `${data.profile.highest_problem_rating ?? '—'} rating`,
+    ],
+    [
+      'CODEFORCES MAX',
+      `${data.profile.max_rating ?? 'Unrated'}`,
+      data.profile.codeforces_max_rank ?? 'Chưa xếp hạng',
+    ],
+    [
+      '30 NGÀY GẦN NHẤT',
+      `${data.profile.solves_last_30_days} bài`,
+      `Streak dài nhất ${data.streak.longest_streak} ngày`,
+    ],
+    ['QUÀ TIỀN ĐÃ NHẬN', formatVnd(data.profile.cash_received_vnd), 'Thành quả đã quy đổi'],
+  ];
+  facts.forEach(([label, value, note], index) => {
+    const x = 104 + index * 255;
+    if (index) {
+      context.strokeStyle = 'rgba(255,255,255,0.15)';
+      context.beginPath();
+      context.moveTo(x - 20, 650);
+      context.lineTo(x - 20, 740);
+      context.stroke();
+    }
+    context.fillStyle = index === 0 ? '#f9a8d4' : '#67e8f9';
+    context.font = `850 13px ${VI_FONT}`;
+    context.fillText(label ?? '', x, 658);
+    context.fillStyle = '#ffffff';
+    context.font = `900 22px ${VI_FONT}`;
+    fitText(context, value ?? '', x, 699, 220, 22);
+    context.fillStyle = '#a8b4c7';
+    context.font = `650 13px ${VI_FONT}`;
+    fitText(context, note ?? '', x, 728, 220, 13);
+  });
+
+  context.fillStyle = muted;
+  context.font = `850 14px ${VI_FONT}`;
+  context.fillText('VÙNG NĂNG LỰC NỔI BẬT', 82, 808);
+  drawTagCloud(context, data.topTags.slice(0, 6), 82, 828, accent, cyan);
+
+  drawAchievementPanel(context, 78, 890, 502, 332, data.awards, accent);
+  await drawRewardPanel(context, 604, 890, 518, 332, data.rewards, violet);
+
+  const quote = data.quote?.content ?? 'Mỗi bài toán hôm nay là một bước tiến ngày mai.';
+  const author = data.quote?.author ?? 'Cầy Cốt MrTee.VN';
+  const quoteGradient = context.createLinearGradient(78, 1250, 1122, 1390);
+  quoteGradient.addColorStop(0, mixHex(accent, '#ffffff', 0.87));
+  quoteGradient.addColorStop(1, '#ecfeff');
+  roundRect(context, 78, 1250, 1044, 132, 30, quoteGradient, '#ffffff');
+  context.fillStyle = accent;
+  context.font = `950 56px ${VI_FONT}`;
+  context.fillText('“', 104, 1314);
+  context.fillStyle = ink;
+  context.font = `800 20px ${VI_FONT}`;
+  drawWrappedText(context, quote, 158, 1290, 900, 30, 2);
+  context.fillStyle = muted;
+  context.font = `700 14px ${VI_FONT}`;
+  context.textAlign = 'right';
+  context.fillText(`— ${author}`, 1080, 1355);
+  context.textAlign = 'start';
+
+  context.fillStyle = accent;
+  context.beginPath();
+  context.arc(92, 1415, 6, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = muted;
+  context.font = `700 14px ${VI_FONT}`;
+  context.fillText('Mỗi Accepted là một dấu mốc có thể chứng minh.', 112, 1420);
+  context.textAlign = 'right';
+  context.fillText(
+    new Intl.DateTimeFormat('vi-VN', { dateStyle: 'long' }).format(new Date(data.generatedAt)),
+    1108,
+    1420,
+  );
+  context.textAlign = 'start';
+}
+
+function drawGlow(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  color: string,
+  opacity: number,
+) {
+  const glow = context.createRadialGradient(x, y, 0, x, y, radius);
+  glow.addColorStop(
+    0,
+    `${color}${Math.round(opacity * 255)
+      .toString(16)
+      .padStart(2, '0')}`,
+  );
+  glow.addColorStop(1, `${color}00`);
+  context.fillStyle = glow;
+  context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+}
+
+function drawTechPattern(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  accent: string,
+  cyan: string,
+) {
+  context.save();
+  context.globalAlpha = 0.11;
   context.strokeStyle = accent;
   context.lineWidth = 1;
-  for (let x = 0; x <= width; x += 48) {
+  for (let x = 0; x <= width; x += 52) {
     context.beginPath();
     context.moveTo(x, 0);
     context.lineTo(x, height);
     context.stroke();
   }
-  for (let y = 0; y <= height; y += 48) {
+  for (let y = 0; y <= height; y += 52) {
     context.beginPath();
     context.moveTo(0, y);
     context.lineTo(width, y);
     context.stroke();
   }
-  context.globalAlpha = 0.42;
-  context.lineWidth = 5;
-  const circuitPaths: Array<[number, number, number, number]> = [
-    [40, 340, 290, 340],
-    [910, 760, 1160, 760],
-    [75, 1325, 330, 1325],
+  context.globalAlpha = 0.5;
+  context.strokeStyle = cyan;
+  context.lineWidth = 4;
+  const circuits: Array<[number, number, number]> = [
+    [20, 180, 180],
+    [990, 520, 190],
+    [20, 1180, 165],
   ];
-  for (const [startX, startY, endX, endY] of circuitPaths) {
+  for (const [x, y, dx] of circuits) {
     context.beginPath();
-    context.moveTo(startX, startY);
-    context.lineTo(endX, startY);
-    context.lineTo(endX, endY);
+    context.moveTo(x, y);
+    context.lineTo(x + dx, y);
+    context.lineTo(x + dx + 34, y + 34);
     context.stroke();
-    context.fillStyle = accent;
-    context.beginPath();
-    context.arc(endX, endY, 9, 0, Math.PI * 2);
-    context.fill();
   }
   context.restore();
+}
 
+function drawMetricCard(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  icon: string,
+  label: string,
+  value: string,
+  color: string,
+) {
   context.save();
-  context.globalAlpha = 0.12;
-  context.fillStyle = accent;
-  context.font = `900 260px ${VI_FONT}`;
-  context.textAlign = 'center';
-  context.fillText(data.profile.level_rank_icon ?? '✦', 940, 360);
+  context.shadowColor = 'rgba(31, 41, 55, 0.08)';
+  context.shadowBlur = 18;
+  context.shadowOffsetY = 7;
+  roundRect(context, x, y, width, height, 24, '#ffffff');
   context.restore();
-
-  roundRect(
-    context,
-    56,
-    52,
-    1088,
-    1396,
-    40,
-    'rgba(255, 255, 255, 0.94)',
-    mixHex(accent, '#ffffff', 0.38),
-  );
-  const portraitSource = sameOriginAsset(data.profile.avatar_url) ?? '/brand/cay-code-logo.webp';
-  const portrait = await loadImage(portraitSource).catch(() =>
-    loadImage('/brand/cay-code-logo.webp').catch(() => null),
-  );
-  if (portrait) {
-    context.save();
-    context.beginPath();
-    context.arc(600, 190, 86, 0, Math.PI * 2);
-    context.clip();
-    context.drawImage(portrait, 514, 104, 172, 172);
-    context.restore();
-  }
-
-  centerText(context, 'CẦY CỐT · MRTEE.VN', 600, 310, `700 26px ${VI_FONT}`, accent);
-  centerText(context, 'VINH DANH CÁ NHÂN', 600, 365, `900 48px ${VI_FONT}`, '#172033');
-  centerText(context, data.profile.display_name, 600, 445, `900 64px ${VI_FONT}`, '#5b1646');
-  centerText(
-    context,
-    data.profile.codeforces_handle
-      ? `@${data.profile.codeforces_handle} · ${data.profile.codeforces_rank ?? 'Unrated'}`
-      : data.profile.full_name,
-    600,
-    492,
-    `600 24px ${VI_FONT}`,
-    '#64748b',
-  );
-
-  centerText(
-    context,
-    `${data.profile.level_rank_icon ?? '✦'}  ${data.profile.level_rank_name ?? 'KHỞI ĐẦU'}`,
-    600,
-    535,
-    `800 24px ${VI_FONT}`,
-    accent,
-  );
-  const stats = [
-    ['CC LEVEL', formatNumber(data.profile.cc_level, 2)],
-    ['CC POINT', formatNumber(data.profile.cc_point, 2)],
-    ['STREAK', `${data.streak.current_streak} ngày`],
-    ['CC BALANCE', formatNumber(data.profile.cc_balance, 2)],
-    ['BÀI ĐÃ GIẢI', `${data.profile.total_solves}`],
-  ];
-  stats.forEach(([label, value], index) => {
-    const x = 84 + index * 206;
-    roundRect(
-      context,
-      x,
-      570,
-      190,
-      142,
-      22,
-      'rgba(255, 255, 255, 0.9)',
-      mixHex(accent, '#ffffff', 0.52),
-    );
-    context.fillStyle = '#64748b';
-    context.font = `700 17px ${VI_FONT}`;
-    context.fillText(label ?? '', x + 22, 610);
-    context.fillStyle = index === 1 ? accent : '#172033';
-    context.font = `900 28px ${VI_FONT}`;
-    context.fillText(value ?? '', x + 22, 668);
-  });
-
-  roundRect(
-    context,
-    84,
-    752,
-    1032,
-    112,
-    22,
-    'rgba(255, 255, 255, 0.9)',
-    mixHex(accent, '#ffffff', 0.52),
-  );
-  context.fillStyle = '#64748b';
-  context.font = `700 17px ${VI_FONT}`;
-  context.fillText('CHINH PHỤC KHÓ NHẤT', 108, 792);
-  context.fillStyle = '#172033';
-  context.font = `800 27px ${VI_FONT}`;
-  const highest = data.profile.highest_problem_name
-    ? `${data.profile.highest_problem_name} · ${data.profile.highest_problem_rating ?? '—'}`
-    : 'Đang chờ cột mốc đầu tiên';
-  fitText(context, highest, 108, 835, 980, 27);
-
-  drawList(
-    context,
-    84,
-    910,
-    496,
-    '🏆  DANH HIỆU',
-    data.awards.slice(0, 6).map((award) => `${award.title} · ${award.season_name}`),
-    'Chưa có danh hiệu mùa giải',
-    accent,
-  );
-  await drawRewardList(
-    context,
-    604,
-    910,
-    512,
-    '🎁  QUÀ ĐÃ NHẬN',
-    data.rewards.slice(0, 6),
-    'Chưa có quà đã nhận',
-    accent,
-  );
-
-  context.font = `700 22px ${VI_FONT}`;
-  context.fillStyle = accent;
+  roundRect(context, x + 18, y + 18, 45, 45, 15, mixHex(color, '#ffffff', 0.84));
+  context.fillStyle = color;
+  context.font = `900 21px ${VI_FONT}`;
   context.textAlign = 'center';
-  fitText(
-    context,
-    `“${data.quote?.content ?? 'Mỗi bài toán hôm nay là một bước tiến ngày mai.'}”`,
-    600,
-    1374,
-    1020,
-    22,
-  );
+  context.fillText(icon, x + 40, y + 49);
   context.textAlign = 'start';
-  centerText(
-    context,
-    new Intl.DateTimeFormat('vi-VN', { dateStyle: 'long' }).format(new Date(data.generatedAt)),
-    600,
-    1410,
-    `500 17px ${VI_FONT}`,
-    '#64748b',
-  );
+  context.fillStyle = '#64748b';
+  context.font = `850 13px ${VI_FONT}`;
+  context.fillText(label, x + 76, y + 45);
+  context.fillStyle = '#172033';
+  context.font = `950 28px ${VI_FONT}`;
+  fitText(context, value, x + 20, y + 104, width - 40, 28);
 }
 
-function drawList(
+function drawTagCloud(
   context: CanvasRenderingContext2D,
+  tags: Recognition['topTags'],
   x: number,
   y: number,
-  width: number,
-  title: string,
-  items: string[],
-  empty: string,
   accent: string,
+  cyan: string,
 ) {
-  roundRect(
-    context,
-    x,
-    y,
-    width,
-    400,
-    24,
-    'rgba(255, 255, 255, 0.9)',
-    mixHex(accent, '#ffffff', 0.52),
-  );
-  context.fillStyle = accent;
-  context.font = `800 21px ${VI_FONT}`;
-  context.fillText(title, x + 26, y + 48);
-  const rows = items.length ? items : [empty];
-  rows.forEach((item, index) => {
-    context.fillStyle = items.length ? '#253247' : '#64748b';
-    context.font = `${items.length ? '700' : '500'} 19px ${VI_FONT}`;
-    fitText(
-      context,
-      `${items.length ? '•' : '—'} ${item}`,
-      x + 26,
-      y + 94 + index * 48,
-      width - 52,
-      19,
-    );
+  let cursor = x;
+  const values = tags.length
+    ? tags
+    : [{ tag: 'Bắt đầu hành trình', solved_count: 0, max_rating: null }];
+  values.forEach((tag, index) => {
+    const text = `${tag.tag} · ${tag.solved_count}`;
+    context.font = `800 15px ${VI_FONT}`;
+    const pillWidth = Math.min(205, context.measureText(text).width + 34);
+    if (cursor + pillWidth > 1122) return;
+    const color = index % 2 ? cyan : accent;
+    roundRect(context, cursor, y, pillWidth, 40, 20, mixHex(color, '#ffffff', 0.86));
+    context.fillStyle = color;
+    context.fillText(text, cursor + 17, y + 26, pillWidth - 34);
+    cursor += pillWidth + 12;
   });
 }
 
-async function drawRewardList(
+function drawAchievementPanel(
   context: CanvasRenderingContext2D,
   x: number,
   y: number,
   width: number,
-  title: string,
-  rewards: Recognition['rewards'],
-  empty: string,
+  height: number,
+  awards: Recognition['awards'],
   accent: string,
 ) {
-  roundRect(
-    context,
-    x,
-    y,
-    width,
-    400,
-    24,
-    'rgba(255, 255, 255, 0.9)',
-    mixHex(accent, '#ffffff', 0.52),
-  );
+  roundRect(context, x, y, width, height, 28, '#ffffff', mixHex(accent, '#ffffff', 0.56));
+  roundRect(context, x + 22, y + 20, 52, 52, 17, mixHex(accent, '#ffffff', 0.84));
   context.fillStyle = accent;
-  context.font = `800 21px ${VI_FONT}`;
-  context.fillText(title, x + 26, y + 48);
-  if (!rewards.length) {
+  context.font = `900 26px ${VI_FONT}`;
+  context.fillText('🏆', x + 34, y + 56);
+  context.fillStyle = '#172033';
+  context.font = `900 19px ${VI_FONT}`;
+  context.fillText('DANH HIỆU ĐÃ CHINH PHỤC', x + 88, y + 52);
+  const rows = awards.length ? awards.slice(0, 4) : [];
+  if (!rows.length) {
     context.fillStyle = '#64748b';
-    context.font = `500 19px ${VI_FONT}`;
-    context.fillText(`— ${empty}`, x + 26, y + 94);
+    context.font = `650 17px ${VI_FONT}`;
+    context.fillText('Cột mốc đầu tiên đang chờ bạn.', x + 26, y + 118);
     return;
   }
-  for (const [index, reward] of rewards.entries()) {
-    const rowY = y + 70 + index * 48;
+  rows.forEach((award, index) => {
+    const rowY = y + 100 + index * 54;
+    context.fillStyle = mixHex(accent, '#ffffff', 0.14);
+    context.beginPath();
+    context.arc(x + 35, rowY + 7, 6, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = '#253247';
+    context.font = `800 17px ${VI_FONT}`;
+    fitText(context, award.title, x + 54, rowY + 13, width - 80, 17);
+    context.fillStyle = '#64748b';
+    context.font = `650 13px ${VI_FONT}`;
+    fitText(context, award.season_name, x + 54, rowY + 34, width - 80, 13);
+  });
+}
+
+async function drawRewardPanel(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  rewards: Recognition['rewards'],
+  color: string,
+) {
+  roundRect(context, x, y, width, height, 28, '#ffffff', mixHex(color, '#ffffff', 0.56));
+  roundRect(context, x + 22, y + 20, 52, 52, 17, mixHex(color, '#ffffff', 0.84));
+  context.fillStyle = color;
+  context.font = `900 26px ${VI_FONT}`;
+  context.fillText('🎁', x + 34, y + 56);
+  context.fillStyle = '#172033';
+  context.font = `900 19px ${VI_FONT}`;
+  context.fillText('BỘ SƯU TẬP PHẦN THƯỞNG', x + 88, y + 52);
+  const rows = rewards.slice(0, 4);
+  if (!rows.length) {
+    context.fillStyle = '#64748b';
+    context.font = `650 17px ${VI_FONT}`;
+    context.fillText('Phần thưởng đầu tiên đang chờ bạn.', x + 26, y + 118);
+    return;
+  }
+  for (const [index, reward] of rows.entries()) {
+    const rowY = y + 90 + index * 57;
+    roundRect(context, x + 22, rowY, 42, 42, 13, mixHex(color, '#ffffff', 0.9));
     const source = sameOriginAsset(reward.image_url);
     if (source) {
       const mascot = await loadImage(source).catch(() => null);
-      if (mascot) context.drawImage(mascot, x + 24, rowY, 38, 38);
+      if (mascot) drawImageCover(context, mascot, x + 25, rowY + 3, 36, 36);
+    } else {
+      context.fillStyle = color;
+      context.font = `800 19px ${VI_FONT}`;
+      context.fillText('✦', x + 34, rowY + 28);
     }
     context.fillStyle = '#253247';
-    context.font = `700 19px ${VI_FONT}`;
-    fitText(context, reward.name, x + 72, rowY + 27, width - 98, 19);
+    context.font = `800 17px ${VI_FONT}`;
+    fitText(context, reward.name, x + 78, rowY + 18, width - 106, 17);
+    context.fillStyle = '#64748b';
+    context.font = `650 13px ${VI_FONT}`;
+    fitText(
+      context,
+      reward.cash_value_vnd ? formatVnd(reward.cash_value_vnd) : reward.description,
+      x + 78,
+      rowY + 39,
+      width - 106,
+      13,
+    );
   }
+}
+
+function drawImageCover(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+  const sourceWidth = width / scale;
+  const sourceHeight = height / scale;
+  const sourceX = (image.naturalWidth - sourceWidth) / 2;
+  const sourceY = (image.naturalHeight - sourceHeight) / 2;
+  context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+}
+
+function drawWrappedText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number,
+) {
+  const words = text.trim().split(/\s+/);
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (context.measureText(candidate).width <= maxWidth || !line) {
+      line = candidate;
+    } else {
+      lines.push(line);
+      line = word;
+      if (lines.length === maxLines - 1) break;
+    }
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  const consumed = lines.join(' ').split(/\s+/).length;
+  if (consumed < words.length && lines.length) {
+    let last = lines.at(-1) ?? '';
+    while (last && context.measureText(`${last}…`).width > maxWidth) {
+      last = last.split(' ').slice(0, -1).join(' ');
+    }
+    lines[lines.length - 1] = `${last}…`;
+  }
+  lines.forEach((value, index) => context.fillText(value, x, y + index * lineHeight, maxWidth));
 }
 
 function roundRect(
@@ -694,7 +893,7 @@ function roundRect(
   width: number,
   height: number,
   radius: number,
-  fill: string,
+  fill: string | CanvasGradient,
   stroke?: string,
 ) {
   context.beginPath();
@@ -706,21 +905,6 @@ function roundRect(
     context.lineWidth = 2;
     context.stroke();
   }
-}
-
-function centerText(
-  context: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  font: string,
-  color: string,
-) {
-  context.font = font;
-  context.fillStyle = color;
-  context.textAlign = 'center';
-  context.fillText(text, x, y);
-  context.textAlign = 'start';
 }
 
 function fitText(

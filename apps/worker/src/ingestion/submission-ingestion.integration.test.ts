@@ -287,19 +287,28 @@ describe('submission ingestion', () => {
     );
     expect(results.filter((result) => result.awarded)).toHaveLength(1);
     const [totals] = await client.connection<
-      { solves: number; earns: number; ledger: string; wallet: string; season_score: string }[]
+      {
+        solves: number;
+        earns: number;
+        ledger: string;
+        wallet: string;
+        season_score: string;
+        earn_metadata: { ccLevelAfter: number; ccLevelDelta: number };
+      }[]
     >`
       SELECT
         (SELECT count(*)::int FROM user_problem_solves) AS solves,
         (SELECT count(*)::int FROM point_transactions WHERE type = 'EARN') AS earns,
         (SELECT COALESCE(sum(amount), 0)::text FROM point_transactions WHERE affects_wallet) AS ledger,
         (SELECT balance::text FROM user_wallets WHERE user_id = ${user.id}) AS wallet,
-        (SELECT score::text FROM season_user_totals WHERE user_id = ${user.id}) AS season_score
+        (SELECT score::text FROM season_user_totals WHERE user_id = ${user.id}) AS season_score,
+        (SELECT metadata FROM point_transactions WHERE type = 'EARN') AS earn_metadata
     `;
     expect(totals?.solves).toBe(1);
     expect(totals?.earns).toBe(1);
     expect(totals?.wallet).toBe(totals?.ledger);
     expect(totals?.season_score).toBe(totals?.ledger);
+    expect(totals?.earn_metadata).toEqual({ ccLevelAfter: 800, ccLevelDelta: 0 });
 
     await expect(
       client.connection`UPDATE point_transactions SET amount = amount + 1 WHERE type = 'EARN'`,

@@ -313,13 +313,16 @@ export class InsightsController {
         WHERE active = true AND min_level <= COALESCE(skill.cc_level, 800)
         ORDER BY min_level DESC LIMIT 1
       ) AS level_rank ON true
-      WHERE users.status = 'ACTIVE' AND users.system_role = 'USER'
-        AND NOT EXISTS (
-          SELECT 1 FROM organization_memberships AS staff_memberships
-          WHERE staff_memberships.user_id = users.id
-            AND staff_memberships.status = 'ACTIVE'
-            AND staff_memberships.role IN ('TEACHER', 'ORG_ADMIN')
+      WHERE users.status = 'ACTIVE' AND (
+        users.system_role = 'SYSTEM_ADMIN' OR (
+          users.system_role = 'USER' AND NOT EXISTS (
+            SELECT 1 FROM organization_memberships AS staff_memberships
+            WHERE staff_memberships.user_id = users.id
+              AND staff_memberships.status = 'ACTIVE'
+              AND staff_memberships.role IN ('TEACHER', 'ORG_ADMIN')
+          )
         )
+      )
       ORDER BY
         CASE WHEN ${input.sort} = 'CC_LEVEL' THEN COALESCE(skill.cc_level, 800) END DESC,
         CASE WHEN ${input.sort} = 'CC_POINT' THEN COALESCE(points.cc_point, 0) END DESC,
@@ -331,13 +334,16 @@ export class InsightsController {
     const [{ count } = { count: '0' }] = await this.database.sql<{ count: string }[]>`
       SELECT count(*)::text AS count FROM users
       ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE' AND memberships.role = 'MEMBER'` : this.database.sql``}
-      WHERE users.status = 'ACTIVE' AND users.system_role = 'USER'
-        AND NOT EXISTS (
-          SELECT 1 FROM organization_memberships AS staff_memberships
-          WHERE staff_memberships.user_id = users.id
-            AND staff_memberships.status = 'ACTIVE'
-            AND staff_memberships.role IN ('TEACHER', 'ORG_ADMIN')
+      WHERE users.status = 'ACTIVE' AND (
+        users.system_role = 'SYSTEM_ADMIN' OR (
+          users.system_role = 'USER' AND NOT EXISTS (
+            SELECT 1 FROM organization_memberships AS staff_memberships
+            WHERE staff_memberships.user_id = users.id
+              AND staff_memberships.status = 'ACTIVE'
+              AND staff_memberships.role IN ('TEACHER', 'ORG_ADMIN')
+          )
         )
+      )
     `;
     return {
       seasonId,
@@ -468,12 +474,7 @@ export class InsightsController {
           WHERE active = true AND min_level <= COALESCE(skill.cc_level, 800)
           ORDER BY min_level DESC LIMIT 1
         ) AS level_rank ON true
-        WHERE users.id = ${userId} AND users.status = 'ACTIVE' AND users.system_role = 'USER'
-          AND NOT EXISTS (
-            SELECT 1 FROM organization_memberships AS staff
-            WHERE staff.user_id = users.id AND staff.status = 'ACTIVE'
-              AND staff.role IN ('TEACHER', 'ORG_ADMIN')
-          )
+        WHERE users.id = ${userId} AND users.status = 'ACTIVE'
       `,
         this.streaks.summary(userId),
         this.database.sql`
@@ -513,19 +514,51 @@ export class InsightsController {
       `,
         includePointHistory
           ? this.database.sql`
-            SELECT id, type, amount::text, description, event_at, created_at,
-              CASE WHEN type NOT IN ('REDEEM', 'REFUND') THEN amount ELSE 0 END::text
+            WITH history AS (
+              SELECT transactions.*,
+                sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
+                  ORDER BY event_at, created_at, id
+                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS cc_point_after_value,
+                sum(amount) FILTER (WHERE affects_wallet) OVER (
+                  ORDER BY event_at, created_at, id
+                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS cc_balance_after_value
+              FROM point_transactions AS transactions
+              WHERE user_id = ${userId}
+            ), earn_levels AS (
+              SELECT id,
+                lead(cc_level_before) OVER (ORDER BY event_at, created_at, id)
+                  AS next_cc_level_before
+              FROM point_transactions
+              WHERE user_id = ${userId} AND type = 'EARN'
+            )
+            SELECT history.id, history.type, history.amount::text, history.description,
+              history.event_at, history.created_at, history.source_submission_id::text,
+              history.problem_rating_snapshot,
+              submissions.programming_language,
+              problems.problem_key, problems.contest_id::text, problems.problem_index,
+              problems.name AS problem_name,
+              history.cc_level_before::text,
+              CASE WHEN history.type = 'EARN' THEN COALESCE(
+                history.metadata->>'ccLevelAfter',
+                earn_levels.next_cc_level_before::text,
+                skill.cc_level::text,
+                history.cc_level_before::text
+              ) ELSE NULL END AS cc_level_after,
+              CASE WHEN history.type NOT IN ('REDEEM', 'REFUND') THEN history.amount ELSE 0 END::text
                 AS cc_point_delta,
-              CASE WHEN affects_wallet THEN amount ELSE 0 END::text AS cc_balance_delta,
-              COALESCE(sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
-                ORDER BY event_at, created_at, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-              ), 0)::text AS cc_point_after,
-              COALESCE(sum(amount) FILTER (WHERE affects_wallet) OVER (
-                ORDER BY event_at, created_at, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-              ), 0)::text AS cc_balance_after
-            FROM point_transactions
-            WHERE user_id = ${userId}
-            ORDER BY event_at DESC, created_at DESC, id DESC
+              CASE WHEN history.affects_wallet THEN history.amount ELSE 0 END::text
+                AS cc_balance_delta,
+              COALESCE(history.cc_point_after_value, 0)::text AS cc_point_after,
+              COALESCE(history.cc_balance_after_value, 0)::text AS cc_balance_after
+            FROM history
+            LEFT JOIN earn_levels ON earn_levels.id = history.id
+            LEFT JOIN cf_submissions AS submissions
+              ON submissions.cf_submission_id = history.source_submission_id
+            LEFT JOIN cf_problems AS problems ON problems.problem_key = submissions.problem_key
+            LEFT JOIN user_skill_state AS skill ON skill.user_id = history.user_id
+            ORDER BY history.event_at DESC, history.created_at DESC, history.id DESC
             LIMIT 50
           `
           : Promise.resolve([]),

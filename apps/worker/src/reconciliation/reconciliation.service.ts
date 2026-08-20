@@ -197,8 +197,10 @@ export class ReconciliationService {
     solvedAt: Date,
   ) {
     await transaction`INSERT INTO user_skill_state (user_id) VALUES (${userId}) ON CONFLICT DO NOTHING`;
-    const [state] = await transaction<{ cc_level: string; scoring_policy_version: string }[]>`
-      SELECT cc_level, scoring_policy_version FROM user_skill_state
+    const [state] = await transaction<
+      { cc_base: string; cc_level: string; scoring_policy_version: string }[]
+    >`
+      SELECT cc_base, cc_level, scoring_policy_version FROM user_skill_state
       WHERE user_id = ${userId} FOR UPDATE
     `;
     const [policy] = await transaction<PolicyRow[]>`
@@ -211,6 +213,21 @@ export class ReconciliationService {
       midpointDelta: Number(policy.reward_midpoint_delta),
       scale: Number(policy.reward_scale),
     });
+    const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
+      SELECT problem_key, rating_snapshot FROM user_problem_solves
+      WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
+    `;
+    const nextLevel = calculateCcLevel(
+      solves.map((item) => ({
+        problemKey: item.problem_key,
+        rating: Number(item.rating_snapshot),
+      })),
+      {
+        decay: Number(policy.level_decay),
+        denominator: Number(policy.level_denominator),
+        base: Number(state.cc_base),
+      },
+    );
     const [season] = await transaction<{ id: string }[]>`
       SELECT seasons.id FROM seasons
       WHERE seasons.status <> 'DRAFT'
@@ -229,12 +246,17 @@ export class ReconciliationService {
       INSERT INTO point_transactions (
         user_id, type, amount, season_id, source_submission_id, idempotency_key,
         affects_wallet, affects_season, cc_level_before, problem_rating_snapshot,
-        scoring_policy_version, description, event_at
+        scoring_policy_version, description, metadata, event_at
       ) VALUES (
         ${userId}, 'EARN', ${amount}, ${season?.id ?? null}, ${submission.cf_submission_id},
         ${`earn:submission:${submission.cf_submission_id}`}, true, ${Boolean(season)},
         ${state.cc_level}, ${submission.problem_rating_observed}, ${policy.version},
-        'Replacement reward after Codeforces rejudge', ${solvedAt.toISOString()}
+        'Replacement reward after Codeforces rejudge',
+        ${JSON.stringify({
+          ccLevelAfter: nextLevel.level,
+          ccLevelDelta: nextLevel.level - Number(state.cc_level),
+        })}::jsonb,
+        ${solvedAt.toISOString()}
       ) ON CONFLICT DO NOTHING RETURNING id
     `;
     if (!created) return null;

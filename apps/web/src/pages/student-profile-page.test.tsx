@@ -85,7 +85,28 @@ describe('StudentProfilePage', () => {
         awards: [],
         rewards: [],
         topTags: [],
-        pointHistory: [],
+        pointHistory: [
+          {
+            id: '44444444-4444-4444-8444-444444444444',
+            type: 'EARN',
+            amount: '10.49',
+            description: null,
+            event_at: '2026-08-19T08:00:00Z',
+            source_submission_id: '500',
+            problem_rating_snapshot: 800,
+            programming_language: 'GNU C++20',
+            problem_key: 'contest:4:A',
+            contest_id: '4',
+            problem_index: 'A',
+            problem_name: 'Watermelon',
+            cc_level_before: '800',
+            cc_level_after: '800',
+            cc_point_delta: '10.49',
+            cc_balance_delta: '10.49',
+            cc_point_after: '10.49',
+            cc_balance_after: '10.49',
+          },
+        ],
       });
     });
   });
@@ -119,6 +140,12 @@ describe('StudentProfilePage', () => {
     );
     expect(screen.getByText('7 ngày')).toBeInTheDocument();
     expect(await screen.findByText('Mèo Mầm Code')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /A\. Watermelon/ })).toHaveAttribute(
+      'href',
+      'https://codeforces.com/contest/4/submission/500',
+    );
+    expect(screen.getByText('800 → 800')).toBeInTheDocument();
+    expect(screen.getByText(/Submission #500/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hi sinh 1 linh vật' })).toBeDisabled();
   });
 });
