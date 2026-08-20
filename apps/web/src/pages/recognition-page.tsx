@@ -425,6 +425,22 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   drawGlow(context, 1040, 120, 420, accent, 0.22);
   drawGlow(context, 80, 1410, 460, cyan, 0.18);
   drawGlow(context, 630, 690, 330, violet, 0.08);
+  context.save();
+  context.globalAlpha = 0.12;
+  context.lineCap = 'round';
+  context.strokeStyle = accent;
+  context.lineWidth = 82;
+  context.beginPath();
+  context.moveTo(-120, 470);
+  context.bezierCurveTo(270, 190, 650, 760, 1320, 350);
+  context.stroke();
+  context.strokeStyle = cyan;
+  context.lineWidth = 42;
+  context.beginPath();
+  context.moveTo(-80, 1260);
+  context.bezierCurveTo(350, 930, 760, 1510, 1300, 1080);
+  context.stroke();
+  context.restore();
   drawTechPattern(context, width, height, accent, cyan);
   roundRect(context, 38, 34, 1124, 1432, 46, 'rgba(255,255,255,0.82)', '#ffffff');
   roundRect(
@@ -437,6 +453,13 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     'rgba(255,255,255,0.5)',
     mixHex(accent, '#ffffff', 0.45),
   );
+  context.save();
+  context.globalAlpha = 0.045;
+  context.fillStyle = accent;
+  context.font = `950 340px ${VI_FONT}`;
+  context.textAlign = 'right';
+  context.fillText('CC', 1120, 1180);
+  context.restore();
 
   roundRect(context, 78, 72, 350, 54, 27, mixHex(accent, '#ffffff', 0.86));
   context.fillStyle = accent;
@@ -546,7 +569,11 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     );
   });
 
-  roundRect(context, 78, 624, 1044, 142, 28, '#172033');
+  const factsGradient = context.createLinearGradient(78, 624, 1122, 766);
+  factsGradient.addColorStop(0, mixHex(accent, '#ffffff', 0.88));
+  factsGradient.addColorStop(0.52, '#ffffff');
+  factsGradient.addColorStop(1, mixHex(cyan, '#ffffff', 0.88));
+  roundRect(context, 78, 624, 1044, 142, 28, factsGradient, '#ffffff');
   const facts = [
     [
       'BÀI KHÓ NHẤT',
@@ -567,19 +594,19 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   facts.forEach(([label, value, note], index) => {
     const x = 104 + index * 340;
     if (index) {
-      context.strokeStyle = 'rgba(255,255,255,0.15)';
+      context.strokeStyle = mixHex(accent, '#ffffff', 0.72);
       context.beginPath();
       context.moveTo(x - 20, 650);
       context.lineTo(x - 20, 740);
       context.stroke();
     }
-    context.fillStyle = index === 0 ? '#f9a8d4' : '#67e8f9';
+    context.fillStyle = index === 0 ? accent : cyan;
     context.font = `850 15px ${VI_FONT}`;
     context.fillText(label ?? '', x, 658);
-    context.fillStyle = '#ffffff';
+    context.fillStyle = ink;
     context.font = `900 24px ${VI_FONT}`;
     fitText(context, value ?? '', x, 699, 290, 24);
-    context.fillStyle = '#a8b4c7';
+    context.fillStyle = muted;
     context.font = `650 15px ${VI_FONT}`;
     fitText(context, note ?? '', x, 728, 290, 15);
   });
