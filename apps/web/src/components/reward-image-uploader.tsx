@@ -11,6 +11,7 @@ export function RewardImageUploader({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [zoom, setZoom] = useState(1);
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
@@ -18,6 +19,7 @@ export function RewardImageUploader({
   useEffect(() => {
     if (!sourceUrl) return;
     const image = new Image();
+    image.crossOrigin = 'anonymous';
     image.onload = () => {
       const canvas = canvasRef.current;
       const context = canvas?.getContext('2d');
@@ -32,13 +34,15 @@ export function RewardImageUploader({
       const y = (canvas.height - height) / 2 + (offsetY / 100) * travelY;
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, x, y, width, height);
+      setLoadError('');
     };
+    image.onerror = () => setLoadError('Không thể mở ảnh hiện tại để chỉnh sửa');
     image.src = sourceUrl;
   }, [offsetX, offsetY, sourceUrl, zoom]);
 
   useEffect(
     () => () => {
-      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl);
     },
     [sourceUrl],
   );
@@ -79,8 +83,9 @@ export function RewardImageUploader({
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (!file) return;
-                if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+                if (sourceUrl.startsWith('blob:')) URL.revokeObjectURL(sourceUrl);
                 setSourceUrl(URL.createObjectURL(file));
+                setLoadError('');
                 setZoom(1);
                 setOffsetX(0);
                 setOffsetY(0);
@@ -156,10 +161,26 @@ export function RewardImageUploader({
         />
       </label>
       {value && !sourceUrl && (
-        <button className="button-secondary mt-3" onClick={() => onChange('')} type="button">
-          Xoá ảnh đã chọn
-        </button>
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button
+            className="button-secondary"
+            onClick={() => {
+              setSourceUrl(value);
+              setLoadError('');
+              setZoom(1);
+              setOffsetX(0);
+              setOffsetY(0);
+            }}
+            type="button"
+          >
+            Chỉnh ảnh hiện tại
+          </button>
+          <button className="button-secondary" onClick={() => onChange('')} type="button">
+            Xoá ảnh đã chọn
+          </button>
+        </div>
       )}
+      {loadError && <p className="notice error mt-3">{loadError}</p>}
       {upload.error && <p className="notice error mt-3">{upload.error.message}</p>}
     </div>
   );

@@ -502,7 +502,11 @@ export default function AdminPage() {
       path: string;
       method?: string;
       body: unknown;
-    }) => api(path, { method, body: JSON.stringify(body) }),
+    }) => {
+      const options: RequestInit = { method };
+      if (body !== null && body !== undefined) options.body = JSON.stringify(body);
+      return api(path, options);
+    },
     onSuccess: () => {
       for (const key of [
         'admin-members',
