@@ -1,3 +1,5 @@
+import { PasswordInput } from './ui';
+
 export interface EditableImportRow {
   row: number;
   errors?: string[];
@@ -87,6 +89,11 @@ export function EditableImportTable<T extends EditableImportRow>({
                           </option>
                         ))}
                       </select>
+                    ) : column.type === 'password' ? (
+                      <PasswordInput
+                        onChange={(event) => update(index, column.key, event.target.value)}
+                        value={inputValue(row[column.key])}
+                      />
                     ) : (
                       <input
                         onChange={(event) =>

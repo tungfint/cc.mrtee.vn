@@ -76,6 +76,17 @@ interface StudentProfile {
     earned_at: string;
   }[];
   topTags: { tag: string; solved_count: number; max_rating: number | null }[];
+  pointHistory: {
+    id: string;
+    type: string;
+    amount: string;
+    description: string | null;
+    event_at: string;
+    cc_point_delta: string;
+    cc_balance_delta: string;
+    cc_point_after: string;
+    cc_balance_after: string;
+  }[];
 }
 
 export default function StudentProfilePage() {
@@ -109,7 +120,7 @@ export default function StudentProfilePage() {
     return <ErrorState error={student.error} retry={() => void student.refetch()} />;
   if (!student.data)
     return <EmptyState title="Không tìm thấy học sinh" detail="Hồ sơ không còn khả dụng." />;
-  const { profile, streak, awards, rewards, topTags } = student.data;
+  const { profile, streak, awards, rewards, topTags, pointHistory } = student.data;
   const isOwner = session.data?.user.userId === profile.id;
   const rank = profile.level_rank_name
     ? {
@@ -406,8 +417,84 @@ export default function StudentProfilePage() {
             </div>
           </section>
         </div>
+        {(isOwner || session.data?.user.systemRole === 'SYSTEM_ADMIN') && (
+          <section className="panel point-history-panel p-6">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">LỊCH SỬ ĐIỂM</p>
+                <h2>Biến động CC Point và CC Balance</h2>
+                <p>Mỗi thay đổi được lưu thành một giao dịch riêng, không sửa đè lịch sử.</p>
+              </div>
+              <strong>{pointHistory.length} giao dịch gần nhất</strong>
+            </div>
+            {pointHistory.length ? (
+              <div className="point-history-table">
+                <div className="point-history-row header">
+                  <span>Thời gian</span>
+                  <span>Hoạt động</span>
+                  <span>CC Point</span>
+                  <span>CC Balance</span>
+                </div>
+                {pointHistory.map((transaction) => (
+                  <div className="point-history-row" key={transaction.id}>
+                    <time>{formatDate(transaction.event_at)}</time>
+                    <span>
+                      <strong>{pointTransactionLabel(transaction.type)}</strong>
+                      <small>{transaction.description ?? 'Thay đổi điểm trong hệ thống'}</small>
+                    </span>
+                    <span>
+                      <b
+                        className={
+                          Number(transaction.cc_point_delta) >= 0 ? 'positive' : 'negative'
+                        }
+                      >
+                        {signedPoint(transaction.cc_point_delta)}
+                      </b>
+                      <small>Sau giao dịch: {formatNumber(transaction.cc_point_after, 2)}</small>
+                    </span>
+                    <span>
+                      <b
+                        className={
+                          Number(transaction.cc_balance_delta) >= 0 ? 'positive' : 'negative'
+                        }
+                      >
+                        {signedPoint(transaction.cc_balance_delta)}
+                      </b>
+                      <small>Số dư: {formatNumber(transaction.cc_balance_after, 2)}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="Chưa có thay đổi điểm"
+                detail="Giao dịch CC Point và CC Balance sẽ xuất hiện tại đây."
+              />
+            )}
+          </section>
+        )}
       </section>
     </main>
+  );
+}
+
+function signedPoint(value: string) {
+  const amount = Number(value);
+  if (amount === 0) return '—';
+  return `${amount > 0 ? '+' : '−'}${formatNumber(Math.abs(amount), 2)}`;
+}
+
+function pointTransactionLabel(type: string) {
+  return (
+    {
+      EARN: 'Điểm từ bài giải',
+      BONUS: 'Điểm thưởng',
+      REDEEM: 'Đổi quà',
+      REFUND: 'Hoàn điểm',
+      PENALTY: 'Trừ điểm',
+      REVERSAL: 'Điều chỉnh ngược',
+      ADJUSTMENT: 'Hiệu chỉnh',
+    }[type] ?? type
   );
 }
 

@@ -58,6 +58,9 @@ export default function RecognitionPage() {
   const isAdmin = session.data?.user.systemRole === 'SYSTEM_ADMIN';
   const [studentId, setStudentId] = useState('');
   const [hasImage, setHasImage] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [imageError, setImageError] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const students = useQuery({
     queryKey: ['recognition-students'],
@@ -83,15 +86,61 @@ export default function RecognitionPage() {
       api<Recognition>(isAdmin ? `/admin/users/${studentId}/recognition` : '/me/recognition'),
     enabled: Boolean(session.data) && (!isAdmin || Boolean(studentId)),
   });
-  useEffect(() => setHasImage(false), [studentId]);
+  useEffect(() => {
+    setHasImage(false);
+    setShareUrl('');
+    setImageError('');
+  }, [studentId]);
 
   const createImage = async () => {
     if (!canvasRef.current || !recognition.data) return;
-    const refreshed = await recognition.refetch();
-    const data = refreshed.data ?? recognition.data;
-    await document.fonts.ready;
-    await drawRecognition(canvasRef.current, data);
-    setHasImage(true);
+    setCreating(true);
+    setImageError('');
+    try {
+      const refreshed = await recognition.refetch();
+      const data = refreshed.data ?? recognition.data;
+      await document.fonts.ready;
+      await drawRecognition(canvasRef.current, data);
+      setHasImage(true);
+      const blob = await canvasBlob(canvasRef.current);
+      const form = new FormData();
+      form.append('image', blob, 'vinh-danh.png');
+      const uploaded = await api<{ imageUrl: string }>('/recognition-images', {
+        method: 'POST',
+        body: form,
+      });
+      setShareUrl(new URL(uploaded.imageUrl, window.location.origin).href);
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : 'Không thể tạo ảnh vinh danh');
+    } finally {
+      setCreating(false);
+    }
+  };
+  const copyShareLink = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      setImageError('Không thể sao chép tự động. Bạn có thể mở và sao chép liên kết phía trên.');
+    }
+  };
+  const shareImage = async () => {
+    if (!canvasRef.current || !recognition.data || !shareUrl) return;
+    try {
+      const title = `Vinh danh ${recognition.data.profile.display_name} · Cầy Cốt MrTee.VN`;
+      if (navigator.share) {
+        const blob = await canvasBlob(canvasRef.current);
+        const file = new File([blob], 'vinh-danh-cay-cot.png', { type: 'image/png' });
+        const payload: ShareData = { title, text: title, url: shareUrl };
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) payload.files = [file];
+        await navigator.share(payload);
+        return;
+      }
+      await copyShareLink();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setImageError(error instanceof Error ? error.message : 'Không thể mở trình chia sẻ');
+    }
   };
   const downloadImage = () => {
     if (!canvasRef.current || !recognition.data || !hasImage) return;
@@ -260,8 +309,13 @@ export default function RecognitionPage() {
               </div>
             </div>
             <div className="recognition-actions">
-              <button className="button-primary" onClick={() => void createImage()} type="button">
-                ✦ Tạo ảnh vinh danh
+              <button
+                className="button-primary"
+                disabled={creating}
+                onClick={() => void createImage()}
+                type="button"
+              >
+                {creating ? 'Đang tạo ảnh & liên kết…' : '✦ Tạo ảnh vinh danh'}
               </button>
               <button
                 className="button-secondary"
@@ -272,6 +326,46 @@ export default function RecognitionPage() {
                 ⇩ Tải ảnh PNG
               </button>
             </div>
+            {imageError && <p className="notice error">{imageError}</p>}
+            {shareUrl && (
+              <div className="recognition-share-box">
+                <div>
+                  <strong>Liên kết ảnh công khai</strong>
+                  <a href={shareUrl} rel="noreferrer" target="_blank">
+                    {shareUrl}
+                  </a>
+                </div>
+                <div className="recognition-share-actions">
+                  <button
+                    className="button-secondary"
+                    onClick={() => void copyShareLink()}
+                    type="button"
+                  >
+                    ⧉ Sao chép link
+                  </button>
+                  <button
+                    className="button-primary"
+                    onClick={() => void shareImage()}
+                    type="button"
+                  >
+                    ↗ Facebook · Zalo · Instagram
+                  </button>
+                  <button
+                    className="button-secondary"
+                    onClick={() =>
+                      window.open(
+                        `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
+                        '_blank',
+                        'noopener,noreferrer',
+                      )
+                    }
+                    type="button"
+                  >
+                    Facebook
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
           <section className={`panel recognition-canvas-wrap ${hasImage ? 'ready' : ''}`}>
             {!hasImage && (
@@ -287,6 +381,16 @@ export default function RecognitionPage() {
       )}
     </>
   );
+}
+
+function canvasBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Không thể xuất dữ liệu ảnh'))),
+      'image/png',
+      0.96,
+    );
+  });
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -307,14 +411,15 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     ? (data.profile.level_rank_color ?? '#ec4899')
     : '#ec4899';
   const gradient = context.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, mixHex(accent, '#fff1f7', 0.3));
-  gradient.addColorStop(0.55, mixHex(accent, '#f9a8d4', 0.28));
-  gradient.addColorStop(1, mixHex(accent, '#fce7f3', 0.42));
+  gradient.addColorStop(0, '#fff7fc');
+  gradient.addColorStop(0.42, mixHex(accent, '#ffffff', 0.84));
+  gradient.addColorStop(0.72, '#e9fbff');
+  gradient.addColorStop(1, mixHex(accent, '#fdf2f8', 0.72));
   context.fillStyle = gradient;
   context.fillRect(0, 0, width, height);
 
-  context.globalAlpha = 0.3;
-  context.fillStyle = '#ffffff';
+  context.globalAlpha = 0.48;
+  context.fillStyle = mixHex(accent, '#ffffff', 0.66);
   context.beginPath();
   context.arc(1060, 120, 310, 0, Math.PI * 2);
   context.fill();
@@ -324,8 +429,44 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   context.globalAlpha = 1;
 
   context.save();
-  context.globalAlpha = 0.1;
-  context.fillStyle = '#ffffff';
+  context.globalAlpha = 0.13;
+  context.strokeStyle = accent;
+  context.lineWidth = 1;
+  for (let x = 0; x <= width; x += 48) {
+    context.beginPath();
+    context.moveTo(x, 0);
+    context.lineTo(x, height);
+    context.stroke();
+  }
+  for (let y = 0; y <= height; y += 48) {
+    context.beginPath();
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }
+  context.globalAlpha = 0.42;
+  context.lineWidth = 5;
+  const circuitPaths: Array<[number, number, number, number]> = [
+    [40, 340, 290, 340],
+    [910, 760, 1160, 760],
+    [75, 1325, 330, 1325],
+  ];
+  for (const [startX, startY, endX, endY] of circuitPaths) {
+    context.beginPath();
+    context.moveTo(startX, startY);
+    context.lineTo(endX, startY);
+    context.lineTo(endX, endY);
+    context.stroke();
+    context.fillStyle = accent;
+    context.beginPath();
+    context.arc(endX, endY, 9, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.restore();
+
+  context.save();
+  context.globalAlpha = 0.12;
+  context.fillStyle = accent;
   context.font = `900 260px ${VI_FONT}`;
   context.textAlign = 'center';
   context.fillText(data.profile.level_rank_icon ?? '✦', 940, 360);
@@ -338,8 +479,8 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     1088,
     1396,
     40,
-    'rgba(88, 28, 72, 0.76)',
-    mixHex(accent, '#ffffff', 0.58),
+    'rgba(255, 255, 255, 0.94)',
+    mixHex(accent, '#ffffff', 0.38),
   );
   const portraitSource = sameOriginAsset(data.profile.avatar_url) ?? '/brand/cay-code-logo.webp';
   const portrait = await loadImage(portraitSource).catch(() =>
@@ -355,8 +496,8 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   }
 
   centerText(context, 'CẦY CỐT · MRTEE.VN', 600, 310, `700 26px ${VI_FONT}`, accent);
-  centerText(context, 'VINH DANH CÁ NHÂN', 600, 365, `900 48px ${VI_FONT}`, '#ffffff');
-  centerText(context, data.profile.display_name, 600, 445, `900 64px ${VI_FONT}`, '#ffffff');
+  centerText(context, 'VINH DANH CÁ NHÂN', 600, 365, `900 48px ${VI_FONT}`, '#172033');
+  centerText(context, data.profile.display_name, 600, 445, `900 64px ${VI_FONT}`, '#5b1646');
   centerText(
     context,
     data.profile.codeforces_handle
@@ -365,7 +506,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     600,
     492,
     `600 24px ${VI_FONT}`,
-    '#93aab4',
+    '#64748b',
   );
 
   centerText(
@@ -392,13 +533,13 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
       190,
       142,
       22,
-      'rgba(255, 255, 255, 0.16)',
-      mixHex(accent, '#ffffff', 0.7),
+      'rgba(255, 255, 255, 0.9)',
+      mixHex(accent, '#ffffff', 0.52),
     );
-    context.fillStyle = '#829ca8';
+    context.fillStyle = '#64748b';
     context.font = `700 17px ${VI_FONT}`;
     context.fillText(label ?? '', x + 22, 610);
-    context.fillStyle = index === 1 ? accent : '#eef9fa';
+    context.fillStyle = index === 1 ? accent : '#172033';
     context.font = `900 28px ${VI_FONT}`;
     context.fillText(value ?? '', x + 22, 668);
   });
@@ -410,13 +551,13 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     1032,
     112,
     22,
-    'rgba(255, 255, 255, 0.16)',
-    mixHex(accent, '#ffffff', 0.7),
+    'rgba(255, 255, 255, 0.9)',
+    mixHex(accent, '#ffffff', 0.52),
   );
-  context.fillStyle = '#829ca8';
+  context.fillStyle = '#64748b';
   context.font = `700 17px ${VI_FONT}`;
   context.fillText('CHINH PHỤC KHÓ NHẤT', 108, 792);
-  context.fillStyle = '#ffffff';
+  context.fillStyle = '#172033';
   context.font = `800 27px ${VI_FONT}`;
   const highest = data.profile.highest_problem_name
     ? `${data.profile.highest_problem_name} · ${data.profile.highest_problem_rating ?? '—'}`
@@ -462,7 +603,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     600,
     1410,
     `500 17px ${VI_FONT}`,
-    '#829ca8',
+    '#64748b',
   );
 }
 
@@ -483,15 +624,15 @@ function drawList(
     width,
     400,
     24,
-    'rgba(18, 43, 55, 0.88)',
-    mixHex(accent, '#ffffff', 0.68),
+    'rgba(255, 255, 255, 0.9)',
+    mixHex(accent, '#ffffff', 0.52),
   );
   context.fillStyle = accent;
   context.font = `800 21px ${VI_FONT}`;
   context.fillText(title, x + 26, y + 48);
   const rows = items.length ? items : [empty];
   rows.forEach((item, index) => {
-    context.fillStyle = items.length ? '#edf7f8' : '#829ca8';
+    context.fillStyle = items.length ? '#253247' : '#64748b';
     context.font = `${items.length ? '700' : '500'} 19px ${VI_FONT}`;
     fitText(
       context,
@@ -521,14 +662,14 @@ async function drawRewardList(
     width,
     400,
     24,
-    'rgba(18, 43, 55, 0.88)',
-    mixHex(accent, '#ffffff', 0.68),
+    'rgba(255, 255, 255, 0.9)',
+    mixHex(accent, '#ffffff', 0.52),
   );
   context.fillStyle = accent;
   context.font = `800 21px ${VI_FONT}`;
   context.fillText(title, x + 26, y + 48);
   if (!rewards.length) {
-    context.fillStyle = '#829ca8';
+    context.fillStyle = '#64748b';
     context.font = `500 19px ${VI_FONT}`;
     context.fillText(`— ${empty}`, x + 26, y + 94);
     return;
@@ -540,7 +681,7 @@ async function drawRewardList(
       const mascot = await loadImage(source).catch(() => null);
       if (mascot) context.drawImage(mascot, x + 24, rowY, 38, 38);
     }
-    context.fillStyle = '#edf7f8';
+    context.fillStyle = '#253247';
     context.font = `700 19px ${VI_FONT}`;
     fitText(context, reward.name, x + 72, rowY + 27, width - 98, 19);
   }

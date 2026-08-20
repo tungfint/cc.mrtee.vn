@@ -17,11 +17,13 @@ import { StreakService } from '../rewards/streak.service';
 import { RewardsAdminController } from '../rewards/rewards-admin.controller';
 import { RewardImageService } from '../rewards/reward-image.service';
 import { InsightsController } from '../insights/insights.controller';
+import { RecognitionImageService } from '../insights/recognition-image.service';
 import { ScoringAdjustmentsService } from '../scoring/scoring-adjustments.service';
 import { BulkPointImportService } from '../scoring/bulk-point-import.service';
 import type { SyncJobData } from '@cc/core';
 import { UsersController } from '../users/users.controller';
 import { AdminOrganizationsController } from '../organizations/admin-organizations.controller';
+import { OrganizationsController } from '../organizations/organizations.controller';
 import { StudentImportService } from '../organizations/student-import.service';
 import { AvatarService } from '../users/avatar.service';
 import { AuthorizationService } from './authorization.service';
@@ -59,7 +61,9 @@ const rewardsAdmin = new RewardsAdminController(
   } as unknown as RewardImageService,
 );
 const streaks = new StreakService({ sql: connection } as DatabaseService);
-const insights = new InsightsController({ sql: connection } as DatabaseService, service, streaks);
+const insights = new InsightsController({ sql: connection } as DatabaseService, service, streaks, {
+  store: () => Promise.resolve('/api/uploads/recognition/test.png'),
+} as unknown as RecognitionImageService);
 const contentController = new ContentController({ sql: connection } as DatabaseService);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 const bulkPointImport = new BulkPointImportService(service, adjustments, {
@@ -67,6 +71,10 @@ const bulkPointImport = new BulkPointImportService(service, adjustments, {
 } as DatabaseService);
 const usersController = new UsersController({ sql: connection } as DatabaseService, authService);
 const adminOrganizations = new AdminOrganizationsController({ sql: connection } as DatabaseService);
+const organizationsController = new OrganizationsController(
+  { sql: connection } as DatabaseService,
+  service,
+);
 const studentImport = new StudentImportService(service, authService, {
   sql: connection,
 } as DatabaseService);
@@ -142,6 +150,30 @@ describe('authorization matrix', () => {
     expect(() => service.assertCanView(closedAccess)).toThrow();
     const privateAccess = await service.organizationAccess(ids.privateOrg!);
     expect(() => service.assertCanView(privateAccess)).toThrow();
+  });
+
+  it('adds multiple eligible students to a class from pasted emails', async () => {
+    await connection`
+      INSERT INTO user_credentials (user_id, email, password_hash)
+      VALUES
+        (${ids.member!}, 'member-bulk@example.com', 'test-password-hash'),
+        (${ids.teacher!}, 'teacher-bulk@example.com', 'test-password-hash')
+    `;
+    const result = await organizationsController.addMembersByEmail(
+      ids.publicOrg!,
+      {
+        emails: ['member-bulk@example.com', 'teacher-bulk@example.com', 'missing@example.com'],
+      },
+      authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+    );
+    expect(result).toMatchObject({ requested: 3, matched: 1, added: 1, alreadyInClass: 0 });
+    expect(result.notFound).toEqual(['teacher-bulk@example.com', 'missing@example.com']);
+    const replay = await organizationsController.addMembersByEmail(
+      ids.publicOrg!,
+      { emails: ['member-bulk@example.com'] },
+      authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+    );
+    expect(replay).toMatchObject({ matched: 1, added: 0, alreadyInClass: 1 });
   });
 
   it('allows authenticated users into CLOSED and only own PRIVATE organization', async () => {
@@ -491,6 +523,28 @@ describe('authorization matrix', () => {
     }
   });
 
+  it('stores public recognition images at the social sharing aspect ratio', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cc-recognition-test-'));
+    try {
+      const images = new RecognitionImageService(
+        { values: { UPLOAD_DIR: directory } } as EnvironmentService,
+        { sql: connection } as DatabaseService,
+      );
+      const source = await sharp({
+        create: { width: 600, height: 750, channels: 3, background: '#f472b6' },
+      })
+        .png()
+        .toBuffer();
+      const url = await images.store(ids.member!, source);
+      expect(url).toMatch(/^\/api\/uploads\/recognition\/[a-f0-9-]+\.png$/);
+      const file = await readFile(join(directory, 'recognition', basename(url)));
+      const metadata = await sharp(file).metadata();
+      expect(metadata).toMatchObject({ width: 1200, height: 1500, format: 'png' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('closes a season into deterministic snapshots and awards exactly once', async () => {
     await connection`
       INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
@@ -643,9 +697,13 @@ describe('authorization matrix', () => {
     expect(recognition).toHaveProperty('awards');
     expect(recognition).toHaveProperty('rewards');
     expect(recognition).toHaveProperty('topTags');
+    expect(recognition).toHaveProperty('pointHistory');
     expect(recognition.quote).toMatchObject({ content: 'Danh ngôn dùng cho ảnh vinh danh.' });
     const publicProfile = await insights.studentProfile(ids.member!);
     expect(publicProfile.profile).toMatchObject({ id: ids.member!, classes: ['privateOrg'] });
+    expect(publicProfile.pointHistory).toEqual([]);
+    const ownerProfile = await insights.studentProfile(ids.member!, authUser(ids.member!));
+    expect(ownerProfile).toHaveProperty('pointHistory');
   });
 
   it('requires the configured CC Level before redeeming a mascot', async () => {

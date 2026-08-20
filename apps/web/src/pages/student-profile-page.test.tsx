@@ -85,6 +85,7 @@ describe('StudentProfilePage', () => {
         awards: [],
         rewards: [],
         topTags: [],
+        pointHistory: [],
       });
     });
   });

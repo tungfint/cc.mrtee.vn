@@ -1,4 +1,24 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
+
+export function PasswordInput({
+  className = '',
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className={`password-input ${className}`.trim()}>
+      <input {...props} type={visible ? 'text' : 'password'} />
+      <button
+        aria-label={visible ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+        aria-pressed={visible}
+        onClick={() => setVisible((current) => !current)}
+        type="button"
+      >
+        {visible ? '◉' : '◌'}
+      </button>
+    </span>
+  );
+}
 
 export function Avatar({
   name,

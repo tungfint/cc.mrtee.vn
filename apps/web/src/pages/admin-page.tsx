@@ -1,5 +1,6 @@
 ﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { api, formatDate, formatNumber, formatVnd, useSession } from '../lib/api';
 import {
   Avatar,
@@ -8,6 +9,7 @@ import {
   ErrorState,
   LoadingState,
   PageTitle,
+  PasswordInput,
   StatusPill,
 } from '../components/ui';
 import { RewardImageUploader } from '../components/reward-image-uploader';
@@ -227,7 +229,9 @@ const auditActionLabels: Record<string, string> = {
   ORGANIZATION_UPDATED: 'Cập nhật lớp học',
   ORGANIZATION_ARCHIVED: 'Lưu trữ lớp học',
   ORGANIZATION_MEMBER_ADDED: 'Thêm thành viên vào lớp',
+  ORGANIZATION_MEMBERS_BULK_ADDED: 'Thêm nhiều học sinh vào lớp',
   ORGANIZATION_MEMBER_UPDATED: 'Cập nhật thành viên lớp',
+  RECOGNITION_IMAGE_CREATED: 'Tạo liên kết ảnh vinh danh',
   REWARD_CREATED: 'Tạo phần thưởng',
   REWARD_UPDATED: 'Cập nhật phần thưởng',
   REWARD_DELETED: 'Xoá phần thưởng',
@@ -363,7 +367,12 @@ export default function AdminPage() {
   const [syncScope, setSyncScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>('USER');
   const [syncUserId, setSyncUserId] = useState('');
   const [studentClassFilter, setStudentClassFilter] = useState('ALL');
+  const [accountSearch, setAccountSearch] = useState('');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [classEmailPaste, setClassEmailPaste] = useState('');
+  useEffect(() => {
+    if (isSystemAdmin && tab === 'members') setTab('accounts');
+  }, [isSystemAdmin, tab]);
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => api<{ memberships: Membership[] }>('/me'),
@@ -598,6 +607,33 @@ export default function AdminPage() {
       ]);
     },
   });
+  const addClassMembersByEmail = useMutation({
+    mutationFn: () => {
+      const emails = classEmailPaste
+        .split(/[\s,;]+/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+      if (!organizationId) throw new Error('Chọn lớp học trước khi thêm học sinh');
+      if (!emails.length) throw new Error('Dán ít nhất một email học sinh');
+      return api<{
+        requested: number;
+        matched: number;
+        added: number;
+        alreadyInClass: number;
+        notFound: string[];
+      }>(`/organizations/${organizationId}/members/by-email`, {
+        method: 'POST',
+        body: JSON.stringify({ emails }),
+      });
+    },
+    onSuccess: async () => {
+      setClassEmailPaste('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+      ]);
+    },
+  });
   if (me.isPending) return <LoadingState label="Đang kiểm tra quyền quản trị…" />;
   if (me.error) return <ErrorState error={me.error} />;
   const memberships =
@@ -631,6 +667,31 @@ export default function AdminPage() {
       }
       return true;
     }) ?? [];
+  const accountRows =
+    users.data?.users.filter((item) => {
+      const search = accountSearch.trim().toLocaleLowerCase('vi');
+      if (
+        search &&
+        ![item.display_name, item.full_name, item.email, item.codeforces_handle ?? ''].some(
+          (value) => value.toLocaleLowerCase('vi').includes(search),
+        )
+      ) {
+        return false;
+      }
+      const classes = item.memberships.filter(({ role }) => role === 'MEMBER');
+      if (studentClassFilter === 'UNASSIGNED') return classes.length === 0;
+      if (studentClassFilter !== 'ALL') {
+        return classes.some(({ organizationId: id }) => id === studentClassFilter);
+      }
+      return true;
+    }) ?? [];
+  const selectableAccountStudents = accountRows.filter(
+    (item) =>
+      item.system_role === 'USER' &&
+      !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role)) &&
+      Boolean(item.codeforces_handle) &&
+      item.verification_status === 'UNVERIFIED',
+  );
   const verifiableStudents = globalStudents.filter(
     (item) => item.codeforces_handle && item.verification_status === 'UNVERIFIED',
   );
@@ -713,7 +774,7 @@ export default function AdminPage() {
           { id: 'organizations', label: 'Lớp học' },
         ]
       : []),
-    { id: 'members', label: 'Học sinh' },
+    ...(!isSystemAdmin ? [{ id: 'members', label: 'Học sinh' }] : []),
     { id: 'points', label: 'Điểm & CC Base' },
     { id: 'sync', label: 'Đồng bộ CF' },
     ...(isSystemAdmin
@@ -811,11 +872,10 @@ export default function AdminPage() {
                     </label>
                     <label className="field">
                       <span>Mật khẩu tạm</span>
-                      <input
+                      <PasswordInput
                         minLength={12}
                         onChange={(e) => setPassword(e.target.value)}
                         required
-                        type="password"
                         value={password}
                       />
                     </label>
@@ -916,11 +976,10 @@ export default function AdminPage() {
                   </label>
                   <label className="field mt-4">
                     <span>Mật khẩu mới</span>
-                    <input
+                    <PasswordInput
                       minLength={12}
                       onChange={(e) => setResetPassword(e.target.value)}
                       required
-                      type="password"
                       value={resetPassword}
                     />
                   </label>
@@ -1114,107 +1173,214 @@ export default function AdminPage() {
                 </form>
               )}
               <div className="panel overflow-hidden">
-                <div className="management-header">
-                  <strong>{users.data?.total ?? 0} tài khoản</strong>
-                  <span>Trạng thái và quyền hệ thống</span>
+                <div className="management-header account-management-header">
+                  <div>
+                    <strong>
+                      {accountRows.length}/{users.data?.total ?? 0} tài khoản
+                    </strong>
+                    <span>Tìm kiếm, lọc lớp, chọn học sinh và xác minh Codeforces</span>
+                  </div>
+                  <div className="account-filter-bar">
+                    <label className="field compact-field">
+                      <span>Tìm tài khoản</span>
+                      <input
+                        onChange={(event) => {
+                          setAccountSearch(event.target.value);
+                          setSelectedStudentIds([]);
+                        }}
+                        placeholder="Tên, email hoặc tài khoản CF"
+                        type="search"
+                        value={accountSearch}
+                      />
+                    </label>
+                    <label className="field compact-field">
+                      <span>Lọc theo lớp</span>
+                      <select
+                        onChange={(event) => {
+                          setStudentClassFilter(event.target.value);
+                          setSelectedStudentIds([]);
+                        }}
+                        value={studentClassFilter}
+                      >
+                        <option value="ALL">Tất cả lớp</option>
+                        <option value="UNASSIGNED">Chưa xếp lớp</option>
+                        {organizations.data?.organizations
+                          .filter(({ status }) => status === 'ACTIVE')
+                          .map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <button
+                      className="button-secondary"
+                      disabled={!selectableAccountStudents.length}
+                      onClick={() =>
+                        setSelectedStudentIds(selectableAccountStudents.map((item) => item.id))
+                      }
+                      type="button"
+                    >
+                      Chọn HS chưa xác minh
+                    </button>
+                    <button
+                      className="button-primary"
+                      disabled={!selectedStudentIds.length || verifyStudents.isPending}
+                      onClick={() => verifyStudents.mutate(selectedStudentIds)}
+                      type="button"
+                    >
+                      Xác minh CF ({selectedStudentIds.length})
+                    </button>
+                  </div>
                 </div>
+                {verifyStudents.error && (
+                  <p className="notice error">{verifyStudents.error.message}</p>
+                )}
                 {users.isPending ? (
                   <LoadingState label="Đang tải tài khoản…" />
                 ) : (
-                  users.data?.users.map((item) => (
-                    <div className="account-row" key={item.id}>
-                      <div className="member">
-                        <Avatar
-                          name={item.display_name}
-                          rating={item.current_rating}
-                          size="sm"
-                          url={item.avatar_url}
-                        />
-                        <div>
-                          <strong>{item.display_name}</strong>
-                          <p>
-                            {item.email} · CC Base {item.initial_cc_level ?? '800'} ·{' '}
-                            {item.memberships.length} lớp
-                          </p>
-                          {item.must_change_password && (
-                            <p className="pending-copy">Phải đổi mật khẩu khi đăng nhập</p>
-                          )}
-                          {item.codeforces_handle && (
-                            <CodeforcesHandle
-                              handle={item.codeforces_handle}
-                              rating={item.current_rating}
+                  accountRows.map((item) => {
+                    const isStudent =
+                      item.system_role === 'USER' &&
+                      !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
+                    const canVerify =
+                      isStudent &&
+                      Boolean(item.codeforces_handle) &&
+                      item.verification_status === 'UNVERIFIED';
+                    const checked = selectedStudentIds.includes(item.id);
+                    return (
+                      <div className="account-row" key={item.id}>
+                        <div className="member">
+                          {isStudent && (
+                            <input
+                              aria-label={`Chọn ${item.display_name}`}
+                              checked={checked}
+                              className="student-checkbox"
+                              disabled={!canVerify}
+                              onChange={() =>
+                                setSelectedStudentIds((current) =>
+                                  checked
+                                    ? current.filter((id) => id !== item.id)
+                                    : [...current, item.id],
+                                )
+                              }
+                              type="checkbox"
                             />
                           )}
-                          {item.pending_handle && (
-                            <p className="pending-copy">Chờ duyệt: @{item.pending_handle}</p>
+                          {isStudent ? (
+                            <Link to={`/students/${item.id}`}>
+                              <Avatar
+                                name={item.display_name}
+                                rating={item.current_rating}
+                                size="sm"
+                                url={item.avatar_url}
+                              />
+                            </Link>
+                          ) : (
+                            <Avatar
+                              name={item.display_name}
+                              rating={item.current_rating}
+                              size="sm"
+                              url={item.avatar_url}
+                            />
+                          )}
+                          <div>
+                            {isStudent ? (
+                              <Link
+                                className="student-profile-name-link"
+                                to={`/students/${item.id}`}
+                              >
+                                {item.display_name}
+                              </Link>
+                            ) : (
+                              <strong>{item.display_name}</strong>
+                            )}
+                            <p>
+                              {item.email} · CC Base {item.initial_cc_level ?? '800'} ·{' '}
+                              {item.memberships.length} lớp
+                            </p>
+                            {item.must_change_password && (
+                              <p className="pending-copy">Phải đổi mật khẩu khi đăng nhập</p>
+                            )}
+                            {item.codeforces_handle && (
+                              <CodeforcesHandle
+                                handle={item.codeforces_handle}
+                                rating={item.current_rating}
+                              />
+                            )}
+                            {item.pending_handle && (
+                              <p className="pending-copy">Chờ duyệt: @{item.pending_handle}</p>
+                            )}
+                          </div>
+                        </div>
+                        <select
+                          aria-label={`Trạng thái ${item.display_name}`}
+                          onChange={(e) =>
+                            mutation.mutate({
+                              path: `/admin/users/${item.id}`,
+                              method: 'PATCH',
+                              body: {
+                                status: e.target.value,
+                                reason: 'Cập nhật trạng thái từ trang quản trị',
+                              },
+                            })
+                          }
+                          value={item.status}
+                        >
+                          <option>ACTIVE</option>
+                          <option>INACTIVE</option>
+                          <option>SUSPENDED</option>
+                        </select>
+                        <select
+                          aria-label={`Quyền ${item.display_name}`}
+                          onChange={(e) =>
+                            mutation.mutate({
+                              path: `/admin/users/${item.id}`,
+                              method: 'PATCH',
+                              body: {
+                                systemRole: e.target.value,
+                                reason: 'Cập nhật quyền hệ thống từ trang quản trị',
+                              },
+                            })
+                          }
+                          value={item.system_role}
+                        >
+                          <option>USER</option>
+                          <option>SYSTEM_ADMIN</option>
+                        </select>
+                        <div className="compact-actions">
+                          <button
+                            className="button-secondary"
+                            onClick={() => setEditingUser(item)}
+                            type="button"
+                          >
+                            Sửa
+                          </button>
+                          {item.id !== session.data?.user.userId && (
+                            <button
+                              className="button-danger"
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `Xoá tài khoản “${item.display_name}”? Tài khoản sẽ bị khoá và được đưa ra khỏi tất cả lớp.`,
+                                  )
+                                )
+                                  return;
+                                mutation.mutate({
+                                  path: `/admin/users/${item.id}`,
+                                  method: 'DELETE',
+                                  body: { reason: 'Admin xoá tài khoản khỏi hệ thống' },
+                                });
+                              }}
+                              type="button"
+                            >
+                              Xoá
+                            </button>
                           )}
                         </div>
                       </div>
-                      <select
-                        aria-label={`Trạng thái ${item.display_name}`}
-                        onChange={(e) =>
-                          mutation.mutate({
-                            path: `/admin/users/${item.id}`,
-                            method: 'PATCH',
-                            body: {
-                              status: e.target.value,
-                              reason: 'Cập nhật trạng thái từ trang quản trị',
-                            },
-                          })
-                        }
-                        value={item.status}
-                      >
-                        <option>ACTIVE</option>
-                        <option>INACTIVE</option>
-                        <option>SUSPENDED</option>
-                      </select>
-                      <select
-                        aria-label={`Quyền ${item.display_name}`}
-                        onChange={(e) =>
-                          mutation.mutate({
-                            path: `/admin/users/${item.id}`,
-                            method: 'PATCH',
-                            body: {
-                              systemRole: e.target.value,
-                              reason: 'Cập nhật quyền hệ thống từ trang quản trị',
-                            },
-                          })
-                        }
-                        value={item.system_role}
-                      >
-                        <option>USER</option>
-                        <option>SYSTEM_ADMIN</option>
-                      </select>
-                      <button
-                        className="button-secondary"
-                        onClick={() => setEditingUser(item)}
-                        type="button"
-                      >
-                        Sửa
-                      </button>
-                      {item.id !== session.data?.user.userId && (
-                        <button
-                          className="button-danger"
-                          onClick={() => {
-                            if (
-                              !window.confirm(
-                                `Xoá tài khoản “${item.display_name}”? Tài khoản sẽ bị khoá và được đưa ra khỏi tất cả lớp.`,
-                              )
-                            )
-                              return;
-                            mutation.mutate({
-                              path: `/admin/users/${item.id}`,
-                              method: 'DELETE',
-                              body: { reason: 'Admin xoá tài khoản khỏi hệ thống' },
-                            });
-                          }}
-                          type="button"
-                        >
-                          Xoá tài khoản
-                        </button>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </section>
@@ -1372,35 +1538,30 @@ export default function AdminPage() {
                         <option>ACTIVE</option>
                         <option>INACTIVE</option>
                       </select>
-                      <button
-                        className="button-secondary"
-                        onClick={() => setEditingOrganization(item)}
-                        type="button"
-                      >
-                        Sửa
-                      </button>
-                      <button
-                        className="button-secondary"
-                        onClick={() => setOrganizationId(item.id)}
-                        type="button"
-                      >
-                        Học sinh
-                      </button>
-                      <button
-                        className="button-danger"
-                        disabled={item.status === 'INACTIVE'}
-                        onClick={() => {
-                          if (!window.confirm(`Lưu trữ lớp “${item.name}”?`)) return;
-                          mutation.mutate({
-                            path: `/admin/organizations/${item.id}`,
-                            method: 'DELETE',
-                            body: null,
-                          });
-                        }}
-                        type="button"
-                      >
-                        {item.status === 'INACTIVE' ? 'Đã lưu trữ' : 'Xoá'}
-                      </button>
+                      <div className="compact-actions">
+                        <button
+                          className="button-secondary"
+                          onClick={() => setEditingOrganization(item)}
+                          type="button"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          className="button-danger"
+                          disabled={item.status === 'INACTIVE'}
+                          onClick={() => {
+                            if (!window.confirm(`Lưu trữ lớp “${item.name}”?`)) return;
+                            mutation.mutate({
+                              path: `/admin/organizations/${item.id}`,
+                              method: 'DELETE',
+                              body: null,
+                            });
+                          }}
+                          type="button"
+                        >
+                          {item.status === 'INACTIVE' ? 'Đã lưu trữ' : 'Xoá'}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1467,6 +1628,46 @@ export default function AdminPage() {
                         Thêm vào lớp
                       </button>
                     </form>
+                    <form
+                      className="class-member-bulk-add"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        addClassMembersByEmail.mutate();
+                      }}
+                    >
+                      <label className="field">
+                        <span>Thêm nhiều học sinh bằng email</span>
+                        <textarea
+                          onChange={(event) => setClassEmailPaste(event.target.value)}
+                          placeholder={'hocsinh1@example.com\nhocsinh2@example.com'}
+                          rows={4}
+                          value={classEmailPaste}
+                        />
+                        <small>
+                          Dán email cách nhau bằng dấu phẩy, dấu chấm phẩy hoặc xuống dòng.
+                        </small>
+                      </label>
+                      <button
+                        className="button-secondary"
+                        disabled={!classEmailPaste.trim() || addClassMembersByEmail.isPending}
+                        type="submit"
+                      >
+                        {addClassMembersByEmail.isPending ? 'Đang thêm…' : 'Thêm danh sách vào lớp'}
+                      </button>
+                    </form>
+                    {addClassMembersByEmail.error && (
+                      <p className="notice error">{addClassMembersByEmail.error.message}</p>
+                    )}
+                    {addClassMembersByEmail.data && (
+                      <p className="notice success">
+                        Đã thêm {addClassMembersByEmail.data.added}/
+                        {addClassMembersByEmail.data.requested} học sinh;{' '}
+                        {addClassMembersByEmail.data.alreadyInClass} tài khoản đã có trong lớp.
+                        {addClassMembersByEmail.data.notFound.length
+                          ? ` Không tìm thấy: ${addClassMembersByEmail.data.notFound.join(', ')}.`
+                          : ''}
+                      </p>
+                    )}
                     <div className="class-member-list">
                       {members.isPending ? (
                         <LoadingState label="Đang tải danh sách lớp…" />

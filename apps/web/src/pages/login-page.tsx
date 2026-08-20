@@ -2,6 +2,7 @@
 import { useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api, type SessionUser } from '../lib/api';
+import { PasswordInput } from '../components/ui';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -68,12 +69,11 @@ export default function LoginPage() {
           </label>
           <label className="field mt-4">
             <span>Mật khẩu</span>
-            <input
+            <PasswordInput
               autoComplete="current-password"
               minLength={12}
               onChange={(e) => setPassword(e.target.value)}
               required
-              type="password"
               value={password}
             />
           </label>

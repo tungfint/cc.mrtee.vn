@@ -6,6 +6,7 @@ import {
   ErrorState,
   LoadingState,
   PageTitle,
+  PasswordInput,
   StatusPill,
 } from '../components/ui';
 import { api } from '../lib/api';
@@ -260,21 +261,19 @@ export default function AccountPage() {
             <h2 className="mt-2 text-xl font-black">Đổi mật khẩu</h2>
             <label className="field mt-5">
               <span>Mật khẩu hiện tại</span>
-              <input
+              <PasswordInput
                 minLength={12}
                 onChange={(event) => setCurrentPassword(event.target.value)}
                 required
-                type="password"
                 value={currentPassword}
               />
             </label>
             <label className="field mt-4">
               <span>Mật khẩu mới</span>
-              <input
+              <PasswordInput
                 minLength={12}
                 onChange={(event) => setNewPassword(event.target.value)}
                 required
-                type="password"
                 value={newPassword}
               />
             </label>

@@ -26,6 +26,9 @@ const addMemberSchema = z.object({
   userId: z.string().uuid(),
   role: z.enum(['MEMBER', 'TEACHER', 'ORG_ADMIN']).default('MEMBER'),
 });
+const addMembersByEmailSchema = z.object({
+  emails: z.array(z.string().trim().toLowerCase().email()).min(1).max(500),
+});
 const updateMemberSchema = z.object({
   role: z.enum(['MEMBER', 'TEACHER', 'ORG_ADMIN']).optional(),
   status: z.enum(['ACTIVE', 'SUSPENDED', 'LEFT']).optional(),
@@ -145,6 +148,59 @@ export class OrganizationsController {
       return created;
     });
     return { membership };
+  }
+
+  @Post(':id/members/by-email')
+  async addMembersByEmail(
+    @Param('id') idInput: string,
+    @Body() body: unknown,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const id = this.uuid(idInput);
+    const input = this.parse(addMembersByEmailSchema, body);
+    const emails = [...new Set(input.emails)];
+    const access = await this.authorization.organizationAccess(id, user);
+    this.authorization.assertCanManage(access, user);
+    return this.database.sql.begin(async (transaction) => {
+      const matched = await transaction<{ id: string; email: string }[]>`
+        SELECT users.id, lower(credentials.email::text) AS email
+        FROM users
+        JOIN user_credentials AS credentials ON credentials.user_id = users.id
+        WHERE lower(credentials.email::text) = ANY(${emails}::text[])
+          AND users.status = 'ACTIVE' AND users.system_role = 'USER'
+          AND NOT EXISTS (
+            SELECT 1 FROM organization_memberships AS staff
+            WHERE staff.user_id = users.id AND staff.status = 'ACTIVE'
+              AND staff.role IN ('TEACHER', 'ORG_ADMIN')
+          )
+      `;
+      const added = await transaction<{ user_id: string }[]>`
+        INSERT INTO organization_memberships (organization_id, user_id, role)
+        SELECT ${id}, matched.id, 'MEMBER'
+        FROM unnest(${matched.map((item) => item.id)}::uuid[]) AS matched(id)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM organization_memberships AS existing
+          WHERE existing.organization_id = ${id} AND existing.user_id = matched.id
+            AND existing.status = 'ACTIVE'
+        )
+        RETURNING user_id
+      `;
+      const matchedEmails = new Set(matched.map((item) => item.email));
+      const notFound = emails.filter((email) => !matchedEmails.has(email));
+      await transaction`
+        INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after, reason)
+        VALUES (${user.userId}, 'ORGANIZATION_MEMBERS_BULK_ADDED', 'organization', ${id},
+          ${JSON.stringify({ emails, addedUserIds: added.map((item) => item.user_id), notFound })}::jsonb,
+          'Thêm nhiều học sinh vào lớp bằng danh sách email')
+      `;
+      return {
+        requested: emails.length,
+        matched: matched.length,
+        added: added.length,
+        alreadyInClass: matched.length - added.length,
+        notFound,
+      };
+    });
   }
 
   @Patch(':id/members/:userId')

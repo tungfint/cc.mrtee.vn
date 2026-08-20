@@ -16,6 +16,7 @@ import {
 
 interface Dashboard {
   profile: {
+    id: string;
     display_name: string;
     avatar_url: string | null;
     codeforces_handle: string | null;
@@ -145,13 +146,19 @@ export default function DashboardPage() {
         detail={<QuoteRotator quotes={dashboardContent.data?.quotes ?? []} />}
         action={
           <div className="dashboard-identity">
-            <Avatar
-              name={profile.display_name}
-              rating={profile.current_rating}
-              size="xl"
-              url={profile.avatar_url}
-            />
+            <Link aria-label="Mở hồ sơ học sinh" to={`/students/${profile.id}`}>
+              <Avatar
+                name={profile.display_name}
+                rating={profile.current_rating}
+                size="xl"
+                url={profile.avatar_url}
+              />
+            </Link>
             <div>
+              <Link className="dashboard-profile-link" to={`/students/${profile.id}`}>
+                <StudentName name={profile.display_name} rating={profile.current_rating} />
+                <span>Mở hồ sơ →</span>
+              </Link>
               {profile.codeforces_handle ? (
                 <CodeforcesHandle
                   handle={profile.codeforces_handle}

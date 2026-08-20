@@ -1244,7 +1244,235 @@ textarea:focus {
   padding: 14px 18px;
 }
 .organization-row {
-  grid-template-columns: minmax(250px, 1fr) 145px 130px auto auto;
+  grid-template-columns: minmax(250px, 1fr) 145px 130px auto;
+}
+
+.compact-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.compact-actions button {
+  min-height: 38px;
+  padding-inline: 13px;
+}
+
+.password-input {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.password-input > input {
+  width: 100%;
+  padding-right: 48px !important;
+}
+
+.password-input > button {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  translate: 0 -50%;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 20px;
+}
+
+.password-input > button:hover {
+  color: var(--accent);
+  background: var(--surface-2);
+}
+
+.dashboard-profile-link {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+  text-decoration: none;
+}
+
+.dashboard-profile-link strong {
+  font-size: 18px;
+}
+
+.dashboard-profile-link span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.student-profile-name-link {
+  color: var(--text);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.student-profile-name-link:hover,
+.dashboard-profile-link:hover span {
+  color: var(--accent);
+}
+
+.account-management-header {
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.account-management-header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.account-filter-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.compact-field {
+  min-width: 190px;
+}
+
+.compact-field > span {
+  font-size: 9px;
+}
+
+.class-member-bulk-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 38%, var(--line));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-2));
+}
+
+.class-member-bulk-add textarea {
+  min-height: 94px;
+  resize: vertical;
+}
+
+.class-member-bulk-add small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.point-history-panel {
+  margin-top: 24px;
+}
+
+.point-history-table {
+  overflow: hidden;
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.point-history-row {
+  display: grid;
+  grid-template-columns: 165px minmax(220px, 1fr) minmax(150px, 0.55fr) minmax(150px, 0.55fr);
+  align-items: center;
+  gap: 16px;
+  padding: 14px 17px;
+  border-top: 1px solid var(--line);
+}
+
+.point-history-row.header {
+  border-top: 0;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.point-history-row > span {
+  display: grid;
+  gap: 3px;
+}
+
+.point-history-row time,
+.point-history-row small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.point-history-row b {
+  font-size: 16px;
+}
+
+.point-history-row .positive {
+  color: #059669;
+}
+
+.point-history-row .negative {
+  color: #e11d48;
+}
+
+.recognition-share-box {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--recognition-accent) 35%, var(--line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--recognition-accent) 7%, var(--surface-2));
+}
+
+.recognition-share-box > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.recognition-share-box a {
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recognition-share-actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .account-management-header,
+  .account-filter-bar,
+  .class-member-bulk-add {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .account-filter-bar > *,
+  .compact-field {
+    width: 100%;
+  }
+
+  .point-history-table {
+    overflow-x: auto;
+  }
+
+  .point-history-row {
+    min-width: 720px;
+  }
 }
 .reward-admin-row {
   grid-template-columns: minmax(230px, 1fr) 110px minmax(170px, auto);

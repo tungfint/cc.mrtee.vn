@@ -1,4 +1,15 @@
-import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { z } from 'zod';
 import {
   CurrentUser,
@@ -10,6 +21,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
 import { StreakService } from '../rewards/streak.service';
+import { RecognitionImageService } from './recognition-image.service';
 
 interface LeaderboardRow {
   user_id: string;
@@ -42,7 +54,26 @@ export class InsightsController {
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
     private readonly streaks: StreakService,
+    private readonly recognitionImages: RecognitionImageService,
   ) {}
+
+  @Post('recognition-images')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      fileFilter: (_request, file, callback) => {
+        callback(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype));
+      },
+    }),
+  )
+  async uploadRecognitionImage(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!file) throw new BadRequestException('Chọn ảnh PNG, JPG hoặc WebP tối đa 10 MB');
+    return { imageUrl: await this.recognitionImages.store(user.userId, file.buffer) };
+  }
 
   @Get('me/dashboard')
   async dashboard(@CurrentUser() user: AuthUser) {
@@ -164,15 +195,17 @@ export class InsightsController {
 
   @Get('me/recognition')
   async ownRecognition(@CurrentUser() user: AuthUser) {
-    return this.recognition(user.userId);
+    return this.recognition(user.userId, true);
   }
 
   @OptionalAuth()
   @Get('students/:userId/profile')
-  async studentProfile(@Param('userId') userIdInput: string) {
+  async studentProfile(@Param('userId') userIdInput: string, @OptionalUser() viewer?: AuthUser) {
     const userId = z.string().uuid().safeParse(userIdInput);
     if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
-    return this.recognition(userId.data);
+    const canViewPointHistory =
+      viewer?.userId === userId.data || viewer?.systemRole === 'SYSTEM_ADMIN';
+    return this.recognition(userId.data, canViewPointHistory);
   }
 
   @RequireSystemRole('SYSTEM_ADMIN')
@@ -180,7 +213,7 @@ export class InsightsController {
   async adminRecognition(@Param('userId') userIdInput: string) {
     const userId = z.string().uuid().safeParse(userIdInput);
     if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
-    return this.recognition(userId.data);
+    return this.recognition(userId.data, true);
   }
 
   @OptionalAuth()
@@ -384,9 +417,10 @@ export class InsightsController {
     };
   }
 
-  private async recognition(userId: string) {
-    const [profiles, streak, awards, rewards, topTags, recognitionQuotes] = await Promise.all([
-      this.database.sql`
+  private async recognition(userId: string, includePointHistory = false) {
+    const [profiles, streak, awards, rewards, topTags, recognitionQuotes, pointHistory] =
+      await Promise.all([
+        this.database.sql`
         SELECT users.id, users.full_name, users.display_name, users.avatar_url,
           accounts.handle AS codeforces_handle, accounts.current_rating, accounts.max_rating,
           accounts.rank AS codeforces_rank, accounts.max_rank AS codeforces_max_rank,
@@ -441,15 +475,15 @@ export class InsightsController {
               AND staff.role IN ('TEACHER', 'ORG_ADMIN')
           )
       `,
-      this.streaks.summary(userId),
-      this.database.sql`
+        this.streaks.summary(userId),
+        this.database.sql`
         SELECT awards.award_type, awards.title, awards.awarded_at, seasons.name AS season_name
         FROM season_awards AS awards
         JOIN seasons ON seasons.id = awards.season_id
         WHERE awards.user_id = ${userId}
         ORDER BY awards.awarded_at DESC LIMIT 12
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT rewards.name, rewards.description, rewards.image_url, rewards.cash_value_vnd,
           orders.reviewed_at AS earned_at
         FROM reward_orders AS orders
@@ -459,7 +493,7 @@ export class InsightsController {
           AND rescues.id IS NULL
         ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 12
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT tags.tag, count(DISTINCT solves.problem_key)::int AS solved_count,
           max(solves.rating_snapshot)::int AS max_rating
         FROM user_problem_solves AS solves
@@ -470,14 +504,32 @@ export class InsightsController {
         ORDER BY solved_count DESC, max_rating DESC NULLS LAST, tags.tag
         LIMIT 8
       `,
-      this.database.sql`
+        this.database.sql`
         SELECT content, author
         FROM motivational_quotes
         WHERE active = true
         ORDER BY random()
         LIMIT 1
       `,
-    ]);
+        includePointHistory
+          ? this.database.sql`
+            SELECT id, type, amount::text, description, event_at, created_at,
+              CASE WHEN type NOT IN ('REDEEM', 'REFUND') THEN amount ELSE 0 END::text
+                AS cc_point_delta,
+              CASE WHEN affects_wallet THEN amount ELSE 0 END::text AS cc_balance_delta,
+              COALESCE(sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
+                ORDER BY event_at, created_at, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+              ), 0)::text AS cc_point_after,
+              COALESCE(sum(amount) FILTER (WHERE affects_wallet) OVER (
+                ORDER BY event_at, created_at, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+              ), 0)::text AS cc_balance_after
+            FROM point_transactions
+            WHERE user_id = ${userId}
+            ORDER BY event_at DESC, created_at DESC, id DESC
+            LIMIT 50
+          `
+          : Promise.resolve([]),
+      ]);
     const profile = profiles[0];
     if (!profile) throw new BadRequestException('Không tìm thấy học sinh');
     return {
@@ -494,6 +546,7 @@ export class InsightsController {
       awards,
       rewards,
       topTags,
+      pointHistory,
       quote: recognitionQuotes[0] ?? null,
       generatedAt: new Date().toISOString(),
     };
