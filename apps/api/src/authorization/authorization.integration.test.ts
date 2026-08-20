@@ -1157,4 +1157,55 @@ describe('authorization matrix', () => {
       adjustments.apply({ ...command, organizationId: ids.otherPrivateOrg! }),
     ).rejects.toThrow();
   });
+
+  it('allows SYSTEM_ADMIN to adjust an account outside every class without season attribution', async () => {
+    const result = await adjustments.apply({
+      targetUserId: ids.systemAdmin!,
+      type: 'BONUS',
+      amount: 25,
+      affectsSeason: true,
+      reason: 'System admin global adjustment',
+      idempotencyKey: 'system-admin-global-adjustment',
+      actor: authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),
+    });
+
+    expect(result.replayed).toBe(false);
+    const transactionId = result.transaction?.id;
+    if (!transactionId) throw new Error('Global adjustment did not create a transaction');
+    const [record] = await connection<
+      {
+        wallet: string;
+        season_id: string | null;
+        affects_season: boolean;
+        organization_id: string | null;
+        scope: string;
+      }[]
+    >`
+      SELECT wallets.balance::text AS wallet, points.season_id, points.affects_season,
+        points.metadata->>'organizationId' AS organization_id,
+        points.metadata->>'scope' AS scope
+      FROM point_transactions AS points
+      JOIN user_wallets AS wallets ON wallets.user_id = points.user_id
+      WHERE points.id = ${transactionId}
+    `;
+    expect(record).toEqual({
+      wallet: '25.00',
+      season_id: null,
+      affects_season: false,
+      organization_id: null,
+      scope: 'GLOBAL',
+    });
+
+    await expect(
+      adjustments.apply({
+        targetUserId: ids.admin!,
+        type: 'BONUS',
+        amount: 10,
+        affectsSeason: false,
+        reason: 'Admin without class',
+        idempotencyKey: 'admin-global-adjustment',
+        actor: authUser(ids.admin!, 'ADMIN'),
+      }),
+    ).rejects.toThrow('Cần chọn lớp học');
+  });
 });

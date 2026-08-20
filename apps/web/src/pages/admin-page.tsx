@@ -707,7 +707,9 @@ export default function AdminPage() {
   const canApproveHandle = isSystemAdmin || selectedOrganization?.role === 'ORG_ADMIN';
   const noOrganizationSelected =
     !organizationId &&
-    (['points', 'sync'].includes(tab) || (!isSystemAdmin && ['members', 'audit'].includes(tab)));
+    ((tab === 'points' && !isSuperAdmin) ||
+      tab === 'sync' ||
+      (!isSystemAdmin && ['members', 'audit'].includes(tab)));
   const globalStudents =
     users.data?.users.filter((item) => {
       if (
@@ -777,18 +779,37 @@ export default function AdminPage() {
   const syncEligibleMembers = syncAccounts.filter(
     (member) => member.verification_status && member.verification_status !== 'UNVERIFIED',
   );
-  const selectTarget = targetId || members.data?.members[0]?.user_id || '';
+  const pointTargets = isSuperAdmin
+    ? (users.data?.users.filter((item) => item.status === 'ACTIVE') ?? [])
+    : (members.data?.members.filter((item) => item.status === 'ACTIVE') ?? []);
+  const selectTarget = pointTargets.some((item) =>
+    ('id' in item ? item.id : item.user_id) === targetId,
+  )
+    ? targetId
+    : pointTargets[0]
+      ? 'id' in pointTargets[0]
+        ? pointTargets[0].id
+        : pointTargets[0].user_id
+      : '';
   const selectSyncTarget = syncUserId || syncEligibleMembers[0]?.user_id || '';
   const submitPoints = (event: FormEvent) => {
     event.preventDefault();
     if (!selectTarget) return;
+    const targetBelongsToSelectedOrganization = isSuperAdmin
+      ? users.data?.users
+          .find((item) => item.id === selectTarget)
+          ?.memberships.some(
+            (membership) =>
+              membership.organizationId === organizationId && membership.role === 'MEMBER',
+          )
+      : true;
     mutation.mutate({
       path: `/admin/users/${selectTarget}/points`,
       body: {
-        organizationId,
+        ...(organizationId && targetBelongsToSelectedOrganization ? { organizationId } : {}),
         type: pointType,
         amount: Math.abs(Number(pointAmount)) * (pointType === 'PENALTY' ? -1 : 1),
-        affectsSeason: true,
+        affectsSeason: Boolean(organizationId && targetBelongsToSelectedOrganization),
         reason: pointReason,
         idempotencyKey: crypto.randomUUID(),
       },
@@ -2309,7 +2330,7 @@ export default function AdminPage() {
               </div>
             </section>
           )}
-          {tab === 'points' && !noOrganizationSelected && (
+          {tab === 'points' && (!noOrganizationSelected || isSuperAdmin) && (
             <div className="space-y-6">
               <div className="grid gap-6 lg:grid-cols-2">
                 <form className="panel p-6" onSubmit={submitPoints}>
@@ -2331,13 +2352,19 @@ export default function AdminPage() {
                     ⇩ Import hàng loạt bằng CSV / Excel (.xlsx)
                   </button>
                   <label className="field mt-5">
-                    <span>Học sinh</span>
+                    <span>Tài khoản nhận điểm</span>
                     <select onChange={(e) => setTargetId(e.target.value)} value={selectTarget}>
-                      {members.data?.members.map((member) => (
-                        <option key={member.user_id} value={member.user_id}>
-                          {member.display_name}
-                        </option>
-                      ))}
+                      {pointTargets.map((member) => {
+                        const id = 'id' in member ? member.id : member.user_id;
+                        return (
+                          <option key={id} value={id}>
+                            {member.display_name}
+                            {'system_role' in member && member.system_role !== 'USER'
+                              ? ` · ${member.system_role === 'SYSTEM_ADMIN' ? 'S-Admin' : 'Admin'}`
+                              : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
                   <div className="form-grid mt-4">

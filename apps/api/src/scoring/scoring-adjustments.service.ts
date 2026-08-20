@@ -5,6 +5,13 @@ import { DatabaseService } from '../database/database.service';
 
 export type ManualPointType = 'BONUS' | 'PENALTY' | 'ADJUSTMENT';
 
+export interface PointTransactionRecord {
+  id: string;
+  type: ManualPointType;
+  amount: string;
+  [key: string]: unknown;
+}
+
 @Injectable()
 export class ScoringAdjustmentsService {
   constructor(
@@ -13,7 +20,7 @@ export class ScoringAdjustmentsService {
   ) {}
 
   async apply(input: {
-    organizationId: string;
+    organizationId?: string;
     targetUserId: string;
     type: ManualPointType;
     amount: number;
@@ -22,14 +29,30 @@ export class ScoringAdjustmentsService {
     idempotencyKey: string;
     actor: AuthUser;
   }) {
-    const access = await this.authorization.organizationAccess(input.organizationId, input.actor);
-    this.authorization.assertCanTeach(access, input.actor);
-    const [membership] = await this.database.sql`
-      SELECT id FROM organization_memberships
-      WHERE organization_id = ${input.organizationId} AND user_id = ${input.targetUserId}
-        AND status = 'ACTIVE'
+    const isSuperAdmin = input.actor.systemRole === 'SYSTEM_ADMIN';
+    const organizationId = input.organizationId;
+    if (!organizationId && !isSuperAdmin) {
+      throw new BadRequestException('Cần chọn lớp học để điều chỉnh điểm');
+    }
+    if (organizationId) {
+      const access = await this.authorization.organizationAccess(organizationId, input.actor);
+      this.authorization.assertCanTeach(access, input.actor);
+    }
+    const [target] = await this.database.sql`
+      SELECT id FROM users WHERE id = ${input.targetUserId} AND status = 'ACTIVE'
     `;
-    if (!membership) throw new BadRequestException('Người dùng không thuộc tổ chức');
+    if (!target) throw new BadRequestException('Không tìm thấy tài khoản đang hoạt động');
+    const membershipRows = organizationId
+      ? await this.database.sql<{ id: string }[]>`
+          SELECT id FROM organization_memberships
+          WHERE organization_id = ${organizationId} AND user_id = ${input.targetUserId}
+            AND status = 'ACTIVE'
+        `
+      : [];
+    const membership = membershipRows[0];
+    if (!membership && !isSuperAdmin) {
+      throw new BadRequestException('Người dùng không thuộc tổ chức');
+    }
     if (input.type === 'BONUS' && input.amount <= 0) {
       throw new BadRequestException('BONUS phải là số dương');
     }
@@ -38,10 +61,12 @@ export class ScoringAdjustmentsService {
     }
     if (input.amount === 0) throw new BadRequestException('Số điểm thay đổi phải khác 0');
 
-    const key = `manual:${input.organizationId}:${input.targetUserId}:${input.idempotencyKey}`;
+    const organizationScope = organizationId ?? 'GLOBAL';
+    const affectsOrganizationSeason = input.affectsSeason && Boolean(membership);
+    const key = `manual:${organizationScope}:${input.targetUserId}:${input.idempotencyKey}`;
     return this.database.sql.begin(async (transaction) => {
       await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
-      const [existing] = await transaction`
+      const [existing] = await transaction<PointTransactionRecord[]>`
         SELECT * FROM point_transactions WHERE idempotency_key = ${key}
       `;
       if (existing) {
@@ -50,23 +75,28 @@ export class ScoringAdjustmentsService {
         }
         return { transaction: existing, replayed: true };
       }
-      const [season] = input.affectsSeason
+      const seasonRows = affectsOrganizationSeason && organizationId
         ? await transaction<{ id: string }[]>`
             SELECT id FROM seasons
-            WHERE organization_id = ${input.organizationId}
+            WHERE organization_id = ${organizationId}
               AND status IN ('ACTIVE', 'CLOSING')
               AND start_at <= now() AND end_at > now()
             ORDER BY start_at DESC LIMIT 1
           `
         : [];
-      const [pointTransaction] = await transaction`
+      const season = seasonRows[0];
+      const [pointTransaction] = await transaction<PointTransactionRecord[]>`
         INSERT INTO point_transactions (
           user_id, type, amount, season_id, idempotency_key, affects_wallet,
           affects_season, description, metadata, event_at
         ) VALUES (
           ${input.targetUserId}, ${input.type}, ${input.amount}, ${season?.id ?? null},
           ${key}, true, ${Boolean(season)}, ${input.reason},
-          ${JSON.stringify({ organizationId: input.organizationId, actorUserId: input.actor.userId })}::jsonb,
+          jsonb_strip_nulls(jsonb_build_object(
+            'organizationId', ${organizationId ?? null}::text,
+            'actorUserId', ${input.actor.userId}::text,
+            'scope', ${membership ? 'ORGANIZATION' : 'GLOBAL'}::text
+          )),
           now()
         ) RETURNING *
       `;

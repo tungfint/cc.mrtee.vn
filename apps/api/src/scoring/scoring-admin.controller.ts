@@ -7,7 +7,7 @@ import { DatabaseService } from '../database/database.service';
 import { ScoringAdjustmentsService } from './scoring-adjustments.service';
 
 const pointSchema = z.object({
-  organizationId: z.string().uuid(),
+  organizationId: z.string().uuid().optional(),
   type: z.enum(['BONUS', 'PENALTY', 'ADJUSTMENT']),
   amount: z.coerce.number().min(-1_000_000).max(1_000_000),
   affectsSeason: z.boolean().default(true),
@@ -39,7 +39,16 @@ export class ScoringAdminController {
     if (!userId.success || !input.success) {
       throw new BadRequestException('Dữ liệu không hợp lệ');
     }
-    return this.adjustments.apply({ targetUserId: userId.data, actor, ...input.data });
+    return this.adjustments.apply({
+      targetUserId: userId.data,
+      actor,
+      type: input.data.type,
+      amount: input.data.amount,
+      affectsSeason: input.data.affectsSeason,
+      reason: input.data.reason,
+      idempotencyKey: input.data.idempotencyKey,
+      ...(input.data.organizationId ? { organizationId: input.data.organizationId } : {}),
+    });
   }
 
   @Post(':id/activity-risk/review')
