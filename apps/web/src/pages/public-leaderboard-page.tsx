@@ -24,6 +24,8 @@ interface SharedBoard {
     ccPoint: string;
     ccBalance: string;
     streak: number;
+    activityRiskLevel: 'NORMAL' | 'REVIEW' | 'PRIORITY';
+    activityRiskScore: number;
     levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
   share: { scope: 'ALL' | 'ORGANIZATION'; organizationName: string | null } | null;
@@ -116,6 +118,14 @@ export default function PublicLeaderboardPage() {
                   <span className="leader-identity-copy">
                     <span className="leader-name-row">
                       <StudentName name={entry.displayName} rating={entry.currentRating} />
+                      {entry.activityRiskLevel && entry.activityRiskLevel !== 'NORMAL' && (
+                        <span
+                          className={`activity-risk-icon ${entry.activityRiskLevel.toLowerCase()}`}
+                          title="Hoạt động cần kiểm tra"
+                        >
+                          ⚠
+                        </span>
+                      )}
                       <LevelRankBadge rank={entry.levelRank} />
                     </span>
                     {entry.codeforcesHandle && (

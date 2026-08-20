@@ -14,7 +14,6 @@ interface Recognition {
     max_rating: number | null;
     codeforces_rank: string | null;
     codeforces_max_rank: string | null;
-    cc_base: string;
     cc_level: string;
     cc_point: string;
     cc_balance: string;

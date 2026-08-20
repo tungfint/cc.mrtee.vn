@@ -107,7 +107,8 @@ describe('authorization matrix', () => {
         reward_min, reward_max, reward_midpoint_delta, reward_scale, effective_from
       ) VALUES
         ('v2.0', 0.95, 20, 0, 4, 400, 800, 0.05, 30, 50, 80, now()),
-        ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30, 50, 80, now())
+        ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30, 50, 80, now()),
+        ('v3.0', 0.95, 20, 0, 4, 400, 800, 0.25, 12.5, 50, 120, now())
     `;
     for (const name of ['member', 'teacher', 'orgAdmin', 'admin', 'otherAdmin', 'systemAdmin']) {
       const systemRole =
@@ -278,7 +279,7 @@ describe('authorization matrix', () => {
     const [skill] = await connection<{ cc_base: string; cc_level: string }[]>`
       SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${userId}
     `;
-    expect(skill).toMatchObject({ cc_base: '800.00', cc_level: '800.00' });
+    expect(skill).toMatchObject({ cc_base: '800.00', cc_level: '800.0000' });
   });
 
   it('enforces the S-Admin and Admin account-management hierarchy', async () => {
@@ -390,7 +391,7 @@ describe('authorization matrix', () => {
     );
   });
 
-  it('allows teachers to import students with class, handle, and initial level', async () => {
+  it('allows teachers to import students with class and handle at the default CCL 800', async () => {
     const csv = [
       'tai_khoan,mat_khau,ho_va_ten,ten_hien_thi,tai_khoan_codeforces,muc_ban_dau',
       'imported@example.com,Temporary!2026,Nguyen Van Import,Import Student,import_cf,950',
@@ -416,7 +417,7 @@ describe('authorization matrix', () => {
     `;
     expect(student).toMatchObject({
       email: 'imported@example.com',
-      cc_base: '950.00',
+      cc_base: '800.00',
       handle: 'import_cf',
       organization_id: ids.privateOrg,
     });

@@ -1039,6 +1039,36 @@ textarea:focus {
   align-items: center;
   gap: 7px;
 }
+
+.activity-risk-icon,
+.activity-risk-badge {
+  align-items: center;
+  border: 1px solid color-mix(in srgb, #f59e0b 55%, transparent);
+  border-radius: 999px;
+  color: #b45309;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 850;
+  gap: 0.3rem;
+  line-height: 1;
+}
+
+.activity-risk-icon {
+  height: 1.45rem;
+  justify-content: center;
+  width: 1.45rem;
+}
+
+.activity-risk-badge {
+  background: color-mix(in srgb, #fef3c7 72%, var(--panel));
+  padding: 0.42rem 0.65rem;
+}
+
+.activity-risk-icon.priority,
+.activity-risk-badge.priority {
+  border-color: color-mix(in srgb, #ef4444 58%, transparent);
+  color: #dc2626;
+}
 .leader-identity-copy .cf-handle {
   width: fit-content;
   font-size: 10px;

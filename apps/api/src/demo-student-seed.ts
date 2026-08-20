@@ -1,4 +1,4 @@
-import { calculateCcLevel, calculateReward, round2 } from '@cc/core';
+import { calculateCcLevel, calculateReward, round4 } from '@cc/core';
 import { createDatabaseClient } from '@cc/database';
 import { hashPassword } from './auth/password';
 
@@ -19,14 +19,12 @@ if (!DEMO_PASSWORD || DEMO_PASSWORD.length < 12) {
 
 const policy = {
   level: {
-    decay: 0.95,
-    denominator: 20,
-    base: 800,
-    masteryFactor: 8,
-    masteryScale: 4,
-    masteryRatingStep: 400,
+    initialLevel: 800,
+    gainMax: 4,
+    gainScale: 100,
+    maxPositiveDelta: 500,
   },
-  reward: { min: 0.05, max: 30, midpointDelta: 50, scale: 80 },
+  reward: { min: 0.25, max: 12.5, midpointDelta: 50, scale: 120, maxPositiveDelta: 500 },
 };
 const ratings = [
   ...Array<number>(10).fill(800),
@@ -76,7 +74,6 @@ async function main() {
           userId: USER_ID,
           email: DEMO_EMAIL,
           solves: existing?.solves ?? 0,
-          ccBase: 800,
           ccLevel: Number(existing?.cc_level ?? 800),
           ccPoint: Number(existing?.cc_point ?? 0),
           ccBalance: Number(existing?.cc_balance ?? 0),
@@ -169,7 +166,7 @@ async function main() {
 
       const solves: { problemKey: string; rating: number }[] = [];
       let currentLevel = 800;
-      let calculatedLevel = 0;
+      let calculatedLevel = 800;
       let masteryBonus = 0;
       let earnedTotal = 0;
       for (const [zeroIndex, rating] of ratings.entries()) {
@@ -179,7 +176,7 @@ async function main() {
         const submissionId = String(9_800_000_000_000 + index);
         const solvedAt = new Date(firstSolveAt.getTime() + zeroIndex * 86_400_000);
         const levelBefore = currentLevel;
-        const rewardReferenceLevelBefore = Math.max(800, calculatedLevel);
+        const rewardReferenceLevelBefore = currentLevel;
         solves.push({ problemKey, rating });
         const nextLevel = calculateCcLevel(solves, policy.level);
         const reward = calculateReward(rating, rewardReferenceLevelBefore, policy.reward);
@@ -225,14 +222,14 @@ async function main() {
           scoring_policy_version, description, metadata, event_at
         ) VALUES (
           ${USER_ID}, 'EARN', ${reward}, ${submissionId},
-          ${`demo:student:solve:${index}`}, true, false, ${rewardReferenceLevelBefore}, ${rating}, 'v2.1',
+          ${`demo:student:solve:${index}`}, true, false, ${rewardReferenceLevelBefore}, ${rating}, 'v3.0',
           ${`Ghi nhận bài luyện tập minh họa rating ${rating}`},
           ${JSON.stringify({
             demo: true,
             displayCcLevelBefore: levelBefore,
             rewardReferenceLevelBefore,
             ccLevelAfter: nextLevel.level,
-            ccLevelDelta: round2(nextLevel.level - levelBefore),
+            ccLevelDelta: round4(nextLevel.level - levelBefore),
           })}::jsonb,
           ${iso(solvedAt)}
         )
@@ -289,13 +286,13 @@ async function main() {
       await transaction`
       INSERT INTO user_skill_state (
         user_id, cc_base, cc_calculated, cc_mastery_bonus, cc_level, scoring_policy_version
-      ) VALUES (${USER_ID}, 800, ${calculatedLevel}, ${masteryBonus}, ${currentLevel}, 'v2.1')
+      ) VALUES (${USER_ID}, 800, ${calculatedLevel}, ${masteryBonus}, ${currentLevel}, 'v3.0')
       ON CONFLICT (user_id) DO UPDATE SET
         cc_base = 800,
         cc_calculated = EXCLUDED.cc_calculated,
         cc_mastery_bonus = EXCLUDED.cc_mastery_bonus,
         cc_level = EXCLUDED.cc_level,
-        scoring_policy_version = 'v2.1',
+        scoring_policy_version = 'v3.0',
         updated_at = now()
     `;
       await transaction`
@@ -309,7 +306,6 @@ async function main() {
         ${JSON.stringify({
           email: DEMO_EMAIL,
           solves: ratings.length,
-          ccBase: 800,
           ccLevel: currentLevel,
           ccPoint: earnedTotal,
           ccBalance: balance,
@@ -323,7 +319,6 @@ async function main() {
         userId: USER_ID,
         email: DEMO_EMAIL,
         solves: ratings.length,
-        ccBase: 800,
         ccLevel: currentLevel,
         ccPoint: earnedTotal,
         ccBalance: balance,

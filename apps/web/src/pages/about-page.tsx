@@ -6,7 +6,7 @@ const metrics = [
     icon: '⚡',
     name: 'CC Level',
     detail:
-      'Năng lực dài hạn được ước lượng từ độ khó các bài đã giải. CC Base là mức nền do Admin thiết lập, nên CC Level không thấp hơn mốc này.',
+      'CC Level bắt đầu từ 800. Mỗi bài rated giải lần đầu đều giúp tăng năng lực; bài ngang hoặc cao hơn trình độ tăng nhanh hơn, còn bài dễ vẫn tăng nhưng giảm dần tự nhiên.',
   },
   {
     icon: '◆',

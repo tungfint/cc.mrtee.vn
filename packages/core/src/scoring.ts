@@ -1,55 +1,58 @@
 export interface RatedSolve {
   problemKey: string;
   rating: number | null;
+  solvedAt?: Date | string | number;
+  submissionId?: string | number;
 }
 
 export interface LevelPolicy {
-  decay: number;
-  denominator: number;
-  base: number;
-  masteryFactor?: number;
-  masteryScale?: number;
-  masteryRatingStep?: number;
+  initialLevel: number;
+  gainMax: number;
+  gainScale: number;
+  maxPositiveDelta: number;
 }
 
-export function calculateCcLevel(
-  solves: RatedSolve[],
-  policy: LevelPolicy,
-): {
+export interface CcLevelResult {
   calculated: number;
   coreLevel: number;
   masteryBonus: number;
   level: number;
-} {
-  const uniqueRatings = new Map<string, number>();
-  for (const solve of solves) {
-    if (solve.rating === null) continue;
-    const existing = uniqueRatings.get(solve.problemKey);
-    if (existing === undefined || solve.rating > existing) {
-      uniqueRatings.set(solve.problemKey, solve.rating);
-    }
+}
+
+/** Scoring policy v3.0: every unique rated first solve adds a positive gain. */
+export function calculateCcLevelGain(
+  problemRating: number,
+  levelBefore: number,
+  policy: LevelPolicy,
+): number {
+  const delta = Math.min(problemRating - levelBefore, policy.maxPositiveDelta);
+  return round4(policy.gainMax / (1 + Math.exp(-delta / policy.gainScale)));
+}
+
+export function calculateCcLevel(solves: RatedSolve[], policy: LevelPolicy): CcLevelResult {
+  const unique = new Map<string, RatedSolve & { inputIndex: number }>();
+  solves.forEach((solve, inputIndex) => {
+    if (solve.rating === null || unique.has(solve.problemKey)) return;
+    unique.set(solve.problemKey, { ...solve, inputIndex });
+  });
+
+  const ordered = [...unique.values()].sort((left, right) => {
+    const timeOrder = solveTime(left.solvedAt) - solveTime(right.solvedAt);
+    if (timeOrder !== 0) return timeOrder;
+    return (
+      compareSubmissionIds(left.submissionId, right.submissionId) ||
+      left.inputIndex - right.inputIndex
+    );
+  });
+
+  let level = policy.initialLevel;
+  for (const solve of ordered) {
+    level += calculateCcLevelGain(Number(solve.rating), level, policy);
   }
-  const ratings = [...uniqueRatings.values()].sort((a, b) => b - a);
-  const calculated =
-    ratings.reduce((sum, rating, index) => sum + rating * policy.decay ** index, 0) /
-    policy.denominator;
-  const roundedCalculated = round2(calculated);
-  const coreLevel = round2(Math.max(policy.base, calculated));
-  const masteryFactor = policy.masteryFactor ?? 0;
-  const masteryScale = policy.masteryScale ?? 4;
-  const masteryRatingStep = policy.masteryRatingStep ?? 400;
-  const evidence = ratings.reduce(
-    (sum, rating) =>
-      sum + Math.min(2, Math.max(0.25, 2 ** ((rating - policy.base) / masteryRatingStep))),
-    0,
-  );
-  const masteryBonus = round2(masteryFactor * Math.log1p(evidence / masteryScale));
-  return {
-    calculated: roundedCalculated,
-    coreLevel,
-    masteryBonus,
-    level: round2(coreLevel + masteryBonus),
-  };
+  level = round4(level);
+
+  // Legacy-shaped return while old database columns are retired gradually.
+  return { calculated: level, coreLevel: level, masteryBonus: 0, level };
 }
 
 export interface RewardPolicy {
@@ -57,6 +60,7 @@ export interface RewardPolicy {
   max: number;
   midpointDelta: number;
   scale: number;
+  maxPositiveDelta?: number;
 }
 
 export function calculateReward(
@@ -64,13 +68,37 @@ export function calculateReward(
   levelBefore: number,
   policy: RewardPolicy,
 ): number {
+  const delta = Math.min(problemRating - levelBefore, policy.maxPositiveDelta ?? 500);
   const raw =
     policy.min +
-    (policy.max - policy.min) /
-      (1 + Math.exp(-((problemRating - levelBefore - policy.midpointDelta) / policy.scale)));
+    (policy.max - policy.min) / (1 + Math.exp(-((delta - policy.midpointDelta) / policy.scale)));
   return Math.min(policy.max, Math.max(policy.min, round2(raw)));
+}
+
+function solveTime(value: RatedSolve['solvedAt']): number {
+  if (value === undefined) return Number.MAX_SAFE_INTEGER;
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
+
+function compareSubmissionIds(
+  left: RatedSolve['submissionId'],
+  right: RatedSolve['submissionId'],
+): number {
+  if (left === undefined || right === undefined) return 0;
+  try {
+    const leftId = BigInt(left);
+    const rightId = BigInt(right);
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  } catch {
+    return String(left).localeCompare(String(right));
+  }
 }
 
 export function round2(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function round4(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10_000) / 10_000;
 }

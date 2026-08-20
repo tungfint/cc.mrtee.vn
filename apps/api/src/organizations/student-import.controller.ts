@@ -21,7 +21,6 @@ const editableRowSchema = z.object({
   fullName: z.string(),
   displayName: z.string(),
   codeforcesHandle: z.string(),
-  initialCcLevel: z.coerce.number(),
   classSlug: z.string(),
   mustChangePassword: z.boolean(),
   errors: z.array(z.string()).optional().default([]),

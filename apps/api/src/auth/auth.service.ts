@@ -132,7 +132,6 @@ export class AuthService {
       leaderboardVisible?: boolean;
       organizationId?: string;
       codeforcesHandle?: string;
-      initialCcLevel?: number;
       mustChangePassword?: boolean;
       verifyCodeforces?: boolean;
     },
@@ -161,10 +160,9 @@ export class AuthService {
         RETURNING user_id AS id
       `;
       if (user) {
-        const initialCcLevel = input.initialCcLevel ?? 800;
         await transaction`
           INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
-          VALUES (${user.id}, ${initialCcLevel}, 0, ${initialCcLevel})
+          VALUES (${user.id}, 800, 800, 800)
         `;
         if (input.organizationId) {
           await transaction`

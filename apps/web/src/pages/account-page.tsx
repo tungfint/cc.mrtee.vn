@@ -20,7 +20,6 @@ interface AccountData {
     avatar_url: string | null;
     status: string;
     system_role: string;
-    initial_cc_level: string;
     cc_level: string;
     codeforces_handle: string | null;
     pending_handle: string | null;
@@ -223,10 +222,6 @@ export default function AccountPage() {
               <div>
                 <dt>Email đăng nhập</dt>
                 <dd>{user.email}</dd>
-              </div>
-              <div>
-                <dt>Mức ban đầu</dt>
-                <dd>{user.initial_cc_level ?? '800'} CC Level</dd>
               </div>
               <div>
                 <dt>CC Level hiện tại</dt>

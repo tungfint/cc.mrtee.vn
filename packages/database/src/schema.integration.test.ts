@@ -57,7 +57,8 @@ async function resetDatabase(sql: Sql): Promise<void> {
       effective_from
     ) VALUES
       ('v2.0', 0.95, 20, 0, 4, 400, 800, 0.05, 30.00, 50, 80, '2026-08-18T00:00:00+07:00'),
-      ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30.00, 50, 80, '2026-08-20T00:00:00+07:00')
+      ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30.00, 50, 80, '2026-08-20T00:00:00+07:00'),
+      ('v3.0', 0.95, 20, 0, 4, 400, 800, 0.25, 12.50, 50, 120, '2026-08-20T18:00:00+07:00')
   `;
 }
 
@@ -157,6 +158,25 @@ describe('Phase 1 database invariants', () => {
       reward_max: '30.00',
       reward_midpoint_delta: '50.00',
       reward_scale: '80.00',
+    });
+  });
+
+  it('seeds scoring policy v3.0 with the approved CCL and CCP calibration', async () => {
+    const [policy] = await connection`
+      SELECT version, level_initial, level_gain_max, level_gain_scale,
+        max_positive_delta, reward_min, reward_max, reward_midpoint_delta, reward_scale
+      FROM scoring_policies WHERE version = 'v3.0'
+    `;
+    expect(policy).toMatchObject({
+      version: 'v3.0',
+      level_initial: '800.00',
+      level_gain_max: '4.0000',
+      level_gain_scale: '100.00',
+      max_positive_delta: '500.00',
+      reward_min: '0.25',
+      reward_max: '12.50',
+      reward_midpoint_delta: '50.00',
+      reward_scale: '120.00',
     });
   });
 

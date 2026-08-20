@@ -35,6 +35,8 @@ interface Dashboard {
     highest_problem_name: string | null;
     recent_five_average_rating: number | null;
     recent_five_rated_count: number;
+    activity_risk_level: 'NORMAL' | 'REVIEW' | 'PRIORITY';
+    activity_risk_score: number;
   };
   season: { name: string; score: string; qualifying_solves: number } | null;
   streak: { current_streak: number; longest_streak: number };
@@ -91,6 +93,8 @@ interface TopBoard {
     ccLevel: string;
     ccPoint: string;
     streak: number;
+    activityRiskLevel: 'NORMAL' | 'REVIEW' | 'PRIORITY';
+    activityRiskScore: number;
     levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
 }
@@ -172,6 +176,14 @@ export default function DashboardPage() {
             <div>
               <Link className="dashboard-profile-link" to={`/students/${profile.id}`}>
                 <StudentName name={profile.display_name} rating={profile.current_rating} />
+                {profile.activity_risk_level && profile.activity_risk_level !== 'NORMAL' && (
+                  <span
+                    className={`activity-risk-badge ${profile.activity_risk_level.toLowerCase()}`}
+                    title={`Điểm cảnh báo: ${profile.activity_risk_score}`}
+                  >
+                    ⚠ Hoạt động cần kiểm tra
+                  </span>
+                )}
                 <span>Mở hồ sơ →</span>
               </Link>
               {profile.codeforces_handle ? (
@@ -588,6 +600,14 @@ function MiniLeaderboard({
               />
               <Link className="mini-rank-identity" to={`/students/${row.userId}`}>
                 <StudentName name={row.displayName} rating={row.currentRating} />
+                {row.activityRiskLevel && row.activityRiskLevel !== 'NORMAL' && (
+                  <span
+                    className={`activity-risk-icon ${row.activityRiskLevel.toLowerCase()}`}
+                    title="Hoạt động cần kiểm tra"
+                  >
+                    ⚠
+                  </span>
+                )}
                 <LevelRankBadge rank={row.levelRank} />
               </Link>
               <b>{value(row)}</b>

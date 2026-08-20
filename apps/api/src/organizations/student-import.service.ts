@@ -17,7 +17,6 @@ const studentSchema = z.object({
     .trim()
     .max(24)
     .regex(/^$|^[A-Za-z0-9_.-]{3,24}$/, 'Codeforces handle không hợp lệ'),
-  initialCcLevel: z.coerce.number().min(0).max(10_000).default(800),
   classSlug: z
     .string()
     .trim()
@@ -34,7 +33,6 @@ export type EditableStudentImportRow = {
   fullName: string;
   displayName: string;
   codeforcesHandle: string;
-  initialCcLevel: number;
   classSlug: string;
   mustChangePassword: boolean;
   errors: string[];
@@ -95,7 +93,6 @@ export class StudentImportService {
         fullName: String(record.ho_va_ten ?? '').trim(),
         displayName: String(record.ten_hien_thi ?? '').trim(),
         codeforcesHandle: String(record.tai_khoan_codeforces ?? '').trim(),
-        initialCcLevel: Number(record.muc_ban_dau === '' ? 800 : record.muc_ban_dau),
         classSlug: useClassSlug
           ? String(record.lop_hoc_slug ?? record.slug_lop ?? '')
               .trim()
@@ -172,7 +169,6 @@ export class StudentImportService {
             password: parsed.data.password,
             fullName: parsed.data.fullName,
             displayName: parsed.data.displayName,
-            initialCcLevel: parsed.data.initialCcLevel,
             mustChangePassword: parsed.data.mustChangePassword,
             verifyCodeforces: useClassSlug && Boolean(parsed.data.codeforcesHandle),
             ...(organizationId ? { organizationId } : {}),
@@ -246,7 +242,6 @@ export class StudentImportService {
         fullName: String(record.ho_va_ten ?? ''),
         displayName: String(record.ten_hien_thi ?? ''),
         codeforcesHandle: String(record.tai_khoan_codeforces ?? ''),
-        initialCcLevel: record.muc_ban_dau === '' ? 800 : record.muc_ban_dau,
         classSlug: String(record.lop_hoc_slug ?? record.slug_lop ?? '')
           .trim()
           .toLowerCase(),
@@ -285,7 +280,6 @@ export class StudentImportService {
             password: parsed.data.password,
             fullName: parsed.data.fullName,
             displayName: parsed.data.displayName,
-            initialCcLevel: parsed.data.initialCcLevel,
             mustChangePassword: parsed.data.mustChangePassword,
             verifyCodeforces: useClassSlug && Boolean(parsed.data.codeforcesHandle),
             ...(organizationId ? { organizationId } : {}),
@@ -303,7 +297,6 @@ export class StudentImportService {
               fullName: parsed.data.fullName,
               displayName: parsed.data.displayName,
               codeforcesHandle: parsed.data.codeforcesHandle || null,
-              initialCcLevel: parsed.data.initialCcLevel,
               mustChangePassword: parsed.data.mustChangePassword,
             },
           },

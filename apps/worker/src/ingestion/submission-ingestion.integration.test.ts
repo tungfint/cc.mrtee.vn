@@ -65,7 +65,8 @@ describe('submission ingestion', () => {
         reward_min, reward_max, reward_midpoint_delta, reward_scale, effective_from
       ) VALUES
         ('v2.0', 0.95, 20, 0, 4, 400, 800, 0.05, 30, 50, 80, now()),
-        ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30, 50, 80, now())
+        ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30, 50, 80, now()),
+        ('v3.0', 0.95, 20, 0, 4, 400, 800, 0.25, 12.5, 50, 120, now())
     `;
   });
   afterAll(async () => client.close());
@@ -159,7 +160,7 @@ describe('submission ingestion', () => {
     });
   });
 
-  it('persists the versioned CC level while respecting the default base', async () => {
+  it('replays rated first solves chronologically with scoring policy v3.0', async () => {
     const [user] = await client.connection<{ id: string }[]>`
       INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
     `;
@@ -173,13 +174,13 @@ describe('submission ingestion', () => {
     ]);
     await firstSolves.recordBatch(user.id, ingested, new Date(0), false);
     const result = await level.recompute(user.id);
-    expect(result.version).toBe('v2.1');
-    expect(result.level).toBe(805.55);
+    expect(result.version).toBe('v3.0');
+    expect(result.level).toBe(807.9013);
     const [state] = await client.connection<{ cc_base: string; cc_level: string }[]>`
       SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${user.id}
     `;
     expect(Number(state?.cc_base)).toBe(800);
-    expect(Number(state?.cc_level)).toBe(805.55);
+    expect(Number(state?.cc_level)).toBe(807.9013);
   });
 
   it('resumes a crashed backfill from its persisted cursor without creating EARN', async () => {
@@ -317,11 +318,17 @@ describe('submission ingestion', () => {
     expect(totals?.wallet).toBe(totals?.ledger);
     expect(totals?.season_score).toBe(totals?.ledger);
     expect(Number(totals?.wallet)).toBe(
-      calculateReward(1200, 800, { min: 0.05, max: 30, midpointDelta: 50, scale: 80 }),
+      calculateReward(1200, 800, {
+        min: 0.25,
+        max: 12.5,
+        midpointDelta: 50,
+        scale: 120,
+        maxPositiveDelta: 500,
+      }),
     );
     expect(totals?.earn_metadata).toEqual({
-      ccLevelAfter: 803.24,
-      ccLevelDelta: 3.24,
+      ccLevelAfter: 803.9281,
+      ccLevelDelta: 3.9281,
       displayCcLevelBefore: 800,
       rewardReferenceLevelBefore: 800,
     });
@@ -383,6 +390,46 @@ describe('submission ingestion', () => {
     expect(Number(after?.cc_level)).toBeGreaterThan(Number(before.cc_level));
     expect(Number(after?.cc_point)).toBe(result.amount);
     expect(after?.cc_balance).toBe(after?.cc_point);
+  });
+
+  it('awards points immediately while flagging a burst of unusually hard solves', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Risk', 'Risk') RETURNING id
+    `;
+    if (!user) throw new Error('Missing risk fixture user');
+
+    for (let index = 0; index < 5; index += 1) {
+      const ingested = await service.ingest(
+        user.id,
+        makeSubmission({
+          id: 80_000 + index,
+          creationTimeSeconds: 1_700_000_000 + index * 60,
+          problem: {
+            ...makeSubmission().problem,
+            contestId: 80_000 + index,
+            rating: 1500,
+          },
+        }),
+      );
+      await expect(rewards.process(user.id, ingested, new Date(0))).resolves.toMatchObject({
+        awarded: true,
+      });
+    }
+
+    const [result] = await client.connection<
+      { activity_risk_score: number; activity_risk_level: string; earns: number; wallet: string }[]
+    >`
+      SELECT users.activity_risk_score, users.activity_risk_level,
+        (SELECT count(*)::int FROM point_transactions
+          WHERE user_id = users.id AND type = 'EARN') AS earns,
+        wallets.balance::text AS wallet
+      FROM users JOIN user_wallets AS wallets ON wallets.user_id = users.id
+      WHERE users.id = ${user.id}
+    `;
+    expect(result?.earns).toBe(5);
+    expect(Number(result?.wallet)).toBeGreaterThan(0);
+    expect(result?.activity_risk_score).toBeGreaterThanOrEqual(10);
+    expect(result?.activity_risk_level).toBe('PRIORITY');
   });
 
   it('coordinates multiple schedulers and recovers due state after queue loss', async () => {

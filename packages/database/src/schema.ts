@@ -87,11 +87,24 @@ export const users = pgTable(
     status: userStatus('status').default('ACTIVE').notNull(),
     systemRole: systemRole('system_role').default('USER').notNull(),
     leaderboardVisible: boolean('leaderboard_visible').default(true).notNull(),
+    activityRiskScore: integer('activity_risk_score').default(0).notNull(),
+    activityRiskLevel: varchar('activity_risk_level', { length: 20 }).default('NORMAL').notNull(),
+    activityRiskReviewedAt: timestamp('activity_risk_reviewed_at', { withTimezone: true }),
+    activityRiskReviewedBy: uuid('activity_risk_reviewed_by').references(
+      (): AnyPgColumn => users.id,
+      { onDelete: 'set null' },
+    ),
     timezone: varchar('timezone', { length: 100 }).default('Asia/Ho_Chi_Minh').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('users_status_idx').on(table.status)],
+  (table) => [
+    index('users_status_idx').on(table.status),
+    check(
+      'users_activity_risk_check',
+      sql`${table.activityRiskScore} >= 0 AND ${table.activityRiskLevel} IN ('NORMAL', 'REVIEW', 'PRIORITY')`,
+    ),
+  ],
 );
 
 export const userCredentials = pgTable(
@@ -278,6 +291,14 @@ export const scoringPolicies = pgTable(
       .default('400')
       .notNull(),
     defaultCcBase: numeric('default_cc_base', { precision: 10, scale: 2 }).notNull(),
+    levelInitial: numeric('level_initial', { precision: 10, scale: 2 }).default('800').notNull(),
+    levelGainMax: numeric('level_gain_max', { precision: 10, scale: 4 }).default('4').notNull(),
+    levelGainScale: numeric('level_gain_scale', { precision: 10, scale: 2 })
+      .default('100')
+      .notNull(),
+    maxPositiveDelta: numeric('max_positive_delta', { precision: 10, scale: 2 })
+      .default('500')
+      .notNull(),
     rewardMin: numeric('reward_min', { precision: 12, scale: 2 }).notNull(),
     rewardMax: numeric('reward_max', { precision: 12, scale: 2 }).notNull(),
     rewardMidpointDelta: numeric('reward_midpoint_delta', { precision: 10, scale: 2 }).notNull(),
@@ -298,6 +319,10 @@ export const scoringPolicies = pgTable(
       sql`${table.rewardMin} > 0 AND ${table.rewardMax} >= ${table.rewardMin}`,
     ),
     check('scoring_policies_reward_scale_check', sql`${table.rewardScale} > 0`),
+    check(
+      'scoring_policies_v3_level_check',
+      sql`${table.levelInitial} >= 0 AND ${table.levelGainMax} > 0 AND ${table.levelGainScale} > 0 AND ${table.maxPositiveDelta} > 0`,
+    ),
   ],
 );
 
@@ -308,13 +333,15 @@ export const userSkillState = pgTable(
       .primaryKey()
       .references(() => users.id, { onDelete: 'restrict' }),
     ccBase: numeric('cc_base', { precision: 10, scale: 2 }).default('800.00').notNull(),
-    ccCalculated: numeric('cc_calculated', { precision: 10, scale: 2 }).default('0.00').notNull(),
+    ccCalculated: numeric('cc_calculated', { precision: 12, scale: 4 })
+      .default('800.0000')
+      .notNull(),
     ccMasteryBonus: numeric('cc_mastery_bonus', { precision: 10, scale: 2 })
       .default('0.00')
       .notNull(),
-    ccLevel: numeric('cc_level', { precision: 10, scale: 2 }).default('800.00').notNull(),
+    ccLevel: numeric('cc_level', { precision: 12, scale: 4 }).default('800.0000').notNull(),
     scoringPolicyVersion: varchar('scoring_policy_version', { length: 50 })
-      .default('v2.1')
+      .default('v3.0')
       .notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -391,6 +418,39 @@ export const cfSubmissions = pgTable(
     ),
     index('cf_submissions_user_creation_idx').on(table.userId, table.creationTime.desc()),
     index('cf_submissions_user_id_idx').on(table.userId, table.cfSubmissionId.desc()),
+  ],
+);
+
+export const activityRiskEvents = pgTable(
+  'activity_risk_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sourceSubmissionId: bigint('source_submission_id', { mode: 'bigint' }).references(
+      () => cfSubmissions.cfSubmissionId,
+      { onDelete: 'set null' },
+    ),
+    signalCode: varchar('signal_code', { length: 60 }).notNull(),
+    score: integer('score').notNull(),
+    summary: varchar('summary', { length: 300 }).notNull(),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().default({}).notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 200 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    resolution: varchar('resolution', { length: 30 }),
+    reviewNote: text('review_note'),
+  },
+  (table) => [
+    unique('activity_risk_events_idempotency_unique').on(table.idempotencyKey),
+    index('activity_risk_events_user_created_idx').on(table.userId, table.createdAt.desc()),
+    check('activity_risk_events_score_check', sql`${table.score} > 0`),
+    check(
+      'activity_risk_events_resolution_check',
+      sql`${table.resolution} IS NULL OR ${table.resolution} IN ('VALID', 'MONITORING', 'VIOLATION')`,
+    ),
   ],
 );
 
@@ -707,7 +767,7 @@ export const pointTransactions = pgTable(
     idempotencyKey: varchar('idempotency_key', { length: 200 }),
     affectsWallet: boolean('affects_wallet').default(true).notNull(),
     affectsSeason: boolean('affects_season').default(false).notNull(),
-    ccLevelBefore: numeric('cc_level_before', { precision: 10, scale: 2 }),
+    ccLevelBefore: numeric('cc_level_before', { precision: 12, scale: 4 }),
     problemRatingSnapshot: integer('problem_rating_snapshot'),
     scoringPolicyVersion: varchar('scoring_policy_version', { length: 50 }),
     description: text('description'),

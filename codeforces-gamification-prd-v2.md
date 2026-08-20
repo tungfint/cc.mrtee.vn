@@ -5,6 +5,50 @@
 > **Thay thế:** `cc.mrtee.md` (PRD v1)  
 > **Mục tiêu:** Theo dõi tiến độ Codeforces của học sinh, ước lượng năng lực, tạo động lực bằng điểm thưởng và leaderboard, nhưng phải chống farm bài dễ, chống sốc điểm, chống cộng điểm trùng, có thể audit và vận hành ổn định với giới hạn API Codeforces.
 
+## Cập nhật Scoring Policy v3.0 — 20/08/2026
+
+Phần cập nhật này thay thế các quy tắc `CC_Base`, công thức `CC_Level` weighted-top và
+sigmoid `CC_Point` v2 ở các phần bên dưới.
+
+- Không còn `CC_Base` trong nghiệp vụ. Học sinh bắt đầu với `CC_Level = 800`.
+- Mỗi unique rated first-solve đều tăng CC Level; bài dễ tăng ít dần.
+- Bài cao hơn CC Level quá 500 được tính như đúng mức `+500`.
+- Bài unrated vẫn tính hoạt động/Streak nhưng không tăng CCL, CCP hoặc CC Balance.
+- CCP kiếm được đồng thời cộng đúng bằng đó vào CC Balance.
+- Điểm được ghi nhận ngay; dấu hiệu bất thường chỉ tạo cảnh báo để kiểm tra, không giữ
+  điểm và không yêu cầu duyệt trước.
+
+Với `L` là CC Level trước bài và `D` là rating bài:
+
+\[
+\Delta=\min(D-L,500)
+\]
+
+\[
+\boxed{CCL_{gain}=\frac{4}{1+e^{-\Delta/100}}}
+\]
+
+\[
+\boxed{CCP_{gain}=0.25+\frac{12.25}{1+e^{-(\Delta-50)/120}}}
+\]
+
+Các mốc hiệu chỉnh chính:
+
+| `D-L` | CCL/bài | CCP/bài |
+|---:|---:|---:|
+| -300 | 0.19 | 0.88 |
+| -200 | 0.48 | 1.61 |
+| -100 | 1.08 | 2.98 |
+| 0 | 2.00 | 5.12 |
+| +100 | 2.92 | 7.63 |
+| +200 | 3.52 | 9.77 |
+| +300 | 3.81 | 11.14 |
+| +500 trở lên | 3.97 | 12.22 |
+
+Lộ trình bình thường đạt khoảng 3.000 CCP sau 430–460 bài; lộ trình thường xuyên giải
+bài `+100..+500` đạt khoảng 3.000 CCP sau 285–310 bài. Mọi transaction cũ giữ nguyên
+policy version; dữ liệu CCL hiện tại được replay theo thời gian first-solve khi kích hoạt v3.0.
+
 ---
 
 ## 0. Các quyết định cốt lõi

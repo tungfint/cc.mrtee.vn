@@ -22,7 +22,6 @@ interface ParticipantRow {
   score: string;
   qualifying_solves: number;
   reached_score_at: Date | string | null;
-  cc_base: string;
   cc_level: string;
   timezone: string;
 }
@@ -66,7 +65,7 @@ export class SeasonClosureService {
     return this.database.sql.begin(async (transaction) => {
       await transaction`SELECT id FROM seasons WHERE id = ${seasonId} FOR UPDATE`;
       const participants = await transaction<ParticipantRow[]>`
-        SELECT totals.*, skill.cc_base, skill.cc_level, users.timezone
+        SELECT totals.*, skill.cc_level, users.timezone
         FROM season_user_totals AS totals
         JOIN users ON users.id = totals.user_id
         JOIN user_skill_state AS skill ON skill.user_id = totals.user_id
@@ -74,39 +73,47 @@ export class SeasonClosureService {
       `;
       const [policy] = await transaction<
         {
-          level_decay: string;
-          level_denominator: string;
-          level_mastery_factor: string;
-          level_mastery_scale: string;
-          level_mastery_rating_step: string;
+          level_initial: string;
+          level_gain_max: string;
+          level_gain_scale: string;
+          max_positive_delta: string;
         }[]
       >`
-        SELECT level_decay, level_denominator, level_mastery_factor,
-          level_mastery_scale, level_mastery_rating_step FROM scoring_policies
+        SELECT level_initial, level_gain_max, level_gain_scale, max_positive_delta
+        FROM scoring_policies
         WHERE version = ${season.scoring_policy_version}
       `;
       if (!policy) throw new Error('Scoring policy is unavailable');
 
       const candidates: SnapshotCandidate[] = [];
       for (const participant of participants) {
-        const historical = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
-          SELECT problem_key, rating_snapshot FROM user_problem_solves
+        const historical = await transaction<
+          {
+            problem_key: string;
+            rating_snapshot: number;
+            first_solved_at: Date;
+            first_ok_submission_id: string;
+          }[]
+        >`
+          SELECT problem_key, rating_snapshot, first_solved_at, first_ok_submission_id
+          FROM user_problem_solves
           WHERE user_id = ${participant.user_id}
             AND rating_snapshot IS NOT NULL
             AND first_solved_at < ${new Date(season.start_at).toISOString()}
+          ORDER BY first_solved_at, first_ok_submission_id, problem_key
         `;
         const startLevel = calculateCcLevel(
           historical.map((solve) => ({
             problemKey: solve.problem_key,
             rating: Number(solve.rating_snapshot),
+            solvedAt: solve.first_solved_at,
+            submissionId: solve.first_ok_submission_id,
           })),
           {
-            decay: Number(policy.level_decay),
-            denominator: Number(policy.level_denominator),
-            base: Number(participant.cc_base),
-            masteryFactor: Number(policy.level_mastery_factor),
-            masteryScale: Number(policy.level_mastery_scale),
-            masteryRatingStep: Number(policy.level_mastery_rating_step),
+            initialLevel: Number(policy.level_initial),
+            gainMax: Number(policy.level_gain_max),
+            gainScale: Number(policy.level_gain_scale),
+            maxPositiveDelta: Number(policy.max_positive_delta),
           },
         ).level;
         const dates = await transaction<{ day: string }[]>`

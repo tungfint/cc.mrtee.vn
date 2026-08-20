@@ -1,11 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { calculateCcLevel, calculateReward, calculateStreakBonus, round2 } from '@cc/core';
+import {
+  calculateCcLevelGain,
+  calculateReward,
+  calculateStreakBonus,
+  round2,
+  round4,
+} from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 import type { IngestedSubmission } from '../ingestion/submission-ingestion.service';
 
 interface SkillStateRow {
-  cc_base: string;
-  cc_calculated: string;
   cc_level: string;
   scoring_policy_version: string;
 }
@@ -17,6 +21,10 @@ interface PolicyRow {
   level_mastery_factor: string;
   level_mastery_scale: string;
   level_mastery_rating_step: string;
+  level_initial: string;
+  level_gain_max: string;
+  level_gain_scale: string;
+  max_positive_delta: string;
   reward_min: string;
   reward_max: string;
   reward_midpoint_delta: string;
@@ -93,41 +101,31 @@ export class RewardEngineService {
         VALUES (${userId}) ON CONFLICT (user_id) DO NOTHING
       `;
       const [state] = await transaction<SkillStateRow[]>`
-        SELECT cc_base, cc_calculated, cc_level, scoring_policy_version
+        SELECT cc_level, scoring_policy_version
         FROM user_skill_state WHERE user_id = ${userId} FOR UPDATE
       `;
       if (!state) throw new Error('Skill state initialization failed');
       const [policy] = await transaction<PolicyRow[]>`
         SELECT version, level_decay, level_denominator, level_mastery_factor,
-          level_mastery_scale, level_mastery_rating_step, reward_min, reward_max,
-          reward_midpoint_delta, reward_scale
+          level_mastery_scale, level_mastery_rating_step, level_initial,
+          level_gain_max, level_gain_scale, max_positive_delta,
+          reward_min, reward_max, reward_midpoint_delta, reward_scale
         FROM scoring_policies WHERE version = ${state.scoring_policy_version}
       `;
       if (!policy) throw new Error('Scoring policy is unavailable');
 
-      const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
-        SELECT problem_key, rating_snapshot FROM user_problem_solves
-        WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
-      `;
-      const nextLevel = calculateCcLevel(
-        solves.map((solve) => ({
-          problemKey: solve.problem_key,
-          rating: Number(solve.rating_snapshot),
-        })),
-        {
-          decay: Number(policy.level_decay),
-          denominator: Number(policy.level_denominator),
-          base: Number(state.cc_base),
-          masteryFactor: Number(policy.level_mastery_factor),
-          masteryScale: Number(policy.level_mastery_scale),
-          masteryRatingStep: Number(policy.level_mastery_rating_step),
-        },
-      );
       const displayLevelBefore = Number(state.cc_level);
-      const rewardReferenceLevelBefore = Math.max(
-        Number(state.cc_base),
-        Number(state.cc_calculated),
-      );
+      const rewardReferenceLevelBefore = displayLevelBefore;
+      const levelGain =
+        canonical.problem_rating_observed === null
+          ? 0
+          : calculateCcLevelGain(Number(canonical.problem_rating_observed), displayLevelBefore, {
+              initialLevel: Number(policy.level_initial),
+              gainMax: Number(policy.level_gain_max),
+              gainScale: Number(policy.level_gain_scale),
+              maxPositiveDelta: Number(policy.max_positive_delta),
+            });
+      const nextLevel = round4(displayLevelBefore + levelGain);
 
       let amount = 0;
       if (rewardEligible && canonical.problem_rating_observed !== null) {
@@ -139,6 +137,7 @@ export class RewardEngineService {
             max: Number(policy.reward_max),
             midpointDelta: Number(policy.reward_midpoint_delta),
             scale: Number(policy.reward_scale),
+            maxPositiveDelta: Number(policy.max_positive_delta),
           },
         );
         const [season] = await transaction<{ id: string }[]>`
@@ -170,8 +169,8 @@ export class RewardEngineService {
             ${JSON.stringify({
               displayCcLevelBefore: displayLevelBefore,
               rewardReferenceLevelBefore,
-              ccLevelAfter: nextLevel.level,
-              ccLevelDelta: round2(nextLevel.level - displayLevelBefore),
+              ccLevelAfter: nextLevel,
+              ccLevelDelta: levelGain,
             })}::jsonb,
             ${solvedAt.toISOString()}
           )
@@ -196,16 +195,102 @@ export class RewardEngineService {
               updated_at = now()
           `;
         }
+        await this.recordRiskSignals(
+          transaction,
+          userId,
+          canonical.cf_submission_id,
+          solvedAt,
+          Number(canonical.problem_rating_observed),
+          rewardReferenceLevelBefore,
+        );
       }
 
       await transaction`
         UPDATE user_skill_state
-        SET cc_calculated = ${nextLevel.calculated}, cc_mastery_bonus = ${nextLevel.masteryBonus},
-          cc_level = ${nextLevel.level}, updated_at = now()
+        SET cc_calculated = ${nextLevel}, cc_mastery_bonus = 0,
+          cc_level = ${nextLevel}, updated_at = now()
         WHERE user_id = ${userId}
       `;
       return { firstSolveCreated: true, awarded: rewardEligible, amount };
     });
+  }
+
+  private async recordRiskSignals(
+    transaction: import('postgres').TransactionSql,
+    userId: string,
+    submissionId: string,
+    solvedAt: Date,
+    problemRating: number,
+    levelBefore: number,
+  ) {
+    const delta = problemRating - levelBefore;
+    const [activity] = await transaction<{ high_delta_count: number; recent_count: number }[]>`
+      SELECT
+        count(*) FILTER (
+          WHERE problem_rating_snapshot - cc_level_before >= 300
+            AND event_at >= ${solvedAt.toISOString()}::timestamptz - interval '24 hours'
+        )::int AS high_delta_count,
+        count(*) FILTER (
+          WHERE event_at >= ${solvedAt.toISOString()}::timestamptz - interval '2 hours'
+        )::int AS recent_count
+      FROM point_transactions
+      WHERE user_id = ${userId} AND type = 'EARN'
+        AND event_at <= ${solvedAt.toISOString()}
+    `;
+    const signals: Array<{ code: string; score: number; summary: string; evidence: object }> = [];
+    if (delta >= 300) {
+      signals.push({
+        code: 'HIGH_DIFFICULTY_DELTA',
+        score: 2,
+        summary: 'Có bài giải cao hơn CC Level từ 300 điểm trở lên',
+        evidence: { delta: round2(delta), problemRating, levelBefore },
+      });
+    }
+    if ((activity?.high_delta_count ?? 0) >= 5) {
+      signals.push({
+        code: 'HIGH_DELTA_BURST_24H',
+        score: 3,
+        summary: 'Có nhiều bài vượt trình trong vòng 24 giờ',
+        evidence: { count: activity?.high_delta_count, windowHours: 24 },
+      });
+    }
+    if ((activity?.recent_count ?? 0) >= 12) {
+      signals.push({
+        code: 'SOLVE_BURST_2H',
+        score: 3,
+        summary: 'Có nhiều bài được ghi nhận trong thời gian ngắn',
+        evidence: { count: activity?.recent_count, windowHours: 2 },
+      });
+    }
+    for (const signal of signals) {
+      const [created] = await transaction<{ id: string }[]>`
+        INSERT INTO activity_risk_events (
+          user_id, source_submission_id, signal_code, score, summary, evidence, idempotency_key
+        ) VALUES (
+          ${userId}, ${submissionId}, ${signal.code}, ${signal.score}, ${signal.summary},
+          ${JSON.stringify(signal.evidence)}::jsonb,
+          ${`risk:${signal.code}:${submissionId}`}
+        ) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id
+      `;
+      if (!created) continue;
+    }
+    await transaction`
+      WITH current_risk AS (
+        SELECT COALESCE(sum(score), 0)::int AS score
+        FROM activity_risk_events
+        WHERE user_id = ${userId} AND resolution IS DISTINCT FROM 'VALID'
+          AND created_at >= now() - interval '30 days'
+      )
+      UPDATE users SET
+        activity_risk_score = current_risk.score,
+        activity_risk_level = CASE
+          WHEN current_risk.score >= 10 THEN 'PRIORITY'
+          WHEN current_risk.score >= 6 THEN 'REVIEW'
+          ELSE 'NORMAL'
+        END,
+        updated_at = now()
+      FROM current_risk WHERE users.id = ${userId}
+    `;
   }
 
   async settleExpiredStreaks(userId: string) {

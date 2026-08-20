@@ -98,7 +98,6 @@ export class OrganizationsController {
         users.full_name,
         users.display_name,
         users.avatar_url,
-        skill.cc_base::text AS initial_cc_level,
         skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle,
         accounts.pending_handle,

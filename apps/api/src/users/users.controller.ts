@@ -18,7 +18,6 @@ import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import { hashPassword, verifyPassword } from '../auth/password';
 import type { AuthUser } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
-import { setCcBaseAndRecompute } from '../scoring/cc-level-recalculation';
 
 const avatarSchema = z
   .string()
@@ -36,7 +35,6 @@ const codeforcesHandleSchema = z
   .min(3)
   .max(24)
   .regex(/^[A-Za-z0-9_.-]+$/, 'Codeforces handle không hợp lệ');
-const initialCcLevelSchema = z.coerce.number().min(0).max(10_000);
 const createUserSchema = z.object({
   email: z.string().trim().email().max(320),
   password: z.string().min(12).max(200),
@@ -46,7 +44,6 @@ const createUserSchema = z.object({
   leaderboardVisible: z.boolean().optional(),
   organizationId: z.string().uuid().optional(),
   codeforcesHandle: codeforcesHandleSchema.optional(),
-  initialCcLevel: initialCcLevelSchema.default(800),
   mustChangePassword: z.boolean().default(false),
 });
 const updateOwnProfileSchema = z
@@ -75,7 +72,6 @@ const updateUserSchema = z
     status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
     systemRole: z.enum(['USER', 'ADMIN', 'SYSTEM_ADMIN']).optional(),
     leaderboardVisible: z.boolean().optional(),
-    initialCcLevel: initialCcLevelSchema.optional(),
     classId: z.string().uuid().nullable().optional(),
     codeforcesHandle: codeforcesHandleSchema.optional(),
     reason: z.string().trim().min(3).max(500),
@@ -103,8 +99,9 @@ export class UsersController {
       SELECT users.id, credentials.email, credentials.must_change_password,
         users.full_name, users.display_name,
         users.avatar_url, users.status, users.system_role, users.leaderboard_visible,
+        users.activity_risk_level, users.activity_risk_score,
         users.created_at,
-        skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
+        skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank
       FROM users
@@ -194,8 +191,9 @@ export class UsersController {
     const users = await this.database.sql`
       SELECT users.id, credentials.email, credentials.must_change_password,
         users.full_name, users.display_name, users.avatar_url,
-        users.status, users.system_role, users.leaderboard_visible, users.created_at,
-        skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
+        users.status, users.system_role, users.leaderboard_visible,
+        users.activity_risk_level, users.activity_risk_score, users.created_at,
+        skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank,
         accounts.sync_status, accounts.last_sync_at,
@@ -222,7 +220,7 @@ export class UsersController {
         OR accounts.handle ILIKE ${search})
         AND (${input.status ?? null}::user_status IS NULL OR users.status = ${input.status ?? null})
       GROUP BY users.id, credentials.email, credentials.must_change_password,
-        skill.cc_base, skill.cc_level, accounts.handle,
+        skill.cc_level, accounts.handle,
         accounts.pending_handle, accounts.verification_status, accounts.current_rating, accounts.rank,
         accounts.sync_status, accounts.last_sync_at,
         wallet.balance, points.cc_point
@@ -257,7 +255,6 @@ export class UsersController {
           displayName: input.displayName,
           systemRole: input.systemRole,
           leaderboardVisible: input.leaderboardVisible ?? input.systemRole === 'USER',
-          initialCcLevel: input.initialCcLevel,
           mustChangePassword: input.mustChangePassword,
           verifyCodeforces: Boolean(input.codeforcesHandle),
           ...(input.organizationId ? { organizationId: input.organizationId } : {}),
@@ -273,7 +270,6 @@ export class UsersController {
             leaderboardVisible: input.leaderboardVisible ?? input.systemRole === 'USER',
             organizationId: input.organizationId ?? null,
             codeforcesHandle: input.codeforcesHandle ?? null,
-            initialCcLevel: input.initialCcLevel,
             mustChangePassword: input.mustChangePassword,
           },
         },
@@ -290,8 +286,9 @@ export class UsersController {
     const userId = this.uuid(id);
     const [user] = await this.database.sql`
       SELECT users.id, credentials.email, users.full_name, users.display_name, users.avatar_url,
-        users.status, users.system_role, users.leaderboard_visible, users.created_at,
-        skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
+        users.status, users.system_role, users.leaderboard_visible,
+        users.activity_risk_level, users.activity_risk_score, users.created_at,
+        skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank
       FROM users
@@ -319,7 +316,7 @@ export class UsersController {
       const updated = await this.database.sql.begin(async (transaction) => {
         const [before] = await transaction`
           SELECT users.full_name, users.display_name, users.avatar_url, users.status,
-            users.system_role, users.leaderboard_visible, credentials.email, skill.cc_base,
+            users.system_role, users.leaderboard_visible, credentials.email,
             accounts.handle AS codeforces_handle, accounts.pending_handle
           FROM users
           LEFT JOIN user_credentials AS credentials ON credentials.user_id = users.id
@@ -350,9 +347,6 @@ export class UsersController {
             UPDATE user_credentials SET email = ${input.email.toLowerCase()}, updated_at = now()
             WHERE user_id = ${userId}
           `;
-        }
-        if (input.initialCcLevel !== undefined) {
-          await setCcBaseAndRecompute(transaction, userId, input.initialCcLevel);
         }
         if (input.classId !== undefined) {
           await transaction`
@@ -401,7 +395,7 @@ export class UsersController {
         }
         const [after] = await transaction`
           SELECT users.full_name, users.display_name, users.avatar_url, users.status,
-            users.system_role, users.leaderboard_visible, credentials.email, skill.cc_base,
+            users.system_role, users.leaderboard_visible, credentials.email,
             accounts.handle AS codeforces_handle, accounts.pending_handle
           FROM users
           LEFT JOIN user_credentials AS credentials ON credentials.user_id = users.id

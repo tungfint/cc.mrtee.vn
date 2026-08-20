@@ -1,112 +1,109 @@
 import { describe, expect, it } from 'vitest';
-import { calculateCcLevel, calculateReward, type RatedSolve } from './scoring';
+import {
+  calculateCcLevel,
+  calculateCcLevelGain,
+  calculateReward,
+  type RatedSolve,
+} from './scoring';
 
-const corePolicy = { decay: 0.95, denominator: 20, base: 800 };
-const policy = {
-  ...corePolicy,
-  masteryFactor: 8,
-  masteryScale: 4,
-  masteryRatingStep: 400,
+const levelPolicy = {
+  initialLevel: 800,
+  gainMax: 4,
+  gainScale: 100,
+  maxPositiveDelta: 500,
 };
 
-describe('CC level', () => {
-  it('is invariant to permutation, duplicate problems, and unrated solves', () => {
+describe('CC Level v3.0', () => {
+  it('uses chronological first-solve order and ignores duplicates/unrated solves', () => {
     const solves: RatedSolve[] = [
-      { problemKey: 'a', rating: 1200 },
-      { problemKey: 'b', rating: 1000 },
+      { problemKey: 'later', rating: 1200, solvedAt: '2026-01-02', submissionId: 2 },
+      { problemKey: 'first', rating: 800, solvedAt: '2026-01-01', submissionId: 1 },
+      { problemKey: 'later', rating: 1500, solvedAt: '2026-01-03', submissionId: 3 },
+      { problemKey: 'unrated', rating: null, solvedAt: '2026-01-04', submissionId: 4 },
     ];
-    const expected = calculateCcLevel(solves, policy);
-    expect(calculateCcLevel([...solves].reverse(), policy)).toEqual(expected);
-    expect(
-      calculateCcLevel([...solves, solves[0]!, { problemKey: 'c', rating: null }], policy),
-    ).toEqual(expected);
+    const expected = calculateCcLevel([solves[1]!, solves[0]!], levelPolicy);
+    expect(calculateCcLevel(solves, levelPolicy)).toEqual(expected);
   });
 
-  it.each([10, 20, 40, 60, 90])('matches the closed form for %i equal ratings', (count) => {
-    const rating = 1500;
-    const solves = Array.from({ length: count }, (_, index) => ({
-      problemKey: String(index),
-      rating,
-    }));
-    const expected = Math.max(800, (rating * (1 - 0.95 ** count)) / (20 * (1 - 0.95)));
-    expect(calculateCcLevel(solves, policy).coreLevel).toBeCloseTo(expected, 2);
+  it.each([
+    [-500, 0.0268],
+    [-300, 0.1897],
+    [-200, 0.4768],
+    [-100, 1.0758],
+    [0, 2],
+    [100, 2.9242],
+    [200, 3.5232],
+    [300, 3.8103],
+    [500, 3.9732],
+  ])('adds the approved gain at delta %i', (delta, gain) => {
+    expect(calculateCcLevelGain(1000 + delta, 1000, levelPolicy)).toBeCloseTo(gain, 4);
   });
 
-  it('does not decrease when another normally qualifying solve is added', () => {
-    const solves = [{ problemKey: 'a', rating: 1200 }];
-    const before = calculateCcLevel(solves, policy).level;
-    const after = calculateCcLevel([...solves, { problemKey: 'b', rating: 1000 }], policy).level;
-    expect(after).toBeGreaterThanOrEqual(before);
-  });
-
-  it('matches the documented simulations', () => {
-    const beginner = [800, 900, 1000, 1100, 1200, 1300].flatMap((rating) =>
-      Array.from({ length: 15 }, (_, index) => ({
-        problemKey: `b-${rating}-${index}`,
-        rating,
-      })),
+  it('caps the positive difficulty delta at +500', () => {
+    expect(calculateCcLevelGain(1500, 1000, levelPolicy)).toBe(
+      calculateCcLevelGain(3000, 1000, levelPolicy),
     );
-    expect(calculateCcLevel(beginner, policy).coreLevel).toBe(1207.61);
-
-    const strong = [1500, 1600, 1700, 1800, 1900].flatMap((rating) =>
-      Array.from({ length: 16 }, (_, index) => ({
-        problemKey: `s-${rating}-${index}`,
-        rating,
-      })),
-    );
-    expect(calculateCcLevel(strong, { ...policy, base: 1500 }).coreLevel).toBe(1799.56);
   });
 
-  it('records every rated first solve with diminishing gains', () => {
-    const levels = Array.from(
-      { length: 100 },
-      (_, index) =>
-        calculateCcLevel(
-          Array.from({ length: index + 1 }, (_, solveIndex) => ({
-            problemKey: `p-${solveIndex}`,
-            rating: 800,
-          })),
-          policy,
-        ).level,
-    );
-    expect(levels[0]).toBe(801.79);
-    expect(levels[1]! - levels[0]!).toBeGreaterThan(levels[99]! - levels[98]!);
-    expect(levels[99]! - levels[98]!).toBeGreaterThan(0);
-    const thousandEasySolves = calculateCcLevel(
-      Array.from({ length: 1000 }, (_, index) => ({ problemKey: `farm-${index}`, rating: 800 })),
-      policy,
-    );
-    expect(thousandEasySolves.level).toBeLessThan(850);
+  it('gives every rated first solve a positive gain that diminishes for fixed easy work', () => {
+    let level = 1000;
+    const gains: number[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      const gain = calculateCcLevelGain(800, level, levelPolicy);
+      gains.push(gain);
+      level += gain;
+    }
+    expect(gains[0]).toBeCloseTo(0.4768, 4);
+    expect(gains[99]!).toBeGreaterThan(0);
+    expect(gains[99]!).toBeLessThan(gains[0]!);
   });
 
-  it('rewards harder evidence more without changing the reward reference core', () => {
-    const first800 = calculateCcLevel([{ problemKey: '800', rating: 800 }], policy);
-    const first900 = calculateCcLevel([{ problemKey: '900', rating: 900 }], policy);
-    expect(first900.level - policy.base).toBeGreaterThan(first800.level - policy.base);
-    expect(first800.coreLevel).toBe(800);
-    expect(first900.coreLevel).toBe(800);
-  });
-
-  it('still adds a small positive amount for an easier solve above base', () => {
-    const history = Array.from({ length: 60 }, (_, index) => ({
-      problemKey: `hard-${index}`,
-      rating: 1100,
-    }));
-    const before = calculateCcLevel(history, policy).level;
-    const after = calculateCcLevel([...history, { problemKey: 'easy', rating: 800 }], policy).level;
-    expect(after).toBeGreaterThan(before);
-    expect(after - before).toBeLessThan(3);
+  it('needs about 50 maintained equal-level solves for +100 CCL', () => {
+    expect(100 / calculateCcLevelGain(1000, 1000, levelPolicy)).toBe(50);
   });
 });
 
-describe('CC reward', () => {
-  const rewardPolicy = { min: 0.05, max: 30, midpointDelta: 50, scale: 80 };
+describe('CC Point v3.0', () => {
+  const rewardPolicy = {
+    min: 0.25,
+    max: 12.5,
+    midpointDelta: 50,
+    scale: 120,
+    maxPositiveDelta: 500,
+  };
 
-  it('is monotonic and clamped for the regression deltas', () => {
-    const deltas = [-500, -300, -200, -100, 0, 100, 200, 300, 500];
-    const rewards = deltas.map((delta) => calculateReward(1200 + delta, 1200, rewardPolicy));
+  it.each([
+    [-500, 0.37],
+    [-300, 0.88],
+    [-200, 1.61],
+    [-100, 2.98],
+    [0, 5.12],
+    [100, 7.63],
+    [200, 9.77],
+    [300, 11.14],
+    [500, 12.22],
+  ])('awards the approved CCP at delta %i', (delta, expected) => {
+    expect(calculateReward(1000 + delta, 1000, rewardPolicy)).toBe(expected);
+  });
+
+  it('caps rewards above +500 and preserves monotonicity', () => {
+    const deltas = [-1000, -500, -300, -100, 0, 100, 300, 500, 1000];
+    const rewards = deltas.map((delta) => calculateReward(1000 + delta, 1000, rewardPolicy));
     expect(rewards).toEqual([...rewards].sort((a, b) => a - b));
-    expect(Math.min(...rewards)).toBeGreaterThanOrEqual(0.05);
-    expect(Math.max(...rewards)).toBeLessThanOrEqual(30);
+    expect(rewards.at(-1)).toBe(rewards.at(-2));
+  });
+
+  it('matches the 3,000 CCP calibration targets', () => {
+    const normalAverage =
+      calculateReward(1000, 1000, rewardPolicy) * 0.5 +
+      calculateReward(1100, 1000, rewardPolicy) * 0.3 +
+      calculateReward(1200, 1000, rewardPolicy) * 0.2;
+    const strongAverage =
+      calculateReward(1100, 1000, rewardPolicy) * 0.2 +
+      calculateReward(1200, 1000, rewardPolicy) * 0.3 +
+      calculateReward(1300, 1000, rewardPolicy) * 0.3 +
+      calculateReward(1500, 1000, rewardPolicy) * 0.2;
+    expect(3000 / normalAverage).toBeCloseTo(441, 0);
+    expect(3000 / strongAverage).toBeCloseTo(293, 0);
   });
 });

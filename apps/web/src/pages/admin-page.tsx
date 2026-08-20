@@ -31,7 +31,6 @@ interface Member {
   full_name: string;
   display_name: string;
   avatar_url: string | null;
-  initial_cc_level: string;
   cc_level: string;
   codeforces_handle: string | null;
   pending_handle: string | null;
@@ -52,7 +51,8 @@ interface UserAccount {
   status: string;
   system_role: string;
   leaderboard_visible: boolean;
-  initial_cc_level: string;
+  activity_risk_level: 'NORMAL' | 'REVIEW' | 'PRIORITY';
+  activity_risk_score: number;
   cc_level: string;
   codeforces_handle: string | null;
   pending_handle: string | null;
@@ -169,7 +169,6 @@ interface StudentImportRow extends EditableImportRow {
   fullName: string;
   displayName: string;
   codeforcesHandle: string;
-  initialCcLevel: number;
   classSlug: string;
   mustChangePassword: boolean;
   errors: string[];
@@ -196,7 +195,6 @@ const studentImportColumns = [
   { key: 'fullName', label: 'Họ và tên', width: '190px' },
   { key: 'displayName', label: 'Tên hiển thị', width: '160px' },
   { key: 'codeforcesHandle', label: 'Codeforces', width: '140px' },
-  { key: 'initialCcLevel', label: 'CC Base', type: 'number' as const, width: '100px' },
   { key: 'classSlug', label: 'Slug lớp', width: '130px' },
   { key: 'mustChangePassword', label: 'Đổi mật khẩu', type: 'checkbox' as const, width: '100px' },
 ];
@@ -236,7 +234,6 @@ interface AuditLog {
 }
 
 const auditActionLabels: Record<string, string> = {
-  CC_BASE_RECALIBRATED: 'Hiệu chỉnh CC Base',
   POINT_BONUS: 'Cộng hoặc trừ CC Point',
   POINTS_BULK_IMPORTED: 'Nhập lệnh CC Point hàng loạt',
   CODEFORCES_ACCOUNT_VERIFIED: 'Xác thực tài khoản Codeforces',
@@ -291,7 +288,6 @@ const auditFieldLabels: Record<string, string> = {
   email: 'Email',
   status: 'Trạng thái',
   role: 'Vai trò',
-  cc_base: 'CC Base',
   cc_level: 'CC Level',
   amount: 'Số điểm',
   balance: 'CC Balance',
@@ -350,8 +346,6 @@ export default function AdminPage() {
   const [reason, setReason] = useState('');
   const [pointAmount, setPointAmount] = useState('10');
   const [pointReason, setPointReason] = useState('');
-  const [baseAmount, setBaseAmount] = useState('800');
-  const [baseReason, setBaseReason] = useState('');
   const [pointType, setPointType] = useState('BONUS');
   const [rewardName, setRewardName] = useState('');
   const [rewardCost, setRewardCost] = useState('100');
@@ -398,7 +392,6 @@ export default function AdminPage() {
   const [displayName, setDisplayName] = useState('');
   const [newSystemRole, setNewSystemRole] = useState<'USER' | 'ADMIN' | 'SYSTEM_ADMIN'>('USER');
   const [codeforcesHandle, setCodeforcesHandle] = useState('');
-  const [initialCcLevel, setInitialCcLevel] = useState('800');
   const [classId, setClassId] = useState('');
   const [resetUserId, setResetUserId] = useState('');
   const [resetPassword, setResetPassword] = useState('');
@@ -840,7 +833,7 @@ export default function AdminPage() {
         ]
       : []),
     ...(!isSystemAdmin ? [{ id: 'members', label: 'Học sinh' }] : []),
-    { id: 'points', label: 'Điểm & CC Base' },
+    { id: 'points', label: 'Điểm CC' },
     { id: 'sync', label: 'Đồng bộ CF' },
     ...(isSystemAdmin
       ? [
@@ -916,7 +909,6 @@ export default function AdminPage() {
                         displayName,
                         systemRole: isSuperAdmin ? newSystemRole : 'USER',
                         leaderboardVisible: newSystemRole === 'USER',
-                        initialCcLevel: Number(initialCcLevel),
                         mustChangePassword,
                         ...(classId ? { organizationId: classId } : {}),
                         ...(codeforcesHandle ? { codeforcesHandle } : {}),
@@ -985,17 +977,6 @@ export default function AdminPage() {
                         pattern="[A-Za-z0-9_.-]{3,24}"
                         placeholder="Có thể để trống"
                         value={codeforcesHandle}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Mức ban đầu</span>
-                      <input
-                        max="10000"
-                        min="0"
-                        onChange={(e) => setInitialCcLevel(e.target.value)}
-                        required
-                        type="number"
-                        value={initialCcLevel}
                       />
                     </label>
                     <label className="field form-span-2">
@@ -1169,7 +1150,6 @@ export default function AdminPage() {
                         email: field('email'),
                         fullName: field('fullName'),
                         displayName: field('displayName'),
-                        initialCcLevel: Number(field('initialCcLevel')),
                         classId: field('classId') || null,
                         ...(nextHandle ? { codeforcesHandle: nextHandle } : {}),
                         reason: field('reason'),
@@ -1202,17 +1182,6 @@ export default function AdminPage() {
                     <label className="field">
                       <span>Tên hiển thị</span>
                       <input defaultValue={editingUser.display_name} name="displayName" required />
-                    </label>
-                    <label className="field">
-                      <span>Mức ban đầu</span>
-                      <input
-                        defaultValue={editingUser.initial_cc_level ?? '800'}
-                        max="10000"
-                        min="0"
-                        name="initialCcLevel"
-                        required
-                        type="number"
-                      />
                     </label>
                     <label className="field">
                       <span>Tài khoản Codeforces</span>
@@ -1384,8 +1353,19 @@ export default function AdminPage() {
                             ) : (
                               <strong>{item.display_name}</strong>
                             )}
+                            {item.activity_risk_level !== 'NORMAL' && (
+                              <span
+                                className={`activity-risk-badge ${item.activity_risk_level.toLowerCase()}`}
+                                title={`Điểm cảnh báo: ${item.activity_risk_score}`}
+                              >
+                                ⚠{' '}
+                                {item.activity_risk_level === 'PRIORITY'
+                                  ? 'Ưu tiên kiểm tra'
+                                  : 'Cần kiểm tra'}
+                              </span>
+                            )}
                             <p>
-                              {item.email} · CC Base {item.initial_cc_level ?? '800'} ·{' '}
+                              {item.email} · CC Level {formatNumber(item.cc_level ?? 800)} ·{' '}
                               {item.memberships.length} lớp
                             </p>
                             {item.must_change_password && (
@@ -1463,6 +1443,25 @@ export default function AdminPage() {
                           </label>
                         )}
                         <div className="compact-actions">
+                          {canManageAccount && item.activity_risk_level !== 'NORMAL' && (
+                            <button
+                              className="button-secondary"
+                              onClick={() => {
+                                const note = window.prompt(
+                                  'Ghi chú xác nhận hoạt động hợp lệ:',
+                                  'Đã kiểm tra lịch sử bài giải và xác nhận hợp lệ',
+                                );
+                                if (!note) return;
+                                mutation.mutate({
+                                  path: `/admin/users/${item.id}/activity-risk/review`,
+                                  body: { resolution: 'VALID', note },
+                                });
+                              }}
+                              type="button"
+                            >
+                              Xác nhận hợp lệ
+                            </button>
+                          )}
                           {canManageAccount && (
                             <button
                               className="button-secondary"
@@ -2226,10 +2225,7 @@ export default function AdminPage() {
                           <p>
                             {member.full_name} · {member.email}
                           </p>
-                          <p>
-                            CC Base {member.initial_cc_level ?? '800'} · CC Level{' '}
-                            {member.cc_level ?? '800'}
-                          </p>
+                          <p>CC Level {member.cc_level ?? '800'}</p>
                           {member.codeforces_handle && (
                             <CodeforcesHandle
                               handle={member.codeforces_handle}
@@ -2376,78 +2372,6 @@ export default function AdminPage() {
                   </label>
                   <button className="button-primary mt-5" disabled={!selectTarget} type="submit">
                     Ghi giao dịch
-                  </button>
-                </form>
-
-                <form
-                  className="panel p-6"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    mutation.mutate({
-                      path: `/admin/users/${selectTarget}/recalibrate-base`,
-                      body: { organizationId, ccBase: Number(baseAmount), reason: baseReason },
-                    });
-                  }}
-                >
-                  <p className="eyebrow">SKILL CALIBRATION</p>
-                  <h2 className="mt-2 text-xl font-black">Hiệu chỉnh CC Base</h2>
-                  <div className="base-explanation mt-4">
-                    <p>
-                      <strong>CC Base</strong> là mức năng lực nền do Admin/Giáo viên xác nhận từ
-                      đầu vào, bài kiểm tra hoặc lịch sử Codeforces. Đây không phải điểm thưởng và
-                      không cộng trực tiếp vào ví.
-                    </p>
-                    <p>
-                      <strong>
-                        CC Level hiện tại = giá trị lớn hơn giữa CC Base và mức hệ thống tính từ bài
-                        đã giải.
-                      </strong>{' '}
-                      Hạ CC Base không làm mất kết quả năng lực đã đạt được.
-                    </p>
-                  </div>
-                  <div className="base-presets mt-4" aria-label="Các mốc CC Base đề xuất">
-                    {[
-                      [800, 'Mới bắt đầu'],
-                      [1000, 'Có nền tảng'],
-                      [1200, 'Khá'],
-                      [1400, 'Vững'],
-                      [1600, 'Nâng cao'],
-                      [1900, 'Chuyên sâu'],
-                    ].map(([level, label]) => (
-                      <button
-                        className={baseAmount === String(level) ? 'active' : ''}
-                        key={level}
-                        onClick={() => setBaseAmount(String(level))}
-                        type="button"
-                      >
-                        <strong>{level}</strong>
-                        <span>{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <label className="field mt-5">
-                    <span>CC Base mới</span>
-                    <input
-                      max="10000"
-                      min="0"
-                      onChange={(e) => setBaseAmount(e.target.value)}
-                      required
-                      type="number"
-                      value={baseAmount}
-                    />
-                  </label>
-                  <label className="field mt-4">
-                    <span>Lý do và căn cứ hiệu chỉnh</span>
-                    <textarea
-                      minLength={3}
-                      onChange={(e) => setBaseReason(e.target.value)}
-                      placeholder="Ví dụ: Kết quả kiểm tra đầu vào ngày…"
-                      required
-                      value={baseReason}
-                    />
-                  </label>
-                  <button className="button-secondary mt-5" disabled={!selectTarget} type="submit">
-                    Hiệu chỉnh CC Base
                   </button>
                 </form>
               </div>

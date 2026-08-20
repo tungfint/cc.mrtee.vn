@@ -127,6 +127,20 @@
       "when": 1787220445000,
       "tag": "0017_repair-demo-utf8-and-level",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787223600000,
+      "tag": "0018_scoring-policy-v30",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787225400000,
+      "tag": "0019_cc-level-precision-v30",
+      "breakpoints": true
     }
   ]
 }

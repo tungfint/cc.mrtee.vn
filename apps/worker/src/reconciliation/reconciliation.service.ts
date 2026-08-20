@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { calculateCcLevel, calculateReward, round2 } from '@cc/core';
+import { calculateCcLevel, calculateCcLevelGain, calculateReward, round4 } from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 
 interface InvalidSolve {
@@ -23,11 +23,10 @@ interface EarnRow {
 
 interface PolicyRow {
   version: string;
-  level_decay: string;
-  level_denominator: string;
-  level_mastery_factor: string;
-  level_mastery_scale: string;
-  level_mastery_rating_step: string;
+  level_initial: string;
+  level_gain_max: string;
+  level_gain_scale: string;
+  max_positive_delta: string;
   reward_min: string;
   reward_max: string;
   reward_midpoint_delta: string;
@@ -202,44 +201,61 @@ export class ReconciliationService {
     await transaction`INSERT INTO user_skill_state (user_id) VALUES (${userId}) ON CONFLICT DO NOTHING`;
     const [state] = await transaction<
       {
-        cc_base: string;
-        cc_calculated: string;
         cc_level: string;
         scoring_policy_version: string;
       }[]
     >`
-      SELECT cc_base, cc_calculated, cc_level, scoring_policy_version FROM user_skill_state
+      SELECT cc_level, scoring_policy_version FROM user_skill_state
       WHERE user_id = ${userId} FOR UPDATE
     `;
     const [policy] = await transaction<PolicyRow[]>`
-      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v2.1'}
+      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v3.0'}
     `;
     if (!state || !policy || submission.problem_rating_observed === null) return null;
-    const rewardReferenceLevel = Math.max(Number(state.cc_base), Number(state.cc_calculated));
+    const priorSolves = await transaction<
+      {
+        problem_key: string;
+        rating_snapshot: number;
+        first_solved_at: Date;
+        first_ok_submission_id: string;
+      }[]
+    >`
+      SELECT problem_key, rating_snapshot, first_solved_at, first_ok_submission_id
+      FROM user_problem_solves
+      WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
+        AND (first_solved_at, first_ok_submission_id) < (
+          ${solvedAt.toISOString()}::timestamptz, ${submission.cf_submission_id}::bigint
+        )
+      ORDER BY first_solved_at, first_ok_submission_id, problem_key
+    `;
+    const levelPolicy = {
+      initialLevel: Number(policy.level_initial),
+      gainMax: Number(policy.level_gain_max),
+      gainScale: Number(policy.level_gain_scale),
+      maxPositiveDelta: Number(policy.max_positive_delta),
+    };
+    const rewardReferenceLevel = calculateCcLevel(
+      priorSolves.map((item) => ({
+        problemKey: item.problem_key,
+        rating: Number(item.rating_snapshot),
+        solvedAt: item.first_solved_at,
+        submissionId: item.first_ok_submission_id,
+      })),
+      levelPolicy,
+    ).level;
     const amount = calculateReward(submission.problem_rating_observed, rewardReferenceLevel, {
       min: Number(policy.reward_min),
       max: Number(policy.reward_max),
       midpointDelta: Number(policy.reward_midpoint_delta),
       scale: Number(policy.reward_scale),
+      maxPositiveDelta: Number(policy.max_positive_delta),
     });
-    const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
-      SELECT problem_key, rating_snapshot FROM user_problem_solves
-      WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
-    `;
-    const nextLevel = calculateCcLevel(
-      solves.map((item) => ({
-        problemKey: item.problem_key,
-        rating: Number(item.rating_snapshot),
-      })),
-      {
-        decay: Number(policy.level_decay),
-        denominator: Number(policy.level_denominator),
-        base: Number(state.cc_base),
-        masteryFactor: Number(policy.level_mastery_factor),
-        masteryScale: Number(policy.level_mastery_scale),
-        masteryRatingStep: Number(policy.level_mastery_rating_step),
-      },
+    const levelGain = calculateCcLevelGain(
+      submission.problem_rating_observed,
+      rewardReferenceLevel,
+      levelPolicy,
     );
+    const levelAfter = round4(rewardReferenceLevel + levelGain);
     const [season] = await transaction<{ id: string }[]>`
       SELECT seasons.id FROM seasons
       WHERE seasons.status <> 'DRAFT'
@@ -265,10 +281,10 @@ export class ReconciliationService {
         ${rewardReferenceLevel}, ${submission.problem_rating_observed}, ${policy.version},
         'Replacement reward after Codeforces rejudge',
         ${JSON.stringify({
-          displayCcLevelBefore: Number(state.cc_level),
+          displayCcLevelBefore: rewardReferenceLevel,
           rewardReferenceLevelBefore: rewardReferenceLevel,
-          ccLevelAfter: nextLevel.level,
-          ccLevelDelta: round2(nextLevel.level - Number(state.cc_level)),
+          ccLevelAfter: levelAfter,
+          ccLevelDelta: levelGain,
         })}::jsonb,
         ${solvedAt.toISOString()}
       ) ON CONFLICT DO NOTHING RETURNING id
@@ -296,29 +312,38 @@ export class ReconciliationService {
 
   private async recomputeSkill(transaction: import('postgres').TransactionSql, userId: string) {
     await transaction`INSERT INTO user_skill_state (user_id) VALUES (${userId}) ON CONFLICT DO NOTHING`;
-    const [state] = await transaction<{ cc_base: string; scoring_policy_version: string }[]>`
-      SELECT cc_base, scoring_policy_version FROM user_skill_state WHERE user_id = ${userId} FOR UPDATE
+    const [state] = await transaction<{ scoring_policy_version: string }[]>`
+      SELECT scoring_policy_version FROM user_skill_state WHERE user_id = ${userId} FOR UPDATE
     `;
     const [policy] = await transaction<PolicyRow[]>`
-      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v2.1'}
+      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v3.0'}
     `;
     if (!state || !policy) throw new Error('Scoring policy is unavailable');
-    const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
-      SELECT problem_key, rating_snapshot FROM user_problem_solves
+    const solves = await transaction<
+      {
+        problem_key: string;
+        rating_snapshot: number;
+        first_solved_at: Date;
+        first_ok_submission_id: string;
+      }[]
+    >`
+      SELECT problem_key, rating_snapshot, first_solved_at, first_ok_submission_id
+      FROM user_problem_solves
       WHERE user_id = ${userId} AND rating_snapshot IS NOT NULL
+      ORDER BY first_solved_at, first_ok_submission_id, problem_key
     `;
     const result = calculateCcLevel(
       solves.map((item) => ({
         problemKey: item.problem_key,
         rating: Number(item.rating_snapshot),
+        solvedAt: item.first_solved_at,
+        submissionId: item.first_ok_submission_id,
       })),
       {
-        decay: Number(policy.level_decay),
-        denominator: Number(policy.level_denominator),
-        base: Number(state.cc_base),
-        masteryFactor: Number(policy.level_mastery_factor),
-        masteryScale: Number(policy.level_mastery_scale),
-        masteryRatingStep: Number(policy.level_mastery_rating_step),
+        initialLevel: Number(policy.level_initial),
+        gainMax: Number(policy.level_gain_max),
+        gainScale: Number(policy.level_gain_scale),
+        maxPositiveDelta: Number(policy.max_positive_delta),
       },
     );
     await transaction`

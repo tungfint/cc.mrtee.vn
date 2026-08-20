@@ -34,6 +34,8 @@ interface Board {
     ccBalance: string;
     streak: number;
     longestStreak: number;
+    activityRiskLevel: 'NORMAL' | 'REVIEW' | 'PRIORITY';
+    activityRiskScore: number;
     levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
 }
@@ -138,6 +140,18 @@ export default function LeaderboardPage() {
                 <span className="leader-identity-copy">
                   <span className="leader-name-row">
                     <StudentName name={entry.displayName} rating={entry.currentRating} />
+                    {entry.activityRiskLevel && entry.activityRiskLevel !== 'NORMAL' && (
+                      <span
+                        className={`activity-risk-icon ${entry.activityRiskLevel.toLowerCase()}`}
+                        title={
+                          entry.activityRiskLevel === 'PRIORITY'
+                            ? 'Hoạt động được ưu tiên kiểm tra'
+                            : 'Hoạt động cần kiểm tra'
+                        }
+                      >
+                        ⚠
+                      </span>
+                    )}
                     <LevelRankBadge rank={entry.levelRank} />
                   </span>
                   {entry.codeforcesHandle ? (

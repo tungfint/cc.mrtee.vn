@@ -34,6 +34,8 @@ interface LeaderboardRow {
   cc_balance: string;
   current_streak: number;
   longest_streak: number;
+  activity_risk_level: string;
+  activity_risk_score: number;
   level_rank_name: string | null;
   level_rank_icon: string | null;
   level_rank_color: string | null;
@@ -108,6 +110,7 @@ export class InsightsController {
     ] = await Promise.all([
       this.database.sql`
         SELECT users.id, users.display_name, users.full_name, users.avatar_url, users.timezone,
+          users.activity_risk_level, users.activity_risk_score,
           accounts.handle AS codeforces_handle, accounts.verification_status,
           accounts.pending_handle, accounts.current_rating, accounts.rank AS codeforces_rank,
           accounts.sync_status, accounts.last_sync_at, accounts.next_sync_at,
@@ -332,6 +335,7 @@ export class InsightsController {
     const offset = (input.page - 1) * input.pageSize;
     const rows = await this.database.sql<LeaderboardRow[]>`
       SELECT users.id AS user_id, users.display_name, users.avatar_url,
+        users.activity_risk_level, users.activity_risk_score,
         accounts.handle AS codeforces_handle, accounts.current_rating,
         COALESCE(skill.cc_level, 800)::text AS cc_level,
         COALESCE(points.cc_point, 0)::text AS cc_point,
@@ -429,6 +433,8 @@ export class InsightsController {
         ccBalance: row.cc_balance,
         streak: row.current_streak,
         longestStreak: row.longest_streak,
+        activityRiskLevel: row.activity_risk_level,
+        activityRiskScore: row.activity_risk_score,
         levelRank: row.level_rank_name
           ? {
               name: row.level_rank_name,
@@ -502,9 +508,14 @@ export class InsightsController {
     ] = await Promise.all([
       this.database.sql`
         SELECT users.id, users.full_name, users.display_name, users.avatar_url,
+          users.activity_risk_level, users.activity_risk_score,
+          ARRAY(
+            SELECT events.summary FROM activity_risk_events AS events
+            WHERE events.user_id = users.id AND events.resolution IS DISTINCT FROM 'VALID'
+            ORDER BY events.created_at DESC LIMIT 5
+          ) AS activity_risk_signals,
           accounts.handle AS codeforces_handle, accounts.current_rating, accounts.max_rating,
           accounts.rank AS codeforces_rank, accounts.max_rank AS codeforces_max_rank,
-          COALESCE(skill.cc_base, 800)::text AS cc_base,
           COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(wallet.balance, 0)::text AS cc_balance,
           COALESCE(points.cc_point, 0)::text AS cc_point,

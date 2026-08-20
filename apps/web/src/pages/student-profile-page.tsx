@@ -23,8 +23,10 @@ interface StudentProfile {
     max_rating: number | null;
     codeforces_rank: string | null;
     codeforces_max_rank: string | null;
-    cc_base: string;
     cc_level: string;
+    activity_risk_level: 'NORMAL' | 'REVIEW' | 'PRIORITY';
+    activity_risk_score: number;
+    activity_risk_signals: string[];
     cc_point: string;
     cc_balance: string;
     cash_received_vnd: string;
@@ -150,7 +152,7 @@ export default function StudentProfilePage() {
   });
   const canViewPointHistory = Boolean(
     session.data &&
-      (session.data.user.userId === userId || session.data.user.systemRole !== 'USER'),
+    (session.data.user.userId === userId || session.data.user.systemRole !== 'USER'),
   );
   const history = useQuery({
     queryKey: ['student-point-history', userId, historyPage, historyMetric],
@@ -238,6 +240,17 @@ export default function StudentProfilePage() {
                   rating={profile.current_rating}
                 />
               )}
+              {profile.activity_risk_level && profile.activity_risk_level !== 'NORMAL' && (
+                <span
+                  className={`activity-risk-badge ${profile.activity_risk_level.toLowerCase()}`}
+                  title={(profile.activity_risk_signals ?? []).join('\n')}
+                >
+                  ⚠{' '}
+                  {profile.activity_risk_level === 'PRIORITY'
+                    ? 'Ưu tiên kiểm tra'
+                    : 'Hoạt động cần kiểm tra'}
+                </span>
+              )}
             </div>
             <small>{profile.classes.length ? profile.classes.join(' · ') : 'Chưa xếp lớp'}</small>
           </div>
@@ -248,7 +261,7 @@ export default function StudentProfilePage() {
             icon="⚡"
             label="CC Level"
             value={formatNumber(profile.cc_level, 2)}
-            note={`CC Base ${formatNumber(profile.cc_base)}`}
+            note="Năng lực tích luỹ từ các bài rated"
           />
           <ProfileMetric
             icon="◆"
@@ -518,9 +531,9 @@ export default function StudentProfilePage() {
                 <p className="eyebrow">LỊCH SỬ ĐIỂM</p>
                 <h2>Biến động CC Point và CC Balance</h2>
                 <p>
-                  Mỗi first-solve có rating đều đóng góp vào năng lực, nhưng CC Level chỉ đổi khi
-                  tổng mức hệ thống tính vượt mức hiện tại/CC Base. Bài đủ điều kiện thưởng cộng
-                  đồng thời CC Point và CC Balance; bài unrated chỉ ghi nhận hoạt động/Streak.
+                  Mỗi first-solve có rating đều làm tăng CC Level. Bài ngang hoặc cao hơn trình độ
+                  tăng nhanh hơn; bài dễ vẫn tăng nhưng giảm dần. Bài đủ điều kiện thưởng cộng đồng
+                  thời CC Point và CC Balance; bài unrated chỉ ghi nhận hoạt động và Streak.
                 </p>
               </div>
               <strong>{historyPagination.total} giao dịch</strong>
