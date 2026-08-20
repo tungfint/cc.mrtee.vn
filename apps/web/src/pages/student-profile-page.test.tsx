@@ -83,6 +83,7 @@ describe('StudentProfilePage', () => {
           bonus_milestones: [{ days: 7, ccPoint: 7 }],
         },
         awards: [],
+        achievements: [],
         rewards: [],
         topTags: [],
         pointHistory: [

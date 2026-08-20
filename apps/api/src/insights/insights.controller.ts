@@ -39,6 +39,18 @@ interface LeaderboardRow {
   level_rank_color: string | null;
 }
 
+interface AchievementRow {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  tier: string;
+  color: string;
+  required_longest_streak: number;
+  grant_source: string | null;
+  granted_at: Date | string | null;
+}
+
 const leaderboardQuery = z.object({
   organizationId: z.string().uuid().optional(),
   seasonId: z.string().uuid().optional(),
@@ -77,9 +89,18 @@ export class InsightsController {
 
   @Get('me/dashboard')
   async dashboard(@CurrentUser() user: AuthUser) {
-    const [profile, seasons, streak, tags, activity, transactions, awards, fulfilledRewards] =
-      await Promise.all([
-        this.database.sql`
+    const [
+      profile,
+      seasons,
+      streak,
+      tags,
+      activity,
+      transactions,
+      awards,
+      fulfilledRewards,
+      achievementRows,
+    ] = await Promise.all([
+      this.database.sql`
         SELECT users.id, users.display_name, users.full_name, users.avatar_url, users.timezone,
           accounts.handle AS codeforces_handle, accounts.verification_status,
           accounts.pending_handle, accounts.current_rating, accounts.rank AS codeforces_rank,
@@ -115,7 +136,7 @@ export class InsightsController {
         ) AS points ON true
         WHERE users.id = ${user.userId}
       `,
-        this.database.sql`
+      this.database.sql`
         SELECT seasons.id, seasons.name, seasons.organization_id, seasons.status,
           seasons.start_at, seasons.end_at,
           COALESCE(totals.score, 0)::text AS score,
@@ -135,8 +156,8 @@ export class InsightsController {
         ORDER BY (seasons.organization_id IS NOT NULL) DESC, seasons.start_at DESC
         LIMIT 1
       `,
-        this.streaks.summary(user.userId),
-        this.database.sql`
+      this.streaks.summary(user.userId),
+      this.database.sql`
         SELECT tag, count(DISTINCT solves.problem_key)::int AS solved_count,
           round(avg(solves.rating_snapshot), 2)::text AS average_rating,
           max(solves.rating_snapshot)::int AS max_rating
@@ -146,7 +167,7 @@ export class InsightsController {
         WHERE solves.user_id = ${user.userId}
         GROUP BY tag ORDER BY solved_count DESC, tag LIMIT 20
       `,
-        this.database.sql`
+      this.database.sql`
         SELECT solves.problem_key, problems.name, solves.rating_snapshot,
           solves.first_solved_at, problems.tags
         FROM user_problem_solves AS solves
@@ -154,28 +175,41 @@ export class InsightsController {
         WHERE solves.user_id = ${user.userId}
         ORDER BY solves.first_solved_at DESC LIMIT 10
       `,
-        this.database.sql`
+      this.database.sql`
         SELECT id, type, amount::text, description, event_at, created_at
         FROM point_transactions WHERE user_id = ${user.userId}
         ORDER BY created_at DESC LIMIT 10
       `,
-        this.database.sql`
+      this.database.sql`
         SELECT awards.award_type, awards.title, awards.awarded_at, seasons.name AS season_name
         FROM season_awards AS awards
         JOIN seasons ON seasons.id = awards.season_id
         WHERE awards.user_id = ${user.userId}
         ORDER BY awards.awarded_at DESC LIMIT 8
       `,
-        this.database.sql`
-        SELECT rewards.name, rewards.description, rewards.image_url, orders.reviewed_at AS earned_at
+      this.database.sql`
+        SELECT rewards.id, rewards.name, rewards.description, rewards.image_url,
+          rewards.category, max(orders.reviewed_at) AS earned_at, count(*)::int AS quantity
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
         WHERE orders.user_id = ${user.userId} AND orders.status = 'FULFILLED'
-          AND rescues.id IS NULL
-        ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 8
+          AND rescues.id IS NULL AND rewards.category <> 'ACHIEVEMENT'
+        GROUP BY rewards.id
+        ORDER BY max(orders.reviewed_at) DESC NULLS LAST LIMIT 12
       `,
-      ]);
+      this.database.sql<AchievementRow[]>`
+        SELECT achievements.id, achievements.name, achievements.description,
+          achievements.icon, achievements.tier, achievements.color,
+          achievements.required_longest_streak, grants.source AS grant_source,
+          grants.granted_at
+        FROM achievements
+        LEFT JOIN user_achievements AS grants
+          ON grants.achievement_id = achievements.id AND grants.user_id = ${user.userId}
+        WHERE achievements.active = true OR grants.id IS NOT NULL
+        ORDER BY achievements.required_longest_streak, achievements.id
+      `,
+    ]);
     return {
       profile: profile[0] ?? null,
       season: seasons[0] ?? null,
@@ -190,6 +224,7 @@ export class InsightsController {
       transactions,
       awards,
       fulfilledRewards,
+      achievements: this.earnedAchievements(achievementRows, streak.longestStreak),
     };
   }
 
@@ -423,9 +458,17 @@ export class InsightsController {
   }
 
   private async recognition(userId: string, includePointHistory = false) {
-    const [profiles, streak, awards, rewards, topTags, recognitionQuotes, pointHistory] =
-      await Promise.all([
-        this.database.sql`
+    const [
+      profiles,
+      streak,
+      awards,
+      rewards,
+      topTags,
+      recognitionQuotes,
+      achievementRows,
+      pointHistory,
+    ] = await Promise.all([
+      this.database.sql`
         SELECT users.id, users.full_name, users.display_name, users.avatar_url,
           accounts.handle AS codeforces_handle, accounts.current_rating, accounts.max_rating,
           accounts.rank AS codeforces_rank, accounts.max_rank AS codeforces_max_rank,
@@ -475,25 +518,27 @@ export class InsightsController {
         ) AS level_rank ON true
         WHERE users.id = ${userId} AND users.status = 'ACTIVE'
       `,
-        this.streaks.summary(userId),
-        this.database.sql`
+      this.streaks.summary(userId),
+      this.database.sql`
         SELECT awards.award_type, awards.title, awards.awarded_at, seasons.name AS season_name
         FROM season_awards AS awards
         JOIN seasons ON seasons.id = awards.season_id
         WHERE awards.user_id = ${userId}
         ORDER BY awards.awarded_at DESC LIMIT 12
       `,
-        this.database.sql`
-        SELECT rewards.name, rewards.description, rewards.image_url, rewards.cash_value_vnd,
-          orders.reviewed_at AS earned_at
+      this.database.sql`
+        SELECT rewards.id, rewards.name, rewards.description, rewards.image_url,
+          rewards.cash_value_vnd, rewards.category,
+          max(orders.reviewed_at) AS earned_at, count(*)::int AS quantity
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
         WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
-          AND rescues.id IS NULL
-        ORDER BY orders.reviewed_at DESC NULLS LAST LIMIT 12
+          AND rescues.id IS NULL AND rewards.category <> 'ACHIEVEMENT'
+        GROUP BY rewards.id
+        ORDER BY max(orders.reviewed_at) DESC NULLS LAST LIMIT 16
       `,
-        this.database.sql`
+      this.database.sql`
         SELECT tags.tag, count(DISTINCT solves.problem_key)::int AS solved_count,
           max(solves.rating_snapshot)::int AS max_rating
         FROM user_problem_solves AS solves
@@ -504,15 +549,26 @@ export class InsightsController {
         ORDER BY solved_count DESC, max_rating DESC NULLS LAST, tags.tag
         LIMIT 8
       `,
-        this.database.sql`
+      this.database.sql`
         SELECT content, author
         FROM motivational_quotes
         WHERE active = true
         ORDER BY random()
         LIMIT 1
       `,
-        includePointHistory
-          ? this.database.sql`
+      this.database.sql<AchievementRow[]>`
+        SELECT achievements.id, achievements.name, achievements.description,
+          achievements.icon, achievements.tier, achievements.color,
+          achievements.required_longest_streak, grants.source AS grant_source,
+          grants.granted_at
+        FROM achievements
+        LEFT JOIN user_achievements AS grants
+          ON grants.achievement_id = achievements.id AND grants.user_id = ${userId}
+        WHERE achievements.active = true OR grants.id IS NOT NULL
+        ORDER BY achievements.required_longest_streak, achievements.id
+      `,
+      includePointHistory
+        ? this.database.sql`
             WITH history AS (
               SELECT transactions.*,
                 sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
@@ -560,8 +616,8 @@ export class InsightsController {
             ORDER BY history.event_at DESC, history.created_at DESC, history.id DESC
             LIMIT 50
           `
-          : Promise.resolve([]),
-      ]);
+        : Promise.resolve([]),
+    ]);
     const profile = profiles[0];
     if (!profile) throw new BadRequestException('Không tìm thấy học sinh');
     return {
@@ -577,10 +633,20 @@ export class InsightsController {
       },
       awards,
       rewards,
+      achievements: this.earnedAchievements(achievementRows, streak.longestStreak),
       topTags,
       pointHistory,
       quote: recognitionQuotes[0] ?? null,
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  private earnedAchievements(rows: AchievementRow[], longestStreak: number) {
+    return rows
+      .filter((row) => row.grant_source !== null || row.required_longest_streak <= longestStreak)
+      .map((row) => ({
+        ...row,
+        source: row.grant_source ?? 'STREAK',
+      }));
   }
 }

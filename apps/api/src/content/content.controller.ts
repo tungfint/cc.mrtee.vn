@@ -56,6 +56,19 @@ const rankSchema = z.object({
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
   active: z.boolean().default(true),
 });
+const achievementSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  description: z.string().trim().min(2).max(1000),
+  icon: z.string().trim().min(1).max(500),
+  tier: z.enum(['BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'MASTER', 'LEGEND']),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i),
+  requiredLongestStreak: z.coerce.number().int().min(1).max(100_000),
+  active: z.boolean().default(true),
+});
+const grantAchievementSchema = z.object({
+  userId: z.string().uuid(),
+  note: z.string().trim().min(3).max(500),
+});
 
 type CellValue = string | number | boolean | Date | DateConstructor | null;
 
@@ -65,7 +78,7 @@ export class ContentController {
 
   @Get('content/dashboard')
   async dashboardContent() {
-    const [quotes, ranks] = await Promise.all([
+    const [quotes, ranks, achievements] = await Promise.all([
       this.database.sql`
         SELECT id, content, author, sort_order, heart_count
         FROM motivational_quotes
@@ -78,18 +91,30 @@ export class ContentController {
         WHERE active = true
         ORDER BY min_level
       `,
+      this.database.sql`
+        SELECT id, name, description, icon, tier, color, required_longest_streak
+        FROM achievements WHERE active = true ORDER BY required_longest_streak
+      `,
     ]);
-    return { quotes, ranks };
+    return { quotes, ranks, achievements };
   }
 
   @RequireSystemRole('SYSTEM_ADMIN')
   @Get('admin/content')
   async adminContent() {
-    const [quotes, ranks] = await Promise.all([
+    const [quotes, ranks, achievements] = await Promise.all([
       this.database.sql`SELECT * FROM motivational_quotes ORDER BY sort_order, created_at, id`,
       this.database.sql`SELECT * FROM cc_level_ranks ORDER BY min_level, id`,
+      this.database.sql`
+        SELECT achievements.*,
+          (SELECT count(*)::int FROM user_achievements
+            WHERE achievement_id = achievements.id) AS granted_count,
+          (SELECT count(*)::int FROM rewards
+            WHERE achievement_id = achievements.id) AS reward_count
+        FROM achievements ORDER BY required_longest_streak, id
+      `,
     ]);
-    return { quotes, ranks };
+    return { quotes, ranks, achievements };
   }
 
   @RequireSystemRole('SYSTEM_ADMIN')
@@ -285,6 +310,82 @@ export class ContentController {
     return this.remove('cc_level_ranks', 'CC_LEVEL_RANK_DELETED', this.uuid(idInput), actor);
   }
 
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Post('admin/achievements')
+  createAchievement(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
+    return this.persistAchievement(null, body, actor);
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Patch('admin/achievements/:id')
+  updateAchievement(
+    @Param('id') idInput: string,
+    @Body() body: unknown,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.persistAchievement(this.uuid(idInput), body, actor);
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Delete('admin/achievements/:id')
+  async archiveAchievement(@Param('id') idInput: string, @CurrentUser() actor: AuthUser) {
+    const id = this.uuid(idInput);
+    return this.database.sql.begin(async (transaction) => {
+      const [before] = await transaction`SELECT * FROM achievements WHERE id = ${id} FOR UPDATE`;
+      if (!before) throw new BadRequestException('Không tìm thấy danh hiệu');
+      const [achievement] = await transaction`
+        UPDATE achievements SET active = false, updated_at = now()
+        WHERE id = ${id} RETURNING *
+      `;
+      await this.audit(
+        transaction,
+        actor,
+        'ACHIEVEMENT_ARCHIVED',
+        'achievement',
+        id,
+        before,
+        achievement,
+      );
+      return { achievement };
+    });
+  }
+
+  @RequireSystemRole('SYSTEM_ADMIN')
+  @Post('admin/achievements/:id/grant')
+  async grantAchievement(
+    @Param('id') idInput: string,
+    @Body() body: unknown,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    const id = this.uuid(idInput);
+    const input = grantAchievementSchema.safeParse(body);
+    if (!input.success) throw new BadRequestException('Dữ liệu tặng danh hiệu không hợp lệ');
+    return this.database.sql.begin(async (transaction) => {
+      const [achievement] = await transaction`SELECT id, name FROM achievements WHERE id = ${id}`;
+      if (!achievement) throw new BadRequestException('Không tìm thấy danh hiệu');
+      const [user] = await transaction`
+        SELECT id, display_name FROM users WHERE id = ${input.data.userId} AND status = 'ACTIVE'
+      `;
+      if (!user) throw new BadRequestException('Không tìm thấy tài khoản đang hoạt động');
+      const [grant] = await transaction`
+        INSERT INTO user_achievements (user_id, achievement_id, source, granted_by, note)
+        VALUES (${input.data.userId}, ${id}, 'MANUAL', ${actor.userId}, ${input.data.note})
+        ON CONFLICT (user_id, achievement_id) DO NOTHING
+        RETURNING *
+      `;
+      await this.audit(
+        transaction,
+        actor,
+        'ACHIEVEMENT_GRANTED',
+        'user_achievement',
+        `${input.data.userId}:${id}`,
+        null,
+        grant ?? { userId: input.data.userId, achievementId: id, replayed: true },
+      );
+      return { grant: grant ?? null, replayed: !grant };
+    });
+  }
+
   private async persistQuote(id: string | null, body: unknown, actor: AuthUser) {
     const parsed = quoteSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException('Dữ liệu danh ngôn không hợp lệ');
@@ -354,6 +455,51 @@ export class ContentController {
     } catch (error) {
       if ((error as { code?: string }).code === '23505') {
         throw new BadRequestException('Mốc CC Level này đã tồn tại');
+      }
+      throw error;
+    }
+  }
+
+  private async persistAchievement(id: string | null, body: unknown, actor: AuthUser) {
+    const parsed = achievementSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('Dữ liệu danh hiệu không hợp lệ');
+    const input = parsed.data;
+    try {
+      return await this.database.sql.begin(async (transaction) => {
+        const [before] = id
+          ? await transaction`SELECT * FROM achievements WHERE id = ${id} FOR UPDATE`
+          : [];
+        const [achievement] = id
+          ? await transaction`
+              UPDATE achievements SET name = ${input.name}, description = ${input.description},
+                icon = ${input.icon}, tier = ${input.tier}, color = ${input.color},
+                required_longest_streak = ${input.requiredLongestStreak},
+                active = ${input.active}, updated_at = now()
+              WHERE id = ${id} RETURNING *
+            `
+          : await transaction`
+              INSERT INTO achievements (
+                name, description, icon, tier, color, required_longest_streak, active
+              ) VALUES (
+                ${input.name}, ${input.description}, ${input.icon}, ${input.tier},
+                ${input.color}, ${input.requiredLongestStreak}, ${input.active}
+              ) RETURNING *
+            `;
+        if (!achievement) throw new BadRequestException('Không tìm thấy danh hiệu');
+        await this.audit(
+          transaction,
+          actor,
+          id ? 'ACHIEVEMENT_UPDATED' : 'ACHIEVEMENT_CREATED',
+          'achievement',
+          String(achievement.id),
+          before,
+          achievement,
+        );
+        return { achievement };
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new BadRequestException('Mốc Streak này đã có danh hiệu');
       }
       throw error;
     }

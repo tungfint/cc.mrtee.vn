@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { z } from 'zod';
-import { CurrentUser, OptionalAuth } from '../auth/auth.decorators';
+import { CurrentUser, OptionalAuth, OptionalUser } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { RewardsService } from './rewards.service';
 import { RateLimitService } from '../rate-limit/rate-limit.service';
@@ -27,8 +27,8 @@ export class RewardsController {
 
   @OptionalAuth()
   @Get('rewards')
-  async catalog() {
-    return { rewards: await this.rewards.catalog() };
+  async catalog(@OptionalUser() user?: AuthUser) {
+    return { rewards: await this.rewards.catalog(user?.userId) };
   }
 
   @Post('rewards/:id/redeem')

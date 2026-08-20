@@ -10,8 +10,14 @@ interface Reward {
   stock: number | null;
   image_url: string | null;
   cash_value_vnd: number | null;
-  category: 'STANDARD' | 'MASCOT';
+  category: 'STANDARD' | 'MASCOT' | 'ACHIEVEMENT';
   required_cc_level: number;
+  achievement_id: string | null;
+  achievement_name: string | null;
+  achievement_icon: string | null;
+  achievement_tier: string | null;
+  achievement_color: string | null;
+  owned_quantity: number;
 }
 
 export default function RewardsPage() {
@@ -40,8 +46,10 @@ export default function RewardsPage() {
     ) ?? [];
   const regularRewards =
     rewards.data?.rewards.filter(
-      (reward) => reward.cash_value_vnd === null && reward.category !== 'MASCOT',
+      (reward) => reward.cash_value_vnd === null && reward.category === 'STANDARD',
     ) ?? [];
+  const achievementRewards =
+    rewards.data?.rewards.filter((reward) => reward.category === 'ACHIEVEMENT') ?? [];
   const redeemReward = (reward: Reward) => {
     if (window.confirm(`Đổi “${reward.name}” với ${formatNumber(reward.cost)} CC Balance?`)) {
       redeem.mutate(reward.id);
@@ -76,6 +84,16 @@ export default function RewardsPage() {
                 eyebrow="BỘ SƯU TẬP LINH VẬT"
                 rewards={mascotRewards}
                 title="Đồng đội đáng yêu của dân Cầy Cốt"
+                onRedeem={redeemReward}
+                pending={redeem.isPending}
+              />
+            )}
+            {achievementRewards.length > 0 && (
+              <RewardSection
+                detail="Đổi CC Balance để nhận danh hiệu có cấp bậc và icon riêng trên hồ sơ."
+                eyebrow="DANH HIỆU"
+                rewards={achievementRewards}
+                title="Dấu ấn cho hành trình bền bỉ"
                 onRedeem={redeemReward}
                 pending={redeem.isPending}
               />
@@ -157,16 +175,28 @@ function RewardSection({
       <div className="reward-grid">
         {rewards.map((reward, index) => (
           <article
-            className={`reward-card ${reward.category === 'MASCOT' ? 'mascot-card' : ''}`}
+            className={`reward-card ${reward.category === 'MASCOT' ? 'mascot-card' : ''} ${reward.category === 'ACHIEVEMENT' ? 'achievement-reward-card' : ''}`}
             key={reward.id}
           >
             <div className={`reward-visual visual-${index % 4}`}>
               {reward.image_url ? (
                 <img alt={reward.name} src={reward.image_url} />
+              ) : reward.category === 'ACHIEVEMENT' && reward.achievement_icon ? (
+                /^https?:\/\//i.test(reward.achievement_icon) ||
+                reward.achievement_icon.startsWith('/') ? (
+                  <img alt={reward.achievement_name ?? reward.name} src={reward.achievement_icon} />
+                ) : (
+                  <span style={{ color: reward.achievement_color ?? undefined }}>
+                    {reward.achievement_icon}
+                  </span>
+                )
               ) : (
                 <span>{['✦', '⌁', '◈', '⚡'][index % 4]}</span>
               )}
               <small>{reward.stock === null ? 'Không giới hạn' : `Còn ${reward.stock}`}</small>
+              {reward.category === 'MASCOT' && reward.owned_quantity > 0 && (
+                <b className="reward-owned-badge">×{reward.owned_quantity}</b>
+              )}
               {reward.required_cc_level > 0 && (
                 <b className="reward-level-lock">
                   ⚡ CC Level {formatNumber(reward.required_cc_level)}
@@ -175,7 +205,11 @@ function RewardSection({
             </div>
             <div className="reward-card-body">
               <p className="eyebrow">
-                {reward.category === 'MASCOT' ? 'LINH VẬT SƯU TẦM' : 'PHẦN THƯỞNG'}
+                {reward.category === 'MASCOT'
+                  ? 'LINH VẬT SƯU TẦM'
+                  : reward.category === 'ACHIEVEMENT'
+                    ? `DANH HIỆU · ${achievementTierLabel(reward.achievement_tier)}`
+                    : 'PHẦN THƯỞNG'}
               </p>
               <h3>{reward.name}</h3>
               <p className="reward-description">{reward.description}</p>
@@ -197,5 +231,20 @@ function RewardSection({
         ))}
       </div>
     </section>
+  );
+}
+
+function achievementTierLabel(tier: string | null) {
+  if (!tier) return 'Chưa xếp cấp';
+  return (
+    {
+      BRONZE: 'Đồng',
+      SILVER: 'Bạc',
+      GOLD: 'Vàng',
+      PLATINUM: 'Bạch kim',
+      DIAMOND: 'Kim cương',
+      MASTER: 'Cao thủ',
+      LEGEND: 'Huyền thoại',
+    }[tier] ?? tier
   );
 }

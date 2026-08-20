@@ -23,6 +23,29 @@ describe('RewardsPage', () => {
           cash_value_vnd: null,
           category: 'MASCOT',
           required_cc_level: 800,
+          achievement_id: null,
+          achievement_name: null,
+          achievement_icon: null,
+          achievement_tier: null,
+          achievement_color: null,
+          owned_quantity: 2,
+        },
+        {
+          id: 'title',
+          name: 'Ngọn lửa kiên trì',
+          description: 'Danh hiệu Streak 7 ngày',
+          cost: '70.00',
+          stock: null,
+          image_url: null,
+          cash_value_vnd: null,
+          category: 'ACHIEVEMENT',
+          required_cc_level: 0,
+          achievement_id: '11111111-1111-4111-8111-111111111111',
+          achievement_name: 'Ngọn lửa kiên trì',
+          achievement_icon: '🔥',
+          achievement_tier: 'SILVER',
+          achievement_color: '#64748b',
+          owned_quantity: 0,
         },
         {
           id: 'cash',
@@ -34,6 +57,12 @@ describe('RewardsPage', () => {
           cash_value_vnd: 10_000,
           category: 'STANDARD',
           required_cc_level: 0,
+          achievement_id: null,
+          achievement_name: null,
+          achievement_icon: null,
+          achievement_tier: null,
+          achievement_color: null,
+          owned_quantity: 0,
         },
       ],
     });
@@ -52,6 +81,11 @@ describe('RewardsPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'CC Balance thành tiền' })).toBeInTheDocument();
     expect(screen.getByText('Mèo Mầm Code')).toBeInTheDocument();
+    expect(screen.getByText('×2')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Dấu ấn cho hành trình bền bỉ' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('DANH HIỆU · Bạc')).toBeInTheDocument();
     expect(screen.getByText('⚡ CC Level 800')).toBeInTheDocument();
     expect(screen.getByText(/10\.000/)).toBeInTheDocument();
   });

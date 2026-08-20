@@ -68,12 +68,25 @@ interface StudentProfile {
     bonus_milestones: { days: number; ccPoint: number }[];
   };
   awards: { award_type: string; title: string; season_name: string; awarded_at: string }[];
+  achievements: {
+    id: string;
+    name: string;
+    description: string;
+    icon: string;
+    tier: string;
+    color: string;
+    required_longest_streak: number;
+    source: string;
+  }[];
   rewards: {
+    id: string;
     name: string;
     description: string;
     image_url: string | null;
     cash_value_vnd: number | null;
     earned_at: string;
+    category: string;
+    quantity: number;
   }[];
   topTags: { tag: string; solved_count: number; max_rating: number | null }[];
   pointHistory: {
@@ -129,7 +142,7 @@ export default function StudentProfilePage() {
     return <ErrorState error={student.error} retry={() => void student.refetch()} />;
   if (!student.data)
     return <EmptyState title="Không tìm thấy học sinh" detail="Hồ sơ không còn khả dụng." />;
-  const { profile, streak, awards, rewards, topTags, pointHistory } = student.data;
+  const { profile, streak, achievements, rewards, topTags, pointHistory } = student.data;
   const isOwner = session.data?.user.userId === profile.id;
   const rank = profile.level_rank_name
     ? {
@@ -385,40 +398,65 @@ export default function StudentProfilePage() {
             <p className="eyebrow">THÀNH TỰU</p>
             <h2>Danh hiệu và quà đã nhận</h2>
             <div className="student-achievement-list">
-              {awards.map((award) => (
-                <article key={`${award.award_type}-${award.awarded_at}`}>
-                  <span>🏆</span>
-                  <div>
-                    <strong>{award.title}</strong>
-                    <p>
-                      {award.season_name} · {formatDate(award.awarded_at)}
-                    </p>
-                  </div>
-                </article>
-              ))}
-              {rewards.map((reward) => (
-                <article key={`${reward.name}-${reward.earned_at}`}>
-                  {reward.image_url ? (
-                    <img
-                      className="student-reward-image"
-                      alt={reward.name}
-                      src={reward.image_url}
-                    />
+              {achievements.map((achievement) => (
+                <article
+                  className="student-title-achievement"
+                  key={achievement.id}
+                  style={{ '--achievement-color': achievement.color } as CSSProperties}
+                >
+                  {/^https?:\/\//i.test(achievement.icon) || achievement.icon.startsWith('/') ? (
+                    <img alt={achievement.name} src={achievement.icon} />
                   ) : (
-                    <span>{reward.cash_value_vnd ? '💵' : '🎁'}</span>
+                    <span>{achievement.icon}</span>
                   )}
                   <div>
-                    <strong>{reward.name}</strong>
+                    <strong>{achievement.name}</strong>
                     <p>
-                      {reward.cash_value_vnd
-                        ? formatVnd(reward.cash_value_vnd)
-                        : reward.description}{' '}
-                      · {formatDate(reward.earned_at)}
+                      {achievementTierLabel(achievement.tier)} · Streak{' '}
+                      {achievement.required_longest_streak} ngày
                     </p>
                   </div>
                 </article>
               ))}
-              {!awards.length && !rewards.length && (
+              {rewards.map((reward) =>
+                reward.category === 'MASCOT' ? (
+                  <article
+                    aria-label={`${reward.name}, số lượng ${reward.quantity}`}
+                    className="student-mascot-collection"
+                    key={reward.id}
+                    title={reward.name}
+                  >
+                    {reward.image_url ? (
+                      <img alt={reward.name} src={reward.image_url} />
+                    ) : (
+                      <span>🐾</span>
+                    )}
+                    <b>×{reward.quantity}</b>
+                  </article>
+                ) : (
+                  <article key={reward.id}>
+                    {reward.image_url ? (
+                      <img
+                        className="student-reward-image"
+                        alt={reward.name}
+                        src={reward.image_url}
+                      />
+                    ) : (
+                      <span>{reward.cash_value_vnd ? '💵' : '🎁'}</span>
+                    )}
+                    <div>
+                      <strong>{reward.name}</strong>
+                      <p>
+                        {reward.cash_value_vnd
+                          ? formatVnd(reward.cash_value_vnd)
+                          : reward.description}{' '}
+                        · {formatDate(reward.earned_at)}
+                      </p>
+                    </div>
+                  </article>
+                ),
+              )}
+              {!achievements.length && !rewards.length && (
                 <p className="text-sm text-[var(--muted)]">
                   Những cột mốc mới sẽ xuất hiện tại đây.
                 </p>
@@ -567,6 +605,20 @@ function pointTransactionLabel(type: string) {
       REVERSAL: 'Điều chỉnh ngược',
       ADJUSTMENT: 'Hiệu chỉnh',
     }[type] ?? type
+  );
+}
+
+function achievementTierLabel(tier: string) {
+  return (
+    {
+      BRONZE: 'Đồng',
+      SILVER: 'Bạc',
+      GOLD: 'Vàng',
+      PLATINUM: 'Bạch kim',
+      DIAMOND: 'Kim cương',
+      MASTER: 'Cao thủ',
+      LEGEND: 'Huyền thoại',
+    }[tier] ?? tier
   );
 }
 

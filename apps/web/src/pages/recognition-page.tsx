@@ -31,11 +31,24 @@ interface Recognition {
   };
   streak: { current_streak: number; longest_streak: number };
   awards: { award_type: string; title: string; season_name: string }[];
+  achievements: {
+    id: string;
+    name: string;
+    description: string;
+    icon: string;
+    tier: string;
+    color: string;
+    required_longest_streak: number;
+    source: string;
+  }[];
   rewards: {
+    id: string;
     name: string;
     description: string;
     image_url: string | null;
     cash_value_vnd: number | null;
+    category: string;
+    quantity: number;
   }[];
   topTags: { tag: string; solved_count: number; max_rating: number | null }[];
   quote: { content: string; author: string | null } | null;
@@ -277,31 +290,61 @@ export default function RecognitionPage() {
             <div className="recognition-lists">
               <div>
                 <h3>🏆 Danh hiệu</h3>
-                {recognition.data.awards.length ? (
-                  recognition.data.awards.slice(0, 6).map((award) => (
-                    <p key={`${award.award_type}-${award.title}`}>
-                      <strong>{award.title}</strong> · {award.season_name}
+                {recognition.data.achievements.length ? (
+                  recognition.data.achievements.slice(0, 6).map((achievement) => (
+                    <p key={achievement.id}>
+                      <strong>
+                        {/^https?:\/\//i.test(achievement.icon) ||
+                        achievement.icon.startsWith('/') ? (
+                          <img
+                            alt=""
+                            className="recognition-achievement-icon"
+                            src={achievement.icon}
+                          />
+                        ) : (
+                          achievement.icon
+                        )}{' '}
+                        {achievement.name}
+                      </strong>{' '}
+                      · {achievementTierLabel(achievement.tier)} · Streak{' '}
+                      {achievement.required_longest_streak} ngày
                     </p>
                   ))
                 ) : (
-                  <p>Chưa có danh hiệu mùa giải.</p>
+                  <p>Chưa mở khóa danh hiệu Streak.</p>
                 )}
               </div>
               <div>
                 <h3>🎁 Quà đã nhận</h3>
                 {recognition.data.rewards.length ? (
-                  recognition.data.rewards.slice(0, 6).map((reward) => (
-                    <div className="recognition-reward-item" key={reward.name}>
-                      {reward.image_url ? (
-                        <img alt={reward.name} src={reward.image_url} />
-                      ) : (
-                        <span>🎁</span>
-                      )}
-                      <p>
-                        <strong>{reward.name}</strong> · {reward.description}
-                      </p>
-                    </div>
-                  ))
+                  recognition.data.rewards.slice(0, 8).map((reward) =>
+                    reward.category === 'MASCOT' ? (
+                      <div
+                        aria-label={`${reward.name}, số lượng ${reward.quantity}`}
+                        className="recognition-mascot-item"
+                        key={reward.id}
+                        title={reward.name}
+                      >
+                        {reward.image_url ? (
+                          <img alt={reward.name} src={reward.image_url} />
+                        ) : (
+                          <span>🐾</span>
+                        )}
+                        <b>×{reward.quantity}</b>
+                      </div>
+                    ) : (
+                      <div className="recognition-reward-item" key={reward.id}>
+                        {reward.image_url ? (
+                          <img alt={reward.name} src={reward.image_url} />
+                        ) : (
+                          <span>🎁</span>
+                        )}
+                        <p>
+                          <strong>{reward.name}</strong> · {reward.description}
+                        </p>
+                      </div>
+                    ),
+                  )
                 ) : (
                   <p>Chưa có quà đã hoàn thành.</p>
                 )}
@@ -616,7 +659,7 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   context.fillText('VÙNG NĂNG LỰC NỔI BẬT', 82, 808);
   drawTagCloud(context, data.topTags.slice(0, 6), 82, 828, accent, cyan);
 
-  drawAchievementPanel(context, 78, 890, 502, 332, data.awards, accent);
+  drawAchievementPanel(context, 78, 890, 502, 332, data.achievements, accent);
   await drawRewardPanel(context, 604, 890, 518, 332, data.rewards, violet);
 
   const quote = data.quote?.content ?? 'Mỗi bài toán hôm nay là một bước tiến ngày mai.';
@@ -774,7 +817,7 @@ function drawAchievementPanel(
   y: number,
   width: number,
   height: number,
-  awards: Recognition['awards'],
+  achievements: Recognition['achievements'],
   accent: string,
 ) {
   roundRect(context, x, y, width, height, 28, '#ffffff', mixHex(accent, '#ffffff', 0.56));
@@ -785,25 +828,37 @@ function drawAchievementPanel(
   context.fillStyle = '#172033';
   context.font = `900 19px ${VI_FONT}`;
   context.fillText('DANH HIỆU ĐÃ CHINH PHỤC', x + 88, y + 52);
-  const rows = awards.length ? awards.slice(0, 4) : [];
+  const rows = achievements.length ? achievements.slice(0, 4) : [];
   if (!rows.length) {
     context.fillStyle = '#64748b';
     context.font = `650 17px ${VI_FONT}`;
     context.fillText('Cột mốc đầu tiên đang chờ bạn.', x + 26, y + 118);
     return;
   }
-  rows.forEach((award, index) => {
+  rows.forEach((achievement, index) => {
     const rowY = y + 100 + index * 54;
-    context.fillStyle = mixHex(accent, '#ffffff', 0.14);
-    context.beginPath();
-    context.arc(x + 35, rowY + 7, 6, 0, Math.PI * 2);
-    context.fill();
+    context.fillStyle = achievement.color;
+    context.font = `900 22px ${VI_FONT}`;
+    context.fillText(
+      /^https?:\/\//i.test(achievement.icon) || achievement.icon.startsWith('/')
+        ? '🏅'
+        : achievement.icon,
+      x + 24,
+      rowY + 14,
+    );
     context.fillStyle = '#253247';
     context.font = `800 17px ${VI_FONT}`;
-    fitText(context, award.title, x + 54, rowY + 13, width - 80, 17);
+    fitText(context, achievement.name, x + 58, rowY + 13, width - 84, 17);
     context.fillStyle = '#64748b';
     context.font = `650 15px ${VI_FONT}`;
-    fitText(context, award.season_name, x + 54, rowY + 36, width - 80, 15);
+    fitText(
+      context,
+      `${achievementTierLabel(achievement.tier)} · Streak ${achievement.required_longest_streak} ngày`,
+      x + 58,
+      rowY + 36,
+      width - 84,
+      15,
+    );
   });
 }
 
@@ -824,25 +879,40 @@ async function drawRewardPanel(
   context.fillStyle = '#172033';
   context.font = `900 19px ${VI_FONT}`;
   context.fillText('BỘ SƯU TẬP PHẦN THƯỞNG', x + 88, y + 52);
-  const rows = rewards.slice(0, 4);
-  if (!rows.length) {
+  const mascotRows = rewards.filter((reward) => reward.category === 'MASCOT').slice(0, 4);
+  const regularRows = rewards.filter((reward) => reward.category !== 'MASCOT').slice(0, 2);
+  if (!mascotRows.length && !regularRows.length) {
     context.fillStyle = '#64748b';
     context.font = `650 17px ${VI_FONT}`;
     context.fillText('Phần thưởng đầu tiên đang chờ bạn.', x + 26, y + 118);
     return;
   }
-  for (const [index, reward] of rows.entries()) {
-    const rowY = y + 90 + index * 57;
-    roundRect(context, x + 22, rowY, 42, 42, 13, mixHex(color, '#ffffff', 0.9));
+  for (const [index, reward] of mascotRows.entries()) {
+    const mascotX = x + 24 + index * 102;
+    const mascotY = y + 90;
+    roundRect(context, mascotX, mascotY, 78, 78, 22, mixHex(color, '#ffffff', 0.9));
     const source = sameOriginAsset(reward.image_url);
     if (source) {
       const mascot = await loadImage(source).catch(() => null);
-      if (mascot) drawImageCover(context, mascot, x + 25, rowY + 3, 36, 36);
+      if (mascot) drawImageCover(context, mascot, mascotX + 5, mascotY + 5, 68, 68);
     } else {
       context.fillStyle = color;
-      context.font = `800 19px ${VI_FONT}`;
-      context.fillText('✦', x + 34, rowY + 28);
+      context.font = `800 38px ${VI_FONT}`;
+      context.fillText('🐾', mascotX + 18, mascotY + 52);
     }
+    roundRect(context, mascotX + 50, mascotY - 8, 39, 28, 14, color);
+    context.fillStyle = '#ffffff';
+    context.font = `900 15px ${VI_FONT}`;
+    context.textAlign = 'center';
+    context.fillText(`×${reward.quantity}`, mascotX + 70, mascotY + 11);
+    context.textAlign = 'start';
+  }
+  for (const [index, reward] of regularRows.entries()) {
+    const rowY = y + (mascotRows.length ? 190 : 90) + index * 57;
+    roundRect(context, x + 22, rowY, 42, 42, 13, mixHex(color, '#ffffff', 0.9));
+    context.fillStyle = color;
+    context.font = `800 19px ${VI_FONT}`;
+    context.fillText('✦', x + 34, rowY + 28);
     context.fillStyle = '#253247';
     context.font = `800 17px ${VI_FONT}`;
     fitText(context, reward.name, x + 78, rowY + 18, width - 106, 17);
@@ -873,6 +943,20 @@ function drawImageCover(
   const sourceX = (image.naturalWidth - sourceWidth) / 2;
   const sourceY = (image.naturalHeight - sourceHeight) / 2;
   context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+}
+
+function achievementTierLabel(tier: string) {
+  return (
+    {
+      BRONZE: 'Đồng',
+      SILVER: 'Bạc',
+      GOLD: 'Vàng',
+      PLATINUM: 'Bạch kim',
+      DIAMOND: 'Kim cương',
+      MASTER: 'Cao thủ',
+      LEGEND: 'Huyền thoại',
+    }[tier] ?? tier
+  );
 }
 
 function drawWrappedText(

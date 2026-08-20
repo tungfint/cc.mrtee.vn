@@ -16,8 +16,9 @@ export interface RewardRow {
   active: boolean;
   image_url: string | null;
   cash_value_vnd: number | null;
-  category: 'STANDARD' | 'MASCOT';
+  category: 'STANDARD' | 'MASCOT' | 'ACHIEVEMENT';
   required_cc_level: number;
+  achievement_id: string | null;
 }
 
 export interface OrderRow {
@@ -35,13 +36,25 @@ type TerminalStatus = 'REJECTED' | 'CANCELLED';
 export class RewardsService {
   constructor(private readonly database: DatabaseService) {}
 
-  async catalog() {
+  async catalog(userId?: string) {
     return this.database.sql<RewardRow[]>`
-      SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd,
-        category, required_cc_level
+      SELECT rewards.id, rewards.name, rewards.description, rewards.cost, rewards.stock,
+        rewards.active, rewards.image_url, rewards.cash_value_vnd, rewards.category,
+        rewards.required_cc_level, rewards.achievement_id,
+        achievements.name AS achievement_name, achievements.icon AS achievement_icon,
+        achievements.tier AS achievement_tier, achievements.color AS achievement_color,
+        COALESCE(owned.quantity, 0)::int AS owned_quantity
       FROM rewards
-      WHERE active = true AND (stock IS NULL OR stock > 0)
-      ORDER BY cost, name
+      LEFT JOIN achievements ON achievements.id = rewards.achievement_id
+      LEFT JOIN LATERAL (
+        SELECT count(*)::int AS quantity
+        FROM reward_orders AS orders
+        LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
+        WHERE orders.reward_id = rewards.id AND orders.user_id = ${userId ?? null}
+          AND orders.status = 'FULFILLED' AND rescues.id IS NULL
+      ) AS owned ON true
+      WHERE rewards.active = true AND (rewards.stock IS NULL OR rewards.stock > 0)
+      ORDER BY rewards.cost, rewards.name
     `;
   }
 
@@ -97,7 +110,7 @@ export class RewardsService {
       `;
       const [reward] = await transaction<RewardRow[]>`
         SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd,
-          category, required_cc_level
+          category, required_cc_level, achievement_id
         FROM rewards WHERE id = ${rewardId} FOR UPDATE
       `;
       if (!reward || !reward.active) throw new NotFoundException('Phần thưởng không khả dụng');
@@ -111,7 +124,7 @@ export class RewardsService {
         const currentLevel = Number(skill?.cc_level ?? 800);
         if (currentLevel < reward.required_cc_level) {
           throw new BadRequestException(
-            `Cần đạt CC Level ${reward.required_cc_level} để đổi linh vật này`,
+            `Cần đạt CC Level ${reward.required_cc_level} để đổi phần thưởng này`,
           );
         }
       }
@@ -181,6 +194,19 @@ export class RewardsService {
         RETURNING *
       `;
       if (!updated) throw new ConflictException('Đơn đã thay đổi trạng thái');
+      if (status === 'FULFILLED') {
+        await transaction`
+          INSERT INTO user_achievements (
+            user_id, achievement_id, source, reward_order_id, granted_by, note
+          )
+          SELECT ${order.user_id}, rewards.achievement_id, 'REWARD', ${order.id},
+            ${actor.userId}, ${note}
+          FROM rewards
+          WHERE rewards.id = ${order.reward_id} AND rewards.category = 'ACHIEVEMENT'
+            AND rewards.achievement_id IS NOT NULL
+          ON CONFLICT (user_id, achievement_id) DO NOTHING
+        `;
+      }
       await transaction`
         INSERT INTO audit_logs (
           actor_user_id, action, entity_type, entity_id, before, after, reason

@@ -96,8 +96,12 @@ interface Reward {
   active: boolean;
   image_url: string | null;
   cash_value_vnd: number | null;
-  category: 'STANDARD' | 'MASCOT';
+  category: 'STANDARD' | 'MASCOT' | 'ACHIEVEMENT';
   required_cc_level: number;
+  achievement_id: string | null;
+  achievement_name: string | null;
+  achievement_icon: string | null;
+  achievement_tier: string | null;
   order_count: number;
 }
 interface RewardOrder {
@@ -135,6 +139,27 @@ interface LevelRank {
   color: string;
   active: boolean;
 }
+interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  tier: 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM' | 'DIAMOND' | 'MASTER' | 'LEGEND';
+  color: string;
+  required_longest_streak: number;
+  active: boolean;
+  granted_count: number;
+  reward_count: number;
+}
+const achievementTierLabels: Record<Achievement['tier'], string> = {
+  BRONZE: 'Đồng',
+  SILVER: 'Bạc',
+  GOLD: 'Vàng',
+  PLATINUM: 'Bạch kim',
+  DIAMOND: 'Kim cương',
+  MASTER: 'Cao thủ',
+  LEGEND: 'Huyền thoại',
+};
 
 interface StudentImportRow extends EditableImportRow {
   email: string;
@@ -238,6 +263,10 @@ const auditActionLabels: Record<string, string> = {
   REWARD_DELETED: 'Xoá phần thưởng',
   REWARD_ARCHIVED: 'Ẩn phần thưởng đã có lịch sử',
   REWARD_ORDER_STATUS_CHANGED: 'Cập nhật yêu cầu đổi quà',
+  ACHIEVEMENT_CREATED: 'Tạo danh hiệu',
+  ACHIEVEMENT_UPDATED: 'Cập nhật danh hiệu',
+  ACHIEVEMENT_ARCHIVED: 'Ẩn danh hiệu',
+  ACHIEVEMENT_GRANTED: 'Tặng danh hiệu',
   STREAK_RESCUED: 'Hi sinh linh vật cứu Streak',
   STREAK_BONUS_AWARDED: 'Cộng thưởng Streak',
   QUOTE_CREATED: 'Tạo danh ngôn',
@@ -273,6 +302,10 @@ const auditFieldLabels: Record<string, string> = {
   cash_value_vnd: 'Giá trị tiền',
   category: 'Loại quà',
   required_cc_level: 'CC Level yêu cầu',
+  required_longest_streak: 'Mốc Streak dài nhất',
+  tier: 'Cấp bậc',
+  color: 'Màu cấp bậc',
+  achievement_id: 'Danh hiệu liên kết',
 };
 
 function auditValue(value: unknown): string {
@@ -324,8 +357,11 @@ export default function AdminPage() {
   const [rewardImageUrl, setRewardImageUrl] = useState('');
   const [rewardActive, setRewardActive] = useState(true);
   const [rewardCashValue, setRewardCashValue] = useState('');
-  const [rewardCategory, setRewardCategory] = useState<'STANDARD' | 'MASCOT'>('STANDARD');
+  const [rewardCategory, setRewardCategory] = useState<'STANDARD' | 'MASCOT' | 'ACHIEVEMENT'>(
+    'STANDARD',
+  );
   const [rewardRequiredLevel, setRewardRequiredLevel] = useState('0');
+  const [rewardAchievementId, setRewardAchievementId] = useState('');
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
   const rewardFormRef = useRef<HTMLFormElement>(null);
   const [quoteContent, setQuoteContent] = useState('');
@@ -340,6 +376,17 @@ export default function AdminPage() {
   const [rankColor, setRankColor] = useState('#22d3ee');
   const [rankActive, setRankActive] = useState(true);
   const [editingRank, setEditingRank] = useState<LevelRank | null>(null);
+  const [achievementName, setAchievementName] = useState('');
+  const [achievementDescription, setAchievementDescription] = useState('');
+  const [achievementIcon, setAchievementIcon] = useState('🏅');
+  const [achievementTier, setAchievementTier] = useState<Achievement['tier']>('BRONZE');
+  const [achievementColor, setAchievementColor] = useState('#b7791f');
+  const [achievementStreak, setAchievementStreak] = useState('3');
+  const [achievementActive, setAchievementActive] = useState(true);
+  const [editingAchievement, setEditingAchievement] = useState<Achievement | null>(null);
+  const [giftAchievementId, setGiftAchievementId] = useState('');
+  const [giftAchievementUserId, setGiftAchievementUserId] = useState('');
+  const [giftAchievementNote, setGiftAchievementNote] = useState('Admin tặng danh hiệu');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mustChangePassword, setMustChangePassword] = useState(true);
@@ -426,7 +473,10 @@ export default function AdminPage() {
   });
   const content = useQuery({
     queryKey: ['admin-content'],
-    queryFn: () => api<{ quotes: MotivationalQuote[]; ranks: LevelRank[] }>('/admin/content'),
+    queryFn: () =>
+      api<{ quotes: MotivationalQuote[]; ranks: LevelRank[]; achievements: Achievement[] }>(
+        '/admin/content',
+      ),
     enabled: Boolean(isSystemAdmin),
   });
   const audits = useQuery({
@@ -753,6 +803,7 @@ export default function AdminPage() {
     setRewardCashValue(reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd));
     setRewardCategory(reward.category);
     setRewardRequiredLevel(String(reward.required_cc_level));
+    setRewardAchievementId(reward.achievement_id ?? '');
     setRewardActive(reward.active);
     window.requestAnimationFrame(() =>
       rewardFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
@@ -2737,6 +2788,8 @@ export default function AdminPage() {
                         cashValueVnd: rewardCashValue === '' ? null : Number(rewardCashValue),
                         category: rewardCategory,
                         requiredCcLevel: Number(rewardRequiredLevel),
+                        achievementId:
+                          rewardCategory === 'ACHIEVEMENT' ? rewardAchievementId : null,
                       },
                     });
                   }}
@@ -2759,6 +2812,7 @@ export default function AdminPage() {
                           setRewardCashValue('');
                           setRewardCategory('STANDARD');
                           setRewardRequiredLevel('0');
+                          setRewardAchievementId('');
                           setRewardActive(true);
                         }}
                         type="button"
@@ -2797,6 +2851,7 @@ export default function AdminPage() {
                   <label className="field mt-4">
                     <span>Giá trị tiền nhận được (VND, trống nếu là quà thường)</span>
                     <input
+                      disabled={rewardCategory === 'ACHIEVEMENT'}
                       min="1"
                       onChange={(event) => setRewardCashValue(event.target.value)}
                       placeholder="Ví dụ: 100000"
@@ -2809,13 +2864,18 @@ export default function AdminPage() {
                     <label className="field">
                       <span>Loại phần thưởng</span>
                       <select
-                        onChange={(event) =>
-                          setRewardCategory(event.target.value as 'STANDARD' | 'MASCOT')
-                        }
+                        onChange={(event) => {
+                          const category = event.target.value as
+                            'STANDARD' | 'MASCOT' | 'ACHIEVEMENT';
+                          setRewardCategory(category);
+                          if (category !== 'ACHIEVEMENT') setRewardAchievementId('');
+                          if (category === 'ACHIEVEMENT') setRewardCashValue('');
+                        }}
                         value={rewardCategory}
                       >
                         <option value="STANDARD">Quà thông thường</option>
                         <option value="MASCOT">Linh vật sưu tầm</option>
+                        <option value="ACHIEVEMENT">Danh hiệu</option>
                       </select>
                     </label>
                     <label className="field">
@@ -2829,6 +2889,26 @@ export default function AdminPage() {
                       />
                     </label>
                   </div>
+                  {rewardCategory === 'ACHIEVEMENT' && (
+                    <label className="field mt-4">
+                      <span>Danh hiệu được trao khi hoàn tất đổi thưởng</span>
+                      <select
+                        onChange={(event) => setRewardAchievementId(event.target.value)}
+                        required
+                        value={rewardAchievementId}
+                      >
+                        <option value="">Chọn danh hiệu</option>
+                        {content.data?.achievements
+                          .filter((achievement) => achievement.active)
+                          .map((achievement) => (
+                            <option key={achievement.id} value={achievement.id}>
+                              {achievement.icon} {achievement.name} · Streak{' '}
+                              {achievement.required_longest_streak}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
                   <div className="form-grid mt-4">
                     <label className="field">
                       <span>Số lượng (trống = không giới hạn)</span>
@@ -2870,6 +2950,11 @@ export default function AdminPage() {
                           {reward.category === 'MASCOT' && (
                             <p className="m-0 text-xs text-[var(--accent)]">
                               Linh vật · cần CC Level {formatNumber(reward.required_cc_level)}
+                            </p>
+                          )}
+                          {reward.category === 'ACHIEVEMENT' && (
+                            <p className="m-0 text-xs text-[var(--accent)]">
+                              Danh hiệu · {reward.achievement_icon} {reward.achievement_name}
                             </p>
                           )}
                           {reward.cash_value_vnd !== null && (
@@ -3366,6 +3451,249 @@ export default function AdminPage() {
                           type="button"
                         >
                           Xoá
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+              <section className="panel p-6 content-admin-wide">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">STREAK ACHIEVEMENTS</p>
+                    <h2>Quản lý danh hiệu</h2>
+                    <p>
+                      Danh hiệu tự mở khóa theo Streak dài nhất; Admin cũng có thể tặng trực tiếp
+                      hoặc liên kết danh hiệu ở phần Đổi thưởng.
+                    </p>
+                  </div>
+                  {editingAchievement && (
+                    <button
+                      className="button-secondary"
+                      onClick={() => {
+                        setEditingAchievement(null);
+                        setAchievementName('');
+                        setAchievementDescription('');
+                        setAchievementIcon('🏅');
+                        setAchievementTier('BRONZE');
+                        setAchievementColor('#b7791f');
+                        setAchievementStreak('3');
+                        setAchievementActive(true);
+                      }}
+                      type="button"
+                    >
+                      Huỷ sửa
+                    </button>
+                  )}
+                </div>
+                <div className="achievement-admin-layout mt-5">
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      mutation.mutate({
+                        path: editingAchievement
+                          ? `/admin/achievements/${editingAchievement.id}`
+                          : '/admin/achievements',
+                        method: editingAchievement ? 'PATCH' : 'POST',
+                        body: {
+                          name: achievementName,
+                          description: achievementDescription,
+                          icon: achievementIcon,
+                          tier: achievementTier,
+                          color: achievementColor,
+                          requiredLongestStreak: Number(achievementStreak),
+                          active: achievementActive,
+                        },
+                      });
+                    }}
+                  >
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Tên danh hiệu</span>
+                        <input
+                          onChange={(event) => setAchievementName(event.target.value)}
+                          required
+                          value={achievementName}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Mốc Streak dài nhất</span>
+                        <input
+                          min="1"
+                          onChange={(event) => setAchievementStreak(event.target.value)}
+                          required
+                          step="1"
+                          type="number"
+                          value={achievementStreak}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Cấp bậc</span>
+                        <select
+                          onChange={(event) =>
+                            setAchievementTier(event.target.value as Achievement['tier'])
+                          }
+                          value={achievementTier}
+                        >
+                          {Object.entries(achievementTierLabels).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Icon / URL icon</span>
+                        <input
+                          onChange={(event) => setAchievementIcon(event.target.value)}
+                          required
+                          value={achievementIcon}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Màu cấp bậc</span>
+                        <div className="color-field">
+                          <input
+                            aria-label="Chọn màu danh hiệu"
+                            onChange={(event) => setAchievementColor(event.target.value)}
+                            type="color"
+                            value={achievementColor}
+                          />
+                          <input
+                            onChange={(event) => setAchievementColor(event.target.value)}
+                            pattern="#[0-9a-fA-F]{6}"
+                            value={achievementColor}
+                          />
+                        </div>
+                      </label>
+                      <label className="field">
+                        <span>Trạng thái</span>
+                        <select
+                          onChange={(event) =>
+                            setAchievementActive(event.target.value === 'ACTIVE')
+                          }
+                          value={achievementActive ? 'ACTIVE' : 'INACTIVE'}
+                        >
+                          <option value="ACTIVE">Đang áp dụng</option>
+                          <option value="INACTIVE">Tạm ẩn</option>
+                        </select>
+                      </label>
+                      <label className="field form-span-2">
+                        <span>Mô tả</span>
+                        <textarea
+                          onChange={(event) => setAchievementDescription(event.target.value)}
+                          required
+                          value={achievementDescription}
+                        />
+                      </label>
+                    </div>
+                    <button className="button-primary mt-4" type="submit">
+                      {editingAchievement ? 'Lưu danh hiệu' : 'Thêm danh hiệu'}
+                    </button>
+                  </form>
+                  <form
+                    className="achievement-gift-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      mutation.mutate({
+                        path: `/admin/achievements/${giftAchievementId}/grant`,
+                        body: {
+                          userId: giftAchievementUserId,
+                          note: giftAchievementNote,
+                        },
+                      });
+                    }}
+                  >
+                    <p className="eyebrow">TẶNG DANH HIỆU</p>
+                    <label className="field">
+                      <span>Danh hiệu</span>
+                      <select
+                        onChange={(event) => setGiftAchievementId(event.target.value)}
+                        required
+                        value={giftAchievementId}
+                      >
+                        <option value="">Chọn danh hiệu</option>
+                        {content.data?.achievements.map((achievement) => (
+                          <option key={achievement.id} value={achievement.id}>
+                            {achievement.icon} {achievement.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Học sinh nhận</span>
+                      <select
+                        onChange={(event) => setGiftAchievementUserId(event.target.value)}
+                        required
+                        value={giftAchievementUserId}
+                      >
+                        <option value="">Chọn học sinh</option>
+                        {users.data?.users
+                          .filter((user) => user.status === 'ACTIVE')
+                          .map((user) => (
+                            <option key={user.id} value={user.id}>
+                              {user.display_name} · {user.email}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Lý do</span>
+                      <textarea
+                        onChange={(event) => setGiftAchievementNote(event.target.value)}
+                        required
+                        value={giftAchievementNote}
+                      />
+                    </label>
+                    <button className="button-secondary" type="submit">
+                      Tặng danh hiệu
+                    </button>
+                  </form>
+                </div>
+                <div className="rank-admin-list mt-6">
+                  {content.data?.achievements.map((achievement) => (
+                    <article className="rank-admin-item" key={achievement.id}>
+                      <LevelRankIcon icon={achievement.icon} name={achievement.name} />
+                      <div>
+                        <strong style={{ color: achievement.color }}>{achievement.name}</strong>
+                        <p>
+                          {achievementTierLabels[achievement.tier]} · Streak{' '}
+                          {achievement.required_longest_streak} ngày · đã tặng{' '}
+                          {achievement.granted_count}
+                        </p>
+                      </div>
+                      <StatusPill value={achievement.active ? 'ACTIVE' : 'INACTIVE'} />
+                      <div className="student-actions">
+                        <button
+                          className="button-secondary"
+                          onClick={() => {
+                            setEditingAchievement(achievement);
+                            setAchievementName(achievement.name);
+                            setAchievementDescription(achievement.description);
+                            setAchievementIcon(achievement.icon);
+                            setAchievementTier(achievement.tier);
+                            setAchievementColor(achievement.color);
+                            setAchievementStreak(String(achievement.required_longest_streak));
+                            setAchievementActive(achievement.active);
+                          }}
+                          type="button"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          className="button-danger"
+                          disabled={!achievement.active}
+                          onClick={() => {
+                            if (!window.confirm(`Ẩn danh hiệu “${achievement.name}”?`)) return;
+                            mutation.mutate({
+                              path: `/admin/achievements/${achievement.id}`,
+                              method: 'DELETE',
+                              body: null,
+                            });
+                          }}
+                          type="button"
+                        >
+                          {achievement.active ? 'Ẩn' : 'Đã ẩn'}
                         </button>
                       </div>
                     </article>

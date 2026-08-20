@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, formatDate, formatNumber } from '../lib/api';
 import { recommendedRange } from './dashboard-recommendation';
@@ -58,11 +58,24 @@ interface Dashboard {
     event_at: string;
   }[];
   awards: { award_type: string; title: string; season_name: string }[];
+  achievements: {
+    id: string;
+    name: string;
+    description: string;
+    icon: string;
+    tier: string;
+    color: string;
+    required_longest_streak: number;
+    source: string;
+  }[];
   fulfilledRewards: {
+    id: string;
     name: string;
     description: string;
     image_url: string | null;
     earned_at: string;
+    category: string;
+    quantity: number;
   }[];
 }
 
@@ -243,42 +256,65 @@ export default function DashboardPage() {
             <h2>Danh hiệu & phần thưởng đã đạt</h2>
           </div>
           <span className="achievement-count">
-            {data.awards.length + data.fulfilledRewards.length} thành tựu
+            {data.achievements.length + data.fulfilledRewards.length} mục sưu tầm
           </span>
         </div>
-        {data.awards.length === 0 && data.fulfilledRewards.length === 0 ? (
+        {data.achievements.length === 0 && data.fulfilledRewards.length === 0 ? (
           <EmptyState
             title="Chưa mở khóa thành tựu"
             detail="Duy trì Streak, chinh phục thử thách và nâng CC Level để nhận huy chương."
           />
         ) : (
           <div className="achievement-grid">
-            {data.awards.map((award) => (
-              <article className="achievement-card" key={`${award.award_type}-${award.title}`}>
-                <span className="achievement-icon">{awardIcon(award.award_type)}</span>
+            {data.achievements.map((achievement) => (
+              <article
+                className="achievement-card title-achievement"
+                key={achievement.id}
+                style={{ '--achievement-color': achievement.color } as CSSProperties}
+              >
+                <AchievementIcon icon={achievement.icon} name={achievement.name} />
                 <div>
-                  <strong>{award.title}</strong>
-                  <p>{award.season_name}</p>
+                  <strong>{achievement.name}</strong>
+                  <p>
+                    {achievementTierLabel(achievement.tier)} · Streak{' '}
+                    {achievement.required_longest_streak} ngày
+                  </p>
                 </div>
               </article>
             ))}
-            {data.fulfilledRewards.map((reward) => (
-              <article className="achievement-card reward-achievement" key={reward.name}>
-                {reward.image_url ? (
-                  <img
-                    className="achievement-reward-image"
-                    alt={reward.name}
-                    src={reward.image_url}
-                  />
-                ) : (
-                  <span className="achievement-icon">🎁</span>
-                )}
-                <div>
-                  <strong>{reward.name}</strong>
-                  <p>{reward.description}</p>
-                </div>
-              </article>
-            ))}
+            {data.fulfilledRewards.map((reward) =>
+              reward.category === 'MASCOT' ? (
+                <article
+                  aria-label={`${reward.name}, số lượng ${reward.quantity}`}
+                  className="mascot-collection-card"
+                  key={reward.id}
+                  title={reward.name}
+                >
+                  {reward.image_url ? (
+                    <img alt={reward.name} src={reward.image_url} />
+                  ) : (
+                    <span>🐾</span>
+                  )}
+                  <b>×{reward.quantity}</b>
+                </article>
+              ) : (
+                <article className="achievement-card reward-achievement" key={reward.id}>
+                  {reward.image_url ? (
+                    <img
+                      className="achievement-reward-image"
+                      alt={reward.name}
+                      src={reward.image_url}
+                    />
+                  ) : (
+                    <span className="achievement-icon">🎁</span>
+                  )}
+                  <div>
+                    <strong>{reward.name}</strong>
+                    <p>{reward.description}</p>
+                  </div>
+                </article>
+              ),
+            )}
           </div>
         )}
       </section>
@@ -576,14 +612,24 @@ function Stat({
   );
 }
 
-function awardIcon(type: string): string {
+function AchievementIcon({ icon, name }: { icon: string; name: string }) {
+  return /^https?:\/\//i.test(icon) || icon.startsWith('/') ? (
+    <img alt={name} className="achievement-reward-image" src={icon} />
+  ) : (
+    <span className="achievement-icon">{icon}</span>
+  );
+}
+
+function achievementTierLabel(tier: string) {
   return (
     {
-      TOP_SCORE: '🏆',
-      MOST_IMPROVED: '🚀',
-      MOST_CONSISTENT: '🥇',
-      CHALLENGE: '🛡️',
-      CUSTOM: '⭐',
-    }[type] ?? '🏅'
+      BRONZE: 'Đồng',
+      SILVER: 'Bạc',
+      GOLD: 'Vàng',
+      PLATINUM: 'Bạch kim',
+      DIAMOND: 'Kim cương',
+      MASTER: 'Cao thủ',
+      LEGEND: 'Huyền thoại',
+    }[tier] ?? tier
   );
 }

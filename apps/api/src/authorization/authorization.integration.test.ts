@@ -97,7 +97,8 @@ describe('authorization matrix', () => {
     syncQueueCalls.length = 0;
     await connection`
       TRUNCATE auth_sessions, user_credentials, audit_logs, organization_memberships,
-        organizations, scoring_policies, users RESTART IDENTITY CASCADE
+        organizations, cf_problems, rewards, achievements, scoring_policies, users
+        RESTART IDENTITY CASCADE
     `;
     await connection`
       INSERT INTO scoring_policies (
@@ -843,6 +844,12 @@ describe('authorization matrix', () => {
     `;
     const before = await streaks.summary(ids.member!);
     expect(before.rescue).toMatchObject({ available: true, requiredMascots: 3 });
+    const dashboardBefore = await insights.dashboard(authUser(ids.member!));
+    expect(dashboardBefore.fulfilledRewards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: mascot.id, category: 'MASCOT', quantity: 3 }),
+      ]),
+    );
     await streaks.rescue(
       ids.member!,
       orders.map((order) => order.id),
@@ -958,6 +965,61 @@ describe('authorization matrix', () => {
     expect(pasted).toMatchObject({ created: 2, failed: 0, total: 2 });
     await contentController.deleteQuote(String(createdQuote.quote.id), actor);
     await contentController.deleteRank(String(createdRank.rank.id), actor);
+  });
+
+  it('manages Streak achievements and grants a configured title through the reward store', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const created = await contentController.createAchievement(
+      {
+        name: 'Kiên trì thử nghiệm',
+        description: 'Danh hiệu dành cho bài kiểm thử tích hợp.',
+        icon: '🏅',
+        tier: 'GOLD',
+        color: '#d97706',
+        requiredLongestStreak: 99,
+        active: true,
+      },
+      actor,
+    );
+    const reward = await rewardsAdmin.create(
+      {
+        name: 'Đổi danh hiệu kiểm thử',
+        description: 'Nhận danh hiệu sau khi Admin xác nhận trao quà.',
+        cost: 20,
+        stock: null,
+        active: true,
+        imageUrl: null,
+        category: 'ACHIEVEMENT',
+        requiredCcLevel: 0,
+        achievementId: String(created.achievement.id),
+      },
+      actor,
+    );
+    await connection`
+      INSERT INTO user_wallets (user_id, balance) VALUES (${ids.member!}, 100)
+      ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance
+    `;
+    const redeemed = await rewards.redeem(
+      ids.member!,
+      String(reward.reward.id),
+      'achievement-reward-test',
+    );
+    await rewards.transitionOrder(redeemed.order.id, 'APPROVED', actor, 'Duyệt kiểm thử');
+    await rewards.transitionOrder(redeemed.order.id, 'FULFILLED', actor, 'Đã trao danh hiệu');
+    const profile = await insights.studentProfile(ids.member!, actor);
+    expect(profile.achievements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: created.achievement.id,
+          name: 'Kiên trì thử nghiệm',
+          tier: 'GOLD',
+          source: 'REWARD',
+        }),
+      ]),
+    );
+    expect(profile.rewards).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: reward.reward.id })]),
+    );
   });
 
   it('enforces organization-scoped teacher adjustments with atomic audit and idempotency', async () => {

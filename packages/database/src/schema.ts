@@ -490,6 +490,32 @@ export const seasonUserSnapshots = pgTable(
   ],
 );
 
+export const achievements = pgTable(
+  'achievements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: varchar('name', { length: 160 }).notNull(),
+    description: text('description').notNull(),
+    icon: text('icon').notNull(),
+    tier: varchar('tier', { length: 30 }).notNull(),
+    color: varchar('color', { length: 20 }).notNull(),
+    requiredLongestStreak: integer('required_longest_streak').notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('achievements_streak_unique').on(table.requiredLongestStreak),
+    index('achievements_active_streak_idx').on(table.active, table.requiredLongestStreak),
+    check(
+      'achievements_tier_check',
+      sql`${table.tier} IN ('BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'MASTER', 'LEGEND')`,
+    ),
+    check('achievements_streak_check', sql`${table.requiredLongestStreak} > 0`),
+    check('achievements_color_check', sql`${table.color} ~ '^#[0-9a-fA-F]{6}$'`),
+  ],
+);
+
 export const rewards = pgTable(
   'rewards',
   {
@@ -503,6 +529,9 @@ export const rewards = pgTable(
     cashValueVnd: integer('cash_value_vnd'),
     category: varchar('category', { length: 20 }).default('STANDARD').notNull(),
     requiredCcLevel: integer('required_cc_level').default(0).notNull(),
+    achievementId: uuid('achievement_id').references(() => achievements.id, {
+      onDelete: 'restrict',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -514,8 +543,15 @@ export const rewards = pgTable(
       'rewards_cash_value_check',
       sql`${table.cashValueVnd} IS NULL OR ${table.cashValueVnd} > 0`,
     ),
-    check('rewards_category_check', sql`${table.category} IN ('STANDARD', 'MASCOT')`),
+    check(
+      'rewards_category_check',
+      sql`${table.category} IN ('STANDARD', 'MASCOT', 'ACHIEVEMENT')`,
+    ),
     check('rewards_required_cc_level_check', sql`${table.requiredCcLevel} >= 0`),
+    check(
+      'rewards_achievement_link_check',
+      sql`(${table.category} = 'ACHIEVEMENT') = (${table.achievementId} IS NOT NULL)`,
+    ),
   ],
 );
 
@@ -583,6 +619,38 @@ export const rewardOrders = pgTable(
     uniqueIndex('reward_orders_idempotency_key_unique').on(table.idempotencyKey),
     index('reward_orders_user_created_idx').on(table.userId, table.createdAt.desc()),
     check('reward_orders_cost_snapshot_check', sql`${table.costSnapshot} > 0`),
+  ],
+);
+
+export const userAchievements = pgTable(
+  'user_achievements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    achievementId: uuid('achievement_id')
+      .notNull()
+      .references(() => achievements.id, { onDelete: 'restrict' }),
+    source: varchar('source', { length: 20 }).notNull(),
+    rewardOrderId: uuid('reward_order_id').references(() => rewardOrders.id, {
+      onDelete: 'restrict',
+    }),
+    grantedBy: uuid('granted_by').references(() => users.id, { onDelete: 'set null' }),
+    note: text('note'),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('user_achievements_identity_unique').on(table.userId, table.achievementId),
+    uniqueIndex('user_achievements_reward_order_unique')
+      .on(table.rewardOrderId)
+      .where(sql`${table.rewardOrderId} IS NOT NULL`),
+    index('user_achievements_user_granted_idx').on(table.userId, table.grantedAt.desc()),
+    check('user_achievements_source_check', sql`${table.source} IN ('MANUAL', 'REWARD')`),
+    check(
+      'user_achievements_reward_link_check',
+      sql`(${table.source} = 'REWARD') = (${table.rewardOrderId} IS NOT NULL)`,
+    ),
   ],
 );
 

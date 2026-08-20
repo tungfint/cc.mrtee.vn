@@ -29,17 +29,35 @@ const rewardImageUrlSchema = z
       z.string().url().safeParse(value).success,
   );
 
-const rewardSchema = z.object({
-  name: z.string().trim().min(2).max(200),
-  description: z.string().trim().min(2).max(2000),
-  cost: z.coerce.number().int().positive().max(1_000_000),
-  stock: z.coerce.number().int().nonnegative().nullable().default(null),
-  active: z.boolean().default(true),
-  imageUrl: rewardImageUrlSchema.nullable().default(null),
-  cashValueVnd: z.coerce.number().int().positive().max(100_000_000).nullable().default(null),
-  category: z.enum(['STANDARD', 'MASCOT']).default('STANDARD'),
-  requiredCcLevel: z.coerce.number().int().min(0).max(10_000).default(0),
-});
+const rewardSchema = z
+  .object({
+    name: z.string().trim().min(2).max(200),
+    description: z.string().trim().min(2).max(2000),
+    cost: z.coerce.number().int().positive().max(1_000_000),
+    stock: z.coerce.number().int().nonnegative().nullable().default(null),
+    active: z.boolean().default(true),
+    imageUrl: rewardImageUrlSchema.nullable().default(null),
+    cashValueVnd: z.coerce.number().int().positive().max(100_000_000).nullable().default(null),
+    category: z.enum(['STANDARD', 'MASCOT', 'ACHIEVEMENT']).default('STANDARD'),
+    requiredCcLevel: z.coerce.number().int().min(0).max(10_000).default(0),
+    achievementId: z.string().uuid().nullable().default(null),
+  })
+  .superRefine((input, context) => {
+    if ((input.category === 'ACHIEVEMENT') !== Boolean(input.achievementId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['achievementId'],
+        message: 'Phần thưởng danh hiệu phải liên kết với một danh hiệu',
+      });
+    }
+    if (input.category === 'ACHIEVEMENT' && input.cashValueVnd !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cashValueVnd'],
+        message: 'Danh hiệu không thể đồng thời là quà tiền mặt',
+      });
+    }
+  });
 
 @RequireSystemRole('SYSTEM_ADMIN')
 @Controller('admin/rewards')
@@ -53,10 +71,13 @@ export class RewardsAdminController {
   async list() {
     return {
       rewards: await this.database.sql`
-        SELECT rewards.*, count(orders.id)::int AS order_count
+        SELECT rewards.*, achievements.name AS achievement_name,
+          achievements.icon AS achievement_icon, achievements.tier AS achievement_tier,
+          count(orders.id)::int AS order_count
         FROM rewards
+        LEFT JOIN achievements ON achievements.id = rewards.achievement_id
         LEFT JOIN reward_orders AS orders ON orders.reward_id = rewards.id
-        GROUP BY rewards.id
+        GROUP BY rewards.id, achievements.id
         ORDER BY rewards.created_at DESC
       `,
     };
@@ -153,18 +174,19 @@ export class RewardsAdminController {
               stock = ${input.stock}, active = ${input.active}, image_url = ${input.imageUrl},
               cash_value_vnd = ${input.cashValueVnd},
               category = ${input.category}, required_cc_level = ${input.requiredCcLevel},
+              achievement_id = ${input.achievementId},
               updated_at = now()
             WHERE id = ${id} RETURNING *
           `
         : await transaction`
             INSERT INTO rewards (
               name, description, cost, stock, active, image_url, cash_value_vnd,
-              category, required_cc_level
+              category, required_cc_level, achievement_id
             )
             VALUES (
               ${input.name}, ${input.description}, ${input.cost}, ${input.stock},
               ${input.active}, ${input.imageUrl}, ${input.cashValueVnd},
-              ${input.category}, ${input.requiredCcLevel}
+              ${input.category}, ${input.requiredCcLevel}, ${input.achievementId}
             ) RETURNING *
           `;
       if (!reward) throw new BadRequestException('Không tìm thấy phần thưởng');
