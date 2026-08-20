@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { calculateCcLevel, calculateReward } from '@cc/core';
+import { calculateCcLevel, calculateReward, round2 } from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 
 interface InvalidSolve {
@@ -25,6 +25,9 @@ interface PolicyRow {
   version: string;
   level_decay: string;
   level_denominator: string;
+  level_mastery_factor: string;
+  level_mastery_scale: string;
+  level_mastery_rating_step: string;
   reward_min: string;
   reward_max: string;
   reward_midpoint_delta: string;
@@ -198,16 +201,22 @@ export class ReconciliationService {
   ) {
     await transaction`INSERT INTO user_skill_state (user_id) VALUES (${userId}) ON CONFLICT DO NOTHING`;
     const [state] = await transaction<
-      { cc_base: string; cc_level: string; scoring_policy_version: string }[]
+      {
+        cc_base: string;
+        cc_calculated: string;
+        cc_level: string;
+        scoring_policy_version: string;
+      }[]
     >`
-      SELECT cc_base, cc_level, scoring_policy_version FROM user_skill_state
+      SELECT cc_base, cc_calculated, cc_level, scoring_policy_version FROM user_skill_state
       WHERE user_id = ${userId} FOR UPDATE
     `;
     const [policy] = await transaction<PolicyRow[]>`
-      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v2.0'}
+      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v2.1'}
     `;
     if (!state || !policy || submission.problem_rating_observed === null) return null;
-    const amount = calculateReward(submission.problem_rating_observed, Number(state.cc_level), {
+    const rewardReferenceLevel = Math.max(Number(state.cc_base), Number(state.cc_calculated));
+    const amount = calculateReward(submission.problem_rating_observed, rewardReferenceLevel, {
       min: Number(policy.reward_min),
       max: Number(policy.reward_max),
       midpointDelta: Number(policy.reward_midpoint_delta),
@@ -226,6 +235,9 @@ export class ReconciliationService {
         decay: Number(policy.level_decay),
         denominator: Number(policy.level_denominator),
         base: Number(state.cc_base),
+        masteryFactor: Number(policy.level_mastery_factor),
+        masteryScale: Number(policy.level_mastery_scale),
+        masteryRatingStep: Number(policy.level_mastery_rating_step),
       },
     );
     const [season] = await transaction<{ id: string }[]>`
@@ -250,11 +262,13 @@ export class ReconciliationService {
       ) VALUES (
         ${userId}, 'EARN', ${amount}, ${season?.id ?? null}, ${submission.cf_submission_id},
         ${`earn:submission:${submission.cf_submission_id}`}, true, ${Boolean(season)},
-        ${state.cc_level}, ${submission.problem_rating_observed}, ${policy.version},
+        ${rewardReferenceLevel}, ${submission.problem_rating_observed}, ${policy.version},
         'Replacement reward after Codeforces rejudge',
         ${JSON.stringify({
+          displayCcLevelBefore: Number(state.cc_level),
+          rewardReferenceLevelBefore: rewardReferenceLevel,
           ccLevelAfter: nextLevel.level,
-          ccLevelDelta: nextLevel.level - Number(state.cc_level),
+          ccLevelDelta: round2(nextLevel.level - Number(state.cc_level)),
         })}::jsonb,
         ${solvedAt.toISOString()}
       ) ON CONFLICT DO NOTHING RETURNING id
@@ -286,7 +300,7 @@ export class ReconciliationService {
       SELECT cc_base, scoring_policy_version FROM user_skill_state WHERE user_id = ${userId} FOR UPDATE
     `;
     const [policy] = await transaction<PolicyRow[]>`
-      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v2.0'}
+      SELECT * FROM scoring_policies WHERE version = ${state?.scoring_policy_version ?? 'v2.1'}
     `;
     if (!state || !policy) throw new Error('Scoring policy is unavailable');
     const solves = await transaction<{ problem_key: string; rating_snapshot: number }[]>`
@@ -302,10 +316,14 @@ export class ReconciliationService {
         decay: Number(policy.level_decay),
         denominator: Number(policy.level_denominator),
         base: Number(state.cc_base),
+        masteryFactor: Number(policy.level_mastery_factor),
+        masteryScale: Number(policy.level_mastery_scale),
+        masteryRatingStep: Number(policy.level_mastery_rating_step),
       },
     );
     await transaction`
-      UPDATE user_skill_state SET cc_calculated = ${result.calculated}, cc_level = ${result.level},
+      UPDATE user_skill_state SET cc_calculated = ${result.calculated},
+        cc_mastery_bonus = ${result.masteryBonus}, cc_level = ${result.level},
         updated_at = now() WHERE user_id = ${userId}
     `;
   }

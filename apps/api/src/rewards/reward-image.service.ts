@@ -20,8 +20,12 @@ export class RewardImageService {
     try {
       await sharp(input, { failOn: 'warning', limitInputPixels: 30_000_000 })
         .rotate()
-        .resize(1200, 800, { fit: 'cover', position: 'centre' })
-        .webp({ quality: 88 })
+        .resize(1200, 800, {
+          fit: 'contain',
+          position: 'centre',
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        })
+        .webp({ quality: 88, alphaQuality: 100 })
         .toFile(target);
     } catch {
       await unlink(target).catch(() => undefined);

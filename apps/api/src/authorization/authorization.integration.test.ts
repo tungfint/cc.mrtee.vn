@@ -102,9 +102,12 @@ describe('authorization matrix', () => {
     `;
     await connection`
       INSERT INTO scoring_policies (
-        version, level_decay, level_denominator, default_cc_base,
+        version, level_decay, level_denominator, level_mastery_factor,
+        level_mastery_scale, level_mastery_rating_step, default_cc_base,
         reward_min, reward_max, reward_midpoint_delta, reward_scale, effective_from
-      ) VALUES ('v2.0', 0.95, 20, 800, 0.05, 30, 50, 80, now())
+      ) VALUES
+        ('v2.0', 0.95, 20, 0, 4, 400, 800, 0.05, 30, 50, 80, now()),
+        ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30, 50, 80, now())
     `;
     for (const name of ['member', 'teacher', 'orgAdmin', 'admin', 'otherAdmin', 'systemAdmin']) {
       const systemRole =
@@ -564,7 +567,12 @@ describe('authorization matrix', () => {
         values: { UPLOAD_DIR: directory },
       } as EnvironmentService);
       const source = await sharp({
-        create: { width: 300, height: 700, channels: 3, background: '#e83e8c' },
+        create: {
+          width: 300,
+          height: 700,
+          channels: 4,
+          background: { r: 232, g: 62, b: 140, alpha: 0.35 },
+        },
       })
         .png()
         .toBuffer();
@@ -572,7 +580,14 @@ describe('authorization matrix', () => {
       expect(url).toMatch(/^\/api\/uploads\/rewards\/[a-f0-9-]+\.webp$/);
       const file = await readFile(join(directory, 'rewards', basename(url)));
       const metadata = await sharp(file).metadata();
-      expect(metadata).toMatchObject({ width: 1200, height: 800, format: 'webp' });
+      expect(metadata).toMatchObject({
+        width: 1200,
+        height: 800,
+        format: 'webp',
+        hasAlpha: true,
+      });
+      const stats = await sharp(file).stats();
+      expect(stats.channels[3]?.min).toBe(0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

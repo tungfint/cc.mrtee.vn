@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { calculateCcLevel, calculateReward, calculateStreakBonus } from '@cc/core';
+import { calculateCcLevel, calculateReward, calculateStreakBonus, round2 } from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 import type { IngestedSubmission } from '../ingestion/submission-ingestion.service';
 
 interface SkillStateRow {
   cc_base: string;
+  cc_calculated: string;
   cc_level: string;
   scoring_policy_version: string;
 }
@@ -13,6 +14,9 @@ interface PolicyRow {
   version: string;
   level_decay: string;
   level_denominator: string;
+  level_mastery_factor: string;
+  level_mastery_scale: string;
+  level_mastery_rating_step: string;
   reward_min: string;
   reward_max: string;
   reward_midpoint_delta: string;
@@ -89,12 +93,13 @@ export class RewardEngineService {
         VALUES (${userId}) ON CONFLICT (user_id) DO NOTHING
       `;
       const [state] = await transaction<SkillStateRow[]>`
-        SELECT cc_base, cc_level, scoring_policy_version
+        SELECT cc_base, cc_calculated, cc_level, scoring_policy_version
         FROM user_skill_state WHERE user_id = ${userId} FOR UPDATE
       `;
       if (!state) throw new Error('Skill state initialization failed');
       const [policy] = await transaction<PolicyRow[]>`
-        SELECT version, level_decay, level_denominator, reward_min, reward_max,
+        SELECT version, level_decay, level_denominator, level_mastery_factor,
+          level_mastery_scale, level_mastery_rating_step, reward_min, reward_max,
           reward_midpoint_delta, reward_scale
         FROM scoring_policies WHERE version = ${state.scoring_policy_version}
       `;
@@ -113,14 +118,22 @@ export class RewardEngineService {
           decay: Number(policy.level_decay),
           denominator: Number(policy.level_denominator),
           base: Number(state.cc_base),
+          masteryFactor: Number(policy.level_mastery_factor),
+          masteryScale: Number(policy.level_mastery_scale),
+          masteryRatingStep: Number(policy.level_mastery_rating_step),
         },
+      );
+      const displayLevelBefore = Number(state.cc_level);
+      const rewardReferenceLevelBefore = Math.max(
+        Number(state.cc_base),
+        Number(state.cc_calculated),
       );
 
       let amount = 0;
       if (rewardEligible && canonical.problem_rating_observed !== null) {
         amount = calculateReward(
           Number(canonical.problem_rating_observed),
-          Number(state.cc_level),
+          rewardReferenceLevelBefore,
           {
             min: Number(policy.reward_min),
             max: Number(policy.reward_max),
@@ -152,11 +165,13 @@ export class RewardEngineService {
             affects_wallet, affects_season, metadata, event_at
           ) VALUES (
             ${userId}, 'EARN', ${amount}, ${season?.id ?? null}, ${canonical.cf_submission_id},
-            ${`earn:submission:${canonical.cf_submission_id}`}, ${state.cc_level},
+            ${`earn:submission:${canonical.cf_submission_id}`}, ${rewardReferenceLevelBefore},
             ${canonical.problem_rating_observed}, ${policy.version}, true, ${Boolean(season)},
             ${JSON.stringify({
+              displayCcLevelBefore: displayLevelBefore,
+              rewardReferenceLevelBefore,
               ccLevelAfter: nextLevel.level,
-              ccLevelDelta: nextLevel.level - Number(state.cc_level),
+              ccLevelDelta: round2(nextLevel.level - displayLevelBefore),
             })}::jsonb,
             ${solvedAt.toISOString()}
           )
@@ -185,7 +200,8 @@ export class RewardEngineService {
 
       await transaction`
         UPDATE user_skill_state
-        SET cc_calculated = ${nextLevel.calculated}, cc_level = ${nextLevel.level}, updated_at = now()
+        SET cc_calculated = ${nextLevel.calculated}, cc_mastery_bonus = ${nextLevel.masteryBonus},
+          cc_level = ${nextLevel.level}, updated_at = now()
         WHERE user_id = ${userId}
       `;
       return { firstSolveCreated: true, awarded: rewardEligible, amount };

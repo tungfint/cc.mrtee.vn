@@ -407,7 +407,7 @@ problemset:{problemsetName}:{index}
 
 Không dùng `name` làm unique key.
 
-## 4.4. Công thức
+## 4.4. Công thức v2.1
 
 Lấy rating của các problem unique đã solve:
 
@@ -425,13 +425,50 @@ CC_{Calculated}
 D_i \cdot 0.95^{i-1}
 \]
 
-Sau đó:
+Giữ chỉ số lõi tương thích v2.0:
 
 \[
-CC_{Level}
+CC_{Core}
 =
 \max(CC_{Base}, CC_{Calculated})
 \]
+
+Mỗi unique rated first-solve còn tạo một lượng bằng chứng luyện tập:
+
+\[
+Evidence(D)
+=
+clamp\left(0.25, 2, 2^{(D-CC_{Base})/400}\right)
+\]
+
+\[
+MasteryBonus
+=
+8\ln\left(1+\frac{\sum Evidence(D)}{4}\right)
+\]
+
+Chỉ số hiển thị cuối cùng:
+
+\[
+CC_{Level}=CC_{Core}+MasteryBonus
+\]
+
+Thuộc tính:
+
+- mọi unique rated first-solve đều làm `CC_Level` tăng;
+- bài cao hơn `CC_Base` tạo nhiều evidence hơn bài thấp;
+- logarithm làm mức tăng biên giảm dần, chống lạm phát do làm nhiều bài cùng mức;
+- `CC_Core` tiếp tục là level tham chiếu của công thức `CC_Point`, nên chính sách point và các mốc đổi quà hiện tại không bị thay đổi bởi `MasteryBonus`.
+
+Mô phỏng với `CC_Base = 800`:
+
+| Tình huống | Mức tăng `CC_Level` xấp xỉ |
+|---|---:|
+| Bài 800 đầu tiên | +1.79 |
+| Bài 900 đầu tiên | +2.08 |
+| Bài 800 thứ 10 | +0.55 |
+| Bài 800 thứ 40 | +0.18 |
+| Bài 800 thứ 100 | +0.08 |
 
 Mặc định:
 
@@ -508,7 +545,7 @@ Mọi correction phải có audit log.
 
 - Backend giữ raw value với độ chính xác cao.
 - UI có thể hiển thị làm tròn tới 10 điểm gần nhất.
-- Reward luôn dùng raw value, không dùng số đã làm tròn trên UI.
+- Reward luôn dùng raw `CC_Core`, không dùng `CC_Level` hiển thị hoặc số đã làm tròn trên UI.
 
 ---
 
@@ -531,7 +568,7 @@ Reward phải:
 Với một first solve tại thời điểm `t`:
 
 ```text
-L = CC_Level ngay trước khi problem đó được thêm vào skill state
+L = CC_Core ngay trước khi problem đó được thêm vào skill state
 D = rating snapshot của problem tại thời điểm award
 delta = D - L
 ```
@@ -636,6 +673,9 @@ Tạo `scoring_policies`:
 version
 level_decay
 level_denominator
+level_mastery_factor
+level_mastery_scale
+level_mastery_rating_step
 default_cc_base
 reward_min
 reward_max
@@ -649,9 +689,12 @@ created_by
 Ví dụ:
 
 ```text
-version = "v2.0"
+version = "v2.1"
 level_decay = 0.95
 level_denominator = 20
+level_mastery_factor = 8
+level_mastery_scale = 4
+level_mastery_rating_step = 400
 default_cc_base = 800
 reward_min = 0.05
 reward_max = 30.00
@@ -659,7 +702,7 @@ reward_midpoint_delta = 50
 reward_scale = 80
 ```
 
-Mỗi transaction EARN lưu `scoring_policy_version`.
+Mỗi transaction EARN lưu `scoring_policy_version`. Metadata đồng thời lưu `displayCcLevelBefore` và `rewardReferenceLevelBefore` để lịch sử hiển thị đúng mà vẫn audit được level lõi dùng tính point.
 
 Không retroactively thay point cũ khi đổi policy.
 
@@ -1345,6 +1388,7 @@ updated_at TIMESTAMPTZ
 user_id UUID PK FK
 cc_base NUMERIC(10,2)
 cc_calculated NUMERIC(10,2)
+cc_mastery_bonus NUMERIC(10,2)
 cc_level NUMERIC(10,2)
 scoring_policy_version VARCHAR
 updated_at TIMESTAMPTZ
@@ -1444,6 +1488,9 @@ version VARCHAR PK
 
 level_decay NUMERIC
 level_denominator NUMERIC
+level_mastery_factor NUMERIC
+level_mastery_scale NUMERIC
+level_mastery_rating_step NUMERIC
 default_cc_base NUMERIC
 
 reward_min NUMERIC
@@ -2213,11 +2260,14 @@ Không tối ưu sớm.
 # 28. Bộ config mặc định v2
 
 ```text
-SCORING_POLICY_VERSION=v2.0
+SCORING_POLICY_VERSION=v2.1
 
 CC_DEFAULT_BASE=800
 CC_LEVEL_DECAY=0.95
 CC_LEVEL_DENOMINATOR=20
+CC_LEVEL_MASTERY_FACTOR=8
+CC_LEVEL_MASTERY_SCALE=4
+CC_LEVEL_MASTERY_RATING_STEP=400
 
 REWARD_MIN=0.05
 REWARD_MAX=30.00
@@ -2504,7 +2554,7 @@ Hai thuật toán cốt lõi:
 
 \[
 \boxed{
-CC_{Level}
+CC_{Core}
 =
 \max
 \left(
@@ -2516,7 +2566,7 @@ D_i \cdot 0.95^{i-1}
 }
 \]
 
-với `D_i` là rating các unique rated first-solves, sắp giảm dần.
+với `D_i` là rating các unique rated first-solves, sắp giảm dần. `CC_Level` hiển thị bằng `CC_Core + MasteryBonus` theo công thức logarithm ở mục 4.4.
 
 ### Điểm thưởng
 
@@ -2539,7 +2589,7 @@ với:
 
 ```text
 D = problem rating snapshot
-L = CC_Level trước first solve
+L = CC_Core trước first solve
 ```
 
 Đây là cấu hình khởi đầu tốt cho production; các hằng số reward vẫn phải được hiệu chỉnh bằng dữ liệu thực sau một hoặc vài season, nhưng việc version hóa scoring policy bảo đảm có thể tune mà không phá lịch sử.

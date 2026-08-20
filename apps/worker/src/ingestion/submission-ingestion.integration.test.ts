@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { migrateDatabase, type DatabaseClient, createDatabaseClient } from '@cc/database';
-import type { CodeforcesSubmission } from '@cc/core';
+import { calculateReward, type CodeforcesSubmission } from '@cc/core';
 import { config } from 'dotenv';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../database/database.service';
@@ -60,9 +60,12 @@ describe('submission ingestion', () => {
     `;
     await client.connection`
       INSERT INTO scoring_policies (
-        version, level_decay, level_denominator, default_cc_base,
+        version, level_decay, level_denominator, level_mastery_factor,
+        level_mastery_scale, level_mastery_rating_step, default_cc_base,
         reward_min, reward_max, reward_midpoint_delta, reward_scale, effective_from
-      ) VALUES ('v2.0', 0.95, 20, 800, 0.05, 30, 50, 80, now())
+      ) VALUES
+        ('v2.0', 0.95, 20, 0, 4, 400, 800, 0.05, 30, 50, 80, now()),
+        ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30, 50, 80, now())
     `;
   });
   afterAll(async () => client.close());
@@ -170,13 +173,13 @@ describe('submission ingestion', () => {
     ]);
     await firstSolves.recordBatch(user.id, ingested, new Date(0), false);
     const result = await level.recompute(user.id);
-    expect(result.version).toBe('v2.0');
-    expect(result.level).toBe(800);
+    expect(result.version).toBe('v2.1');
+    expect(result.level).toBe(805.55);
     const [state] = await client.connection<{ cc_base: string; cc_level: string }[]>`
       SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${user.id}
     `;
     expect(Number(state?.cc_base)).toBe(800);
-    expect(Number(state?.cc_level)).toBe(800);
+    expect(Number(state?.cc_level)).toBe(805.55);
   });
 
   it('resumes a crashed backfill from its persisted cursor without creating EARN', async () => {
@@ -293,7 +296,12 @@ describe('submission ingestion', () => {
         ledger: string;
         wallet: string;
         season_score: string;
-        earn_metadata: { ccLevelAfter: number; ccLevelDelta: number };
+        earn_metadata: {
+          ccLevelAfter: number;
+          ccLevelDelta: number;
+          displayCcLevelBefore: number;
+          rewardReferenceLevelBefore: number;
+        };
       }[]
     >`
       SELECT
@@ -308,7 +316,15 @@ describe('submission ingestion', () => {
     expect(totals?.earns).toBe(1);
     expect(totals?.wallet).toBe(totals?.ledger);
     expect(totals?.season_score).toBe(totals?.ledger);
-    expect(totals?.earn_metadata).toEqual({ ccLevelAfter: 800, ccLevelDelta: 0 });
+    expect(Number(totals?.wallet)).toBe(
+      calculateReward(1200, 800, { min: 0.05, max: 30, midpointDelta: 50, scale: 80 }),
+    );
+    expect(totals?.earn_metadata).toEqual({
+      ccLevelAfter: 803.24,
+      ccLevelDelta: 3.24,
+      displayCcLevelBefore: 800,
+      rewardReferenceLevelBefore: 800,
+    });
 
     await expect(
       client.connection`UPDATE point_transactions SET amount = amount + 1 WHERE type = 'EARN'`,

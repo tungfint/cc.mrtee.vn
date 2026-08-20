@@ -628,10 +628,7 @@ export class InsightsController {
     };
   }
 
-  private async pointHistory(
-    userId: string,
-    input: z.infer<typeof pointHistoryQuery>,
-  ) {
+  private async pointHistory(userId: string, input: z.infer<typeof pointHistoryQuery>) {
     const offset = (input.page - 1) * input.pageSize;
     const rows = await this.database.sql`
       WITH history AS (
@@ -666,7 +663,10 @@ export class InsightsController {
           submissions.programming_language,
           problems.problem_key, problems.contest_id::text, problems.problem_index,
           problems.name AS problem_name, rewards.name AS reward_name,
-          history.cc_level_before::text,
+          COALESCE(
+            history.metadata->>'displayCcLevelBefore',
+            history.cc_level_before::text
+          ) AS cc_level_before,
           CASE WHEN history.type = 'EARN' THEN COALESCE(
             history.metadata->>'ccLevelAfter',
             earn_levels.next_cc_level_before::text,

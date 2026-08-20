@@ -72,8 +72,17 @@ export class SeasonClosureService {
         JOIN user_skill_state AS skill ON skill.user_id = totals.user_id
         WHERE totals.season_id = ${seasonId}
       `;
-      const [policy] = await transaction<{ level_decay: string; level_denominator: string }[]>`
-        SELECT level_decay, level_denominator FROM scoring_policies
+      const [policy] = await transaction<
+        {
+          level_decay: string;
+          level_denominator: string;
+          level_mastery_factor: string;
+          level_mastery_scale: string;
+          level_mastery_rating_step: string;
+        }[]
+      >`
+        SELECT level_decay, level_denominator, level_mastery_factor,
+          level_mastery_scale, level_mastery_rating_step FROM scoring_policies
         WHERE version = ${season.scoring_policy_version}
       `;
       if (!policy) throw new Error('Scoring policy is unavailable');
@@ -95,6 +104,9 @@ export class SeasonClosureService {
             decay: Number(policy.level_decay),
             denominator: Number(policy.level_denominator),
             base: Number(participant.cc_base),
+            masteryFactor: Number(policy.level_mastery_factor),
+            masteryScale: Number(policy.level_mastery_scale),
+            masteryRatingStep: Number(policy.level_mastery_rating_step),
           },
         ).level;
         const dates = await transaction<{ day: string }[]>`

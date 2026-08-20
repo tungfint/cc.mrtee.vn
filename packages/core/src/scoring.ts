@@ -7,6 +7,9 @@ export interface LevelPolicy {
   decay: number;
   denominator: number;
   base: number;
+  masteryFactor?: number;
+  masteryScale?: number;
+  masteryRatingStep?: number;
 }
 
 export function calculateCcLevel(
@@ -14,6 +17,8 @@ export function calculateCcLevel(
   policy: LevelPolicy,
 ): {
   calculated: number;
+  coreLevel: number;
+  masteryBonus: number;
   level: number;
 } {
   const uniqueRatings = new Map<string, number>();
@@ -29,7 +34,22 @@ export function calculateCcLevel(
     ratings.reduce((sum, rating, index) => sum + rating * policy.decay ** index, 0) /
     policy.denominator;
   const roundedCalculated = round2(calculated);
-  return { calculated: roundedCalculated, level: round2(Math.max(policy.base, calculated)) };
+  const coreLevel = round2(Math.max(policy.base, calculated));
+  const masteryFactor = policy.masteryFactor ?? 0;
+  const masteryScale = policy.masteryScale ?? 4;
+  const masteryRatingStep = policy.masteryRatingStep ?? 400;
+  const evidence = ratings.reduce(
+    (sum, rating) =>
+      sum + Math.min(2, Math.max(0.25, 2 ** ((rating - policy.base) / masteryRatingStep))),
+    0,
+  );
+  const masteryBonus = round2(masteryFactor * Math.log1p(evidence / masteryScale));
+  return {
+    calculated: roundedCalculated,
+    coreLevel,
+    masteryBonus,
+    level: round2(coreLevel + masteryBonus),
+  };
 }
 
 export interface RewardPolicy {

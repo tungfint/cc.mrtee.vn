@@ -23,7 +23,7 @@ export function RewardImageUploader({
       const context = canvas?.getContext('2d');
       if (!canvas || !context) return;
       const scale =
-        Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight) * zoom;
+        Math.min(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight) * zoom;
       const width = image.naturalWidth * scale;
       const height = image.naturalHeight * scale;
       const travelX = Math.max(0, width - canvas.width) / 2;
@@ -50,12 +50,11 @@ export function RewardImageUploader({
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(
           (result) => (result ? resolve(result) : reject(new Error('Không thể xử lý ảnh'))),
-          'image/jpeg',
-          0.92,
+          'image/png',
         );
       });
       const form = new FormData();
-      form.append('image', blob, 'reward.jpg');
+      form.append('image', blob, 'reward.png');
       return api<{ imageUrl: string }>('/admin/rewards/image', { method: 'POST', body: form });
     },
     onSuccess: ({ imageUrl }) => {
@@ -101,10 +100,10 @@ export function RewardImageUploader({
           />
           <div className="avatar-crop-controls">
             <label>
-              <span>Phóng to</span>
+              <span>Thu nhỏ / phóng to</span>
               <input
-                max="3"
-                min="1"
+                max="4"
+                min="0.35"
                 onChange={(event) => setZoom(Number(event.target.value))}
                 step="0.05"
                 type="range"

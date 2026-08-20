@@ -5,6 +5,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
 import { ScoringAdjustmentsService } from './scoring-adjustments.service';
+import { setCcBaseAndRecompute } from './cc-level-recalculation';
 
 const schema = z.object({
   organizationId: z.string().uuid(),
@@ -53,15 +54,7 @@ export class ScoringAdminController {
       const [before] = await transaction`
         SELECT * FROM user_skill_state WHERE user_id = ${userId.data} FOR UPDATE
       `;
-      const [state] = await transaction`
-        INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
-        VALUES (${userId.data}, ${input.data.ccBase}, 0, ${input.data.ccBase})
-        ON CONFLICT (user_id) DO UPDATE SET
-          cc_base = EXCLUDED.cc_base,
-          cc_level = GREATEST(EXCLUDED.cc_base, user_skill_state.cc_calculated),
-          updated_at = now()
-        RETURNING *
-      `;
+      const state = await setCcBaseAndRecompute(transaction, userId.data, input.data.ccBase);
       await transaction`
         INSERT INTO audit_logs (
           actor_user_id, action, entity_type, entity_id, before, after, reason

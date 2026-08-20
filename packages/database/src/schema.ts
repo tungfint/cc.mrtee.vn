@@ -268,6 +268,15 @@ export const scoringPolicies = pgTable(
     version: varchar('version', { length: 50 }).primaryKey(),
     levelDecay: numeric('level_decay', { precision: 8, scale: 7 }).notNull(),
     levelDenominator: numeric('level_denominator', { precision: 10, scale: 4 }).notNull(),
+    levelMasteryFactor: numeric('level_mastery_factor', { precision: 10, scale: 4 })
+      .default('0')
+      .notNull(),
+    levelMasteryScale: numeric('level_mastery_scale', { precision: 10, scale: 4 })
+      .default('4')
+      .notNull(),
+    levelMasteryRatingStep: numeric('level_mastery_rating_step', { precision: 10, scale: 2 })
+      .default('400')
+      .notNull(),
     defaultCcBase: numeric('default_cc_base', { precision: 10, scale: 2 }).notNull(),
     rewardMin: numeric('reward_min', { precision: 12, scale: 2 }).notNull(),
     rewardMax: numeric('reward_max', { precision: 12, scale: 2 }).notNull(),
@@ -280,6 +289,10 @@ export const scoringPolicies = pgTable(
   (table) => [
     check('scoring_policies_decay_check', sql`${table.levelDecay} > 0 AND ${table.levelDecay} < 1`),
     check('scoring_policies_denominator_check', sql`${table.levelDenominator} > 0`),
+    check(
+      'scoring_policies_mastery_check',
+      sql`${table.levelMasteryFactor} >= 0 AND ${table.levelMasteryScale} > 0 AND ${table.levelMasteryRatingStep} > 0`,
+    ),
     check(
       'scoring_policies_reward_bounds_check',
       sql`${table.rewardMin} > 0 AND ${table.rewardMax} >= ${table.rewardMin}`,
@@ -296,9 +309,12 @@ export const userSkillState = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     ccBase: numeric('cc_base', { precision: 10, scale: 2 }).default('800.00').notNull(),
     ccCalculated: numeric('cc_calculated', { precision: 10, scale: 2 }).default('0.00').notNull(),
+    ccMasteryBonus: numeric('cc_mastery_bonus', { precision: 10, scale: 2 })
+      .default('0.00')
+      .notNull(),
     ccLevel: numeric('cc_level', { precision: 10, scale: 2 }).default('800.00').notNull(),
     scoringPolicyVersion: varchar('scoring_policy_version', { length: 50 })
-      .default('v2.0')
+      .default('v2.1')
       .notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

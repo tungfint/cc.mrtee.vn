@@ -1,4 +1,4 @@
-import { calculateCcLevel, calculateReward } from '@cc/core';
+import { calculateCcLevel, calculateReward, round2 } from '@cc/core';
 import { createDatabaseClient } from '@cc/database';
 import { hashPassword } from './auth/password';
 
@@ -18,7 +18,14 @@ if (!DEMO_PASSWORD || DEMO_PASSWORD.length < 12) {
 }
 
 const policy = {
-  level: { decay: 0.95, denominator: 20, base: 800 },
+  level: {
+    decay: 0.95,
+    denominator: 20,
+    base: 800,
+    masteryFactor: 8,
+    masteryScale: 4,
+    masteryRatingStep: 400,
+  },
   reward: { min: 0.05, max: 30, midpointDelta: 50, scale: 80 },
 };
 const ratings = [
@@ -34,23 +41,23 @@ async function main() {
   const database = createDatabaseClient(DATABASE_URL!, 1);
   const passwordHash = await hashPassword(DEMO_PASSWORD!);
   try {
-  const result = await database.connection.begin(async (transaction) => {
-    const [emailOwner] = await transaction<{ user_id: string }[]>`
+    const result = await database.connection.begin(async (transaction) => {
+      const [emailOwner] = await transaction<{ user_id: string }[]>`
       SELECT user_id FROM user_credentials WHERE email = ${DEMO_EMAIL}
     `;
-    if (emailOwner && emailOwner.user_id !== USER_ID) {
-      throw new Error(`Email ${DEMO_EMAIL} is already assigned to another account`);
-    }
-    if (emailOwner?.user_id === USER_ID) {
-      const [existing] = await transaction<
-        {
-          cc_level: string;
-          cc_point: string;
-          cc_balance: string;
-          solves: number;
-          reward_orders: number;
-        }[]
-      >`
+      if (emailOwner && emailOwner.user_id !== USER_ID) {
+        throw new Error(`Email ${DEMO_EMAIL} is already assigned to another account`);
+      }
+      if (emailOwner?.user_id === USER_ID) {
+        const [existing] = await transaction<
+          {
+            cc_level: string;
+            cc_point: string;
+            cc_balance: string;
+            solves: number;
+            reward_orders: number;
+          }[]
+        >`
         SELECT COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(points.cc_point, 0)::text AS cc_point,
           COALESCE(wallet.balance, 0)::text AS cc_balance,
@@ -65,21 +72,21 @@ async function main() {
         ) AS points ON true
         WHERE users.id = ${USER_ID}
       `;
-      return {
-        userId: USER_ID,
-        email: DEMO_EMAIL,
-        solves: existing?.solves ?? 0,
-        ccBase: 800,
-        ccLevel: Number(existing?.cc_level ?? 800),
-        ccPoint: Number(existing?.cc_point ?? 0),
-        ccBalance: Number(existing?.cc_balance ?? 0),
-        streak: existing?.solves ?? 0,
-        rewardOrders: existing?.reward_orders ?? 0,
-        existing: true,
-      };
-    }
+        return {
+          userId: USER_ID,
+          email: DEMO_EMAIL,
+          solves: existing?.solves ?? 0,
+          ccBase: 800,
+          ccLevel: Number(existing?.cc_level ?? 800),
+          ccPoint: Number(existing?.cc_point ?? 0),
+          ccBalance: Number(existing?.cc_balance ?? 0),
+          streak: existing?.solves ?? 0,
+          rewardOrders: existing?.reward_orders ?? 0,
+          existing: true,
+        };
+      }
 
-    await transaction`
+      await transaction`
       INSERT INTO users (
         id, full_name, display_name, status, system_role, leaderboard_visible, timezone
       ) VALUES (
@@ -95,7 +102,7 @@ async function main() {
         timezone = EXCLUDED.timezone,
         updated_at = now()
     `;
-    await transaction`
+      await transaction`
       INSERT INTO user_credentials (
         user_id, email, password_hash, must_change_password
       ) VALUES (${USER_ID}, ${DEMO_EMAIL}, ${passwordHash}, false)
@@ -109,7 +116,7 @@ async function main() {
         updated_at = now()
     `;
 
-    await transaction`
+      await transaction`
       INSERT INTO rewards (
         id, name, description, cost, stock, active, image_url, category,
         required_cc_level, requires_approval
@@ -136,18 +143,18 @@ async function main() {
         requires_approval = EXCLUDED.requires_approval,
         updated_at = now()
     `;
-    await transaction`
+      await transaction`
       UPDATE reward_orders
       SET note = 'Dữ liệu demo quà đã nhận của S-Admin'
       WHERE id = 'd1000000-0000-4000-8000-000000000001'::uuid
     `;
 
-    const today = new Date();
-    today.setUTCHours(5, 0, 0, 0);
-    const firstSolveAt = new Date(today.getTime() - (ratings.length - 1) * 86_400_000);
-    const eligibleFrom = new Date(firstSolveAt.getTime() - 86_400_000);
-    const finalSubmissionId = String(9_800_000_000_000 + ratings.length);
-    await transaction`
+      const today = new Date();
+      today.setUTCHours(5, 0, 0, 0);
+      const firstSolveAt = new Date(today.getTime() - (ratings.length - 1) * 86_400_000);
+      const eligibleFrom = new Date(firstSolveAt.getTime() - 86_400_000);
+      const finalSubmissionId = String(9_800_000_000_000 + ratings.length);
+      await transaction`
       INSERT INTO codeforces_accounts (
         id, user_id, handle, current_rating, max_rating, rank, max_rank,
         verification_status, verified_at, reward_eligible_from, last_seen_submission_id,
@@ -160,26 +167,29 @@ async function main() {
       )
     `;
 
-    const solves: { problemKey: string; rating: number }[] = [];
-    let currentLevel = 800;
-    let calculatedLevel = 0;
-    let earnedTotal = 0;
-    for (const [zeroIndex, rating] of ratings.entries()) {
-      const index = zeroIndex + 1;
-      const problemKey = `problemset:cay-cot-demo:D${String(index).padStart(2, '0')}`;
-      const problemIndex = `D${String(index).padStart(2, '0')}`;
-      const submissionId = String(9_800_000_000_000 + index);
-      const solvedAt = new Date(firstSolveAt.getTime() + zeroIndex * 86_400_000);
-      const levelBefore = currentLevel;
-      solves.push({ problemKey, rating });
-      const nextLevel = calculateCcLevel(solves, policy.level);
-      const reward = calculateReward(rating, levelBefore, policy.reward);
-      currentLevel = nextLevel.level;
-      calculatedLevel = nextLevel.calculated;
-      earnedTotal = Math.round((earnedTotal + reward) * 100) / 100;
-      const tag = rating <= 900 ? 'implementation' : rating <= 1000 ? 'math' : 'greedy';
+      const solves: { problemKey: string; rating: number }[] = [];
+      let currentLevel = 800;
+      let calculatedLevel = 0;
+      let masteryBonus = 0;
+      let earnedTotal = 0;
+      for (const [zeroIndex, rating] of ratings.entries()) {
+        const index = zeroIndex + 1;
+        const problemKey = `problemset:cay-cot-demo:D${String(index).padStart(2, '0')}`;
+        const problemIndex = `D${String(index).padStart(2, '0')}`;
+        const submissionId = String(9_800_000_000_000 + index);
+        const solvedAt = new Date(firstSolveAt.getTime() + zeroIndex * 86_400_000);
+        const levelBefore = currentLevel;
+        const rewardReferenceLevelBefore = Math.max(800, calculatedLevel);
+        solves.push({ problemKey, rating });
+        const nextLevel = calculateCcLevel(solves, policy.level);
+        const reward = calculateReward(rating, rewardReferenceLevelBefore, policy.reward);
+        currentLevel = nextLevel.level;
+        calculatedLevel = nextLevel.calculated;
+        masteryBonus = nextLevel.masteryBonus;
+        earnedTotal = Math.round((earnedTotal + reward) * 100) / 100;
+        const tag = rating <= 900 ? 'implementation' : rating <= 1000 ? 'math' : 'greedy';
 
-      await transaction`
+        await transaction`
         INSERT INTO cf_problems (
           problem_key, problemset_name, problem_index, name, type, current_rating, tags
         ) VALUES (
@@ -193,7 +203,7 @@ async function main() {
           tags = EXCLUDED.tags,
           updated_at = now()
       `;
-      await transaction`
+        await transaction`
         INSERT INTO cf_submissions (
           cf_submission_id, user_id, problem_key, creation_time, verdict,
           participant_type, is_team, programming_language, problem_rating_observed, raw_metadata
@@ -202,34 +212,36 @@ async function main() {
           'GNU C++20', ${rating}, ${JSON.stringify({ demo: true })}::jsonb
         )
       `;
-      await transaction`
+        await transaction`
         INSERT INTO user_problem_solves (
           user_id, problem_key, first_ok_submission_id, first_solved_at,
           rating_snapshot, reward_eligible
         ) VALUES (${USER_ID}, ${problemKey}, ${submissionId}, ${iso(solvedAt)}, ${rating}, true)
       `;
-      await transaction`
+        await transaction`
         INSERT INTO point_transactions (
           user_id, type, amount, source_submission_id, idempotency_key,
           affects_wallet, affects_season, cc_level_before, problem_rating_snapshot,
           scoring_policy_version, description, metadata, event_at
         ) VALUES (
           ${USER_ID}, 'EARN', ${reward}, ${submissionId},
-          ${`demo:student:solve:${index}`}, true, false, ${levelBefore}, ${rating}, 'v2.0',
+          ${`demo:student:solve:${index}`}, true, false, ${rewardReferenceLevelBefore}, ${rating}, 'v2.1',
           ${`Ghi nhận bài luyện tập minh họa rating ${rating}`},
           ${JSON.stringify({
             demo: true,
+            displayCcLevelBefore: levelBefore,
+            rewardReferenceLevelBefore,
             ccLevelAfter: nextLevel.level,
-            ccLevelDelta: nextLevel.level - levelBefore,
+            ccLevelDelta: round2(nextLevel.level - levelBefore),
           })}::jsonb,
           ${iso(solvedAt)}
         )
       `;
-    }
+      }
 
-    const streakBonus = 25;
-    earnedTotal = Math.round((earnedTotal + streakBonus) * 100) / 100;
-    await transaction`
+      const streakBonus = 25;
+      earnedTotal = Math.round((earnedTotal + streakBonus) * 100) / 100;
+      await transaction`
       INSERT INTO point_transactions (
         user_id, type, amount, idempotency_key, affects_wallet, affects_season,
         description, metadata, event_at
@@ -240,7 +252,7 @@ async function main() {
       )
     `;
 
-    await transaction`
+      await transaction`
       INSERT INTO reward_orders (
         id, user_id, reward_id, cost_snapshot, status, idempotency_key,
         created_at, reviewed_at, note
@@ -256,7 +268,7 @@ async function main() {
           ${iso(new Date(today.getTime() + 120_000))}, 'Demo đổi quà tự động'
         )
     `;
-    await transaction`
+      await transaction`
       INSERT INTO point_transactions (
         user_id, type, amount, source_reward_order_id, idempotency_key,
         affects_wallet, affects_season, description, metadata, event_at
@@ -273,23 +285,24 @@ async function main() {
         )
     `;
 
-    const balance = Math.round((earnedTotal - 150) * 100) / 100;
-    await transaction`
+      const balance = Math.round((earnedTotal - 150) * 100) / 100;
+      await transaction`
       INSERT INTO user_skill_state (
-        user_id, cc_base, cc_calculated, cc_level, scoring_policy_version
-      ) VALUES (${USER_ID}, 800, ${calculatedLevel}, ${currentLevel}, 'v2.0')
+        user_id, cc_base, cc_calculated, cc_mastery_bonus, cc_level, scoring_policy_version
+      ) VALUES (${USER_ID}, 800, ${calculatedLevel}, ${masteryBonus}, ${currentLevel}, 'v2.1')
       ON CONFLICT (user_id) DO UPDATE SET
         cc_base = 800,
         cc_calculated = EXCLUDED.cc_calculated,
+        cc_mastery_bonus = EXCLUDED.cc_mastery_bonus,
         cc_level = EXCLUDED.cc_level,
-        scoring_policy_version = 'v2.0',
+        scoring_policy_version = 'v2.1',
         updated_at = now()
     `;
-    await transaction`
+      await transaction`
       INSERT INTO user_wallets (user_id, balance) VALUES (${USER_ID}, ${balance})
       ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance, updated_at = now()
     `;
-    await transaction`
+      await transaction`
       INSERT INTO audit_logs (action, entity_type, entity_id, after, reason)
       VALUES (
         'DEMO_STUDENT_SEEDED', 'USER', ${USER_ID},
@@ -306,18 +319,18 @@ async function main() {
       )
     `;
 
-    return {
-      userId: USER_ID,
-      email: DEMO_EMAIL,
-      solves: ratings.length,
-      ccBase: 800,
-      ccLevel: currentLevel,
-      ccPoint: earnedTotal,
-      ccBalance: balance,
-      streak: ratings.length,
-      rewardOrders: 2,
-    };
-  });
+      return {
+        userId: USER_ID,
+        email: DEMO_EMAIL,
+        solves: ratings.length,
+        ccBase: 800,
+        ccLevel: currentLevel,
+        ccPoint: earnedTotal,
+        ccBalance: balance,
+        streak: ratings.length,
+        rewardOrders: 2,
+      };
+    });
     console.log(JSON.stringify(result, null, 2));
   } finally {
     await database.close();

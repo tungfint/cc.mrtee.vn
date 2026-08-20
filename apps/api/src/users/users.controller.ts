@@ -18,6 +18,7 @@ import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import { hashPassword, verifyPassword } from '../auth/password';
 import type { AuthUser } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
+import { setCcBaseAndRecompute } from '../scoring/cc-level-recalculation';
 
 const avatarSchema = z
   .string()
@@ -351,14 +352,7 @@ export class UsersController {
           `;
         }
         if (input.initialCcLevel !== undefined) {
-          await transaction`
-            INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
-            VALUES (${userId}, ${input.initialCcLevel}, 0, ${input.initialCcLevel})
-            ON CONFLICT (user_id) DO UPDATE SET
-              cc_base = EXCLUDED.cc_base,
-              cc_level = GREATEST(EXCLUDED.cc_base, user_skill_state.cc_calculated),
-              updated_at = now()
-          `;
+          await setCcBaseAndRecompute(transaction, userId, input.initialCcLevel);
         }
         if (input.classId !== undefined) {
           await transaction`

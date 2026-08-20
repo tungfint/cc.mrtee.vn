@@ -46,13 +46,18 @@ async function resetDatabase(sql: Sql): Promise<void> {
       version,
       level_decay,
       level_denominator,
+      level_mastery_factor,
+      level_mastery_scale,
+      level_mastery_rating_step,
       default_cc_base,
       reward_min,
       reward_max,
       reward_midpoint_delta,
       reward_scale,
       effective_from
-    ) VALUES ('v2.0', 0.95, 20, 800, 0.05, 30.00, 50, 80, '2026-08-18T00:00:00+07:00')
+    ) VALUES
+      ('v2.0', 0.95, 20, 0, 4, 400, 800, 0.05, 30.00, 50, 80, '2026-08-18T00:00:00+07:00'),
+      ('v2.1', 0.95, 20, 8, 4, 400, 800, 0.05, 30.00, 50, 80, '2026-08-20T00:00:00+07:00')
   `;
 }
 

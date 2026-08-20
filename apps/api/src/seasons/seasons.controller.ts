@@ -11,7 +11,7 @@ const createSchema = z.object({
   name: z.string().trim().min(2).max(200),
   startAt: z.coerce.date(),
   endAt: z.coerce.date(),
-  scoringPolicyVersion: z.string().trim().min(1).max(50).default('v2.0'),
+  scoringPolicyVersion: z.string().trim().min(1).max(50).default('v2.1'),
 });
 const statusSchema = z.object({
   status: z.enum(['ACTIVE', 'CLOSING']),
