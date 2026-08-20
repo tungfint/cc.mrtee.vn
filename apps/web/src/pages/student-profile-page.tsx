@@ -89,38 +89,77 @@ interface StudentProfile {
     quantity: number;
   }[];
   topTags: { tag: string; solved_count: number; max_rating: number | null }[];
-  pointHistory: {
-    id: string;
-    type: string;
-    amount: string;
-    description: string | null;
-    event_at: string;
-    source_submission_id: string | null;
-    problem_rating_snapshot: number | null;
-    programming_language: string | null;
-    problem_key: string | null;
-    contest_id: string | null;
-    problem_index: string | null;
-    problem_name: string | null;
-    cc_level_before: string | null;
-    cc_level_after: string | null;
-    cc_point_delta: string;
-    cc_balance_delta: string;
-    cc_point_after: string;
-    cc_balance_after: string;
-  }[];
+  pointHistory: PointHistoryItem[];
 }
+
+interface PointHistoryItem {
+  id: string;
+  type: string;
+  amount: string;
+  description: string | null;
+  event_at: string;
+  source_submission_id: string | null;
+  source_reward_order_id: string | null;
+  problem_rating_snapshot: number | null;
+  programming_language: string | null;
+  problem_key: string | null;
+  contest_id: string | null;
+  problem_index: string | null;
+  problem_name: string | null;
+  reward_name: string | null;
+  cc_level_before: string | null;
+  cc_level_after: string | null;
+  cc_point_delta: string;
+  cc_balance_delta: string;
+  cc_point_after: string;
+  cc_balance_after: string;
+}
+
+type PointHistoryMetric = 'ALL' | 'CC_LEVEL' | 'CC_POINT' | 'CC_BALANCE';
+
+interface PointHistoryResponse {
+  items: PointHistoryItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+  metric: PointHistoryMetric;
+}
+
+const pointHistoryFilters: { value: PointHistoryMetric; label: string; icon: string }[] = [
+  { value: 'ALL', label: 'Tất cả', icon: '◎' },
+  { value: 'CC_LEVEL', label: 'CC Level', icon: '⚡' },
+  { value: 'CC_POINT', label: 'CC Point', icon: '◆' },
+  { value: 'CC_BALANCE', label: 'CC Balance', icon: '◈' },
+];
 
 export default function StudentProfilePage() {
   const { userId = '' } = useParams();
   const session = useSession();
   const queryClient = useQueryClient();
   const [selectedMascots, setSelectedMascots] = useState<string[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyMetric, setHistoryMetric] = useState<PointHistoryMetric>('ALL');
   const student = useQuery({
     queryKey: ['student-profile', userId],
     queryFn: () => api<StudentProfile>(`/students/${userId}/profile`),
     enabled: Boolean(userId),
     refetchInterval: 15_000,
+  });
+  const canViewPointHistory = Boolean(
+    session.data &&
+      (session.data.user.userId === userId || session.data.user.systemRole !== 'USER'),
+  );
+  const history = useQuery({
+    queryKey: ['student-point-history', userId, historyPage, historyMetric],
+    queryFn: () =>
+      api<PointHistoryResponse>(
+        `/students/${userId}/point-history?page=${historyPage}&pageSize=20&metric=${historyMetric}`,
+      ),
+    enabled: Boolean(userId) && canViewPointHistory,
+    placeholderData: (previous) => previous,
   });
   const rescue = useMutation({
     mutationFn: () =>
@@ -142,8 +181,16 @@ export default function StudentProfilePage() {
     return <ErrorState error={student.error} retry={() => void student.refetch()} />;
   if (!student.data)
     return <EmptyState title="Không tìm thấy học sinh" detail="Hồ sơ không còn khả dụng." />;
-  const { profile, streak, achievements, rewards, topTags, pointHistory } = student.data;
+  const { profile, streak, achievements, rewards, topTags } = student.data;
   const isOwner = session.data?.user.userId === profile.id;
+  const pointHistory = history.data?.items ?? student.data.pointHistory;
+  const historyPagination = history.data?.pagination ?? {
+    page: 1,
+    pageSize: 20,
+    total: student.data.pointHistory.length,
+    totalPages: 1,
+  };
+  const historyPages = paginationPages(historyPagination.page, historyPagination.totalPages);
   const rank = profile.level_rank_name
     ? {
         name: profile.level_rank_name,
@@ -464,7 +511,7 @@ export default function StudentProfilePage() {
             </div>
           </section>
         </div>
-        {(isOwner || session.data?.user.systemRole !== 'USER') && (
+        {canViewPointHistory && (
           <section className="panel point-history-panel p-6">
             <div className="section-heading">
               <div>
@@ -476,9 +523,27 @@ export default function StudentProfilePage() {
                   đồng thời CC Point và CC Balance; bài unrated chỉ ghi nhận hoạt động/Streak.
                 </p>
               </div>
-              <strong>{pointHistory.length} giao dịch gần nhất</strong>
+              <strong>{historyPagination.total} giao dịch</strong>
             </div>
-            {pointHistory.length ? (
+            <div className="point-history-filters" aria-label="Lọc lịch sử điểm">
+              {pointHistoryFilters.map((filter) => (
+                <button
+                  className={historyMetric === filter.value ? 'active' : ''}
+                  key={filter.value}
+                  onClick={() => {
+                    setHistoryMetric(filter.value);
+                    setHistoryPage(1);
+                  }}
+                  type="button"
+                >
+                  <span>{filter.icon}</span>
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+            {history.isPending && !pointHistory.length ? (
+              <LoadingState label="Đang tải lịch sử điểm…" />
+            ) : pointHistory.length ? (
               <div className="point-history-table">
                 <div className="point-history-row header">
                   <span>Thời gian</span>
@@ -506,7 +571,11 @@ export default function StudentProfilePage() {
                       ) : (
                         <>
                           <strong>{pointTransactionLabel(transaction.type)}</strong>
-                          <small>{transaction.description ?? 'Thay đổi điểm trong hệ thống'}</small>
+                          <small>
+                            {transaction.reward_name
+                              ? `${transaction.description ?? 'Đổi quà'} · ${transaction.reward_name}`
+                              : (transaction.description ?? 'Thay đổi điểm trong hệ thống')}
+                          </small>
                         </>
                       )}
                       {transaction.problem_name && (
@@ -571,6 +640,40 @@ export default function StudentProfilePage() {
                 detail="Giao dịch CC Point và CC Balance sẽ xuất hiện tại đây."
               />
             )}
+            {historyPagination.totalPages > 1 && (
+              <nav className="point-history-pagination" aria-label="Phân trang lịch sử điểm">
+                <button
+                  disabled={historyPagination.page <= 1 || history.isFetching}
+                  onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}
+                  type="button"
+                >
+                  ← Trước
+                </button>
+                {historyPages.map((page) => (
+                  <button
+                    aria-current={page === historyPagination.page ? 'page' : undefined}
+                    className={page === historyPagination.page ? 'active' : ''}
+                    disabled={history.isFetching}
+                    key={page}
+                    onClick={() => setHistoryPage(page)}
+                    type="button"
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  disabled={
+                    historyPagination.page >= historyPagination.totalPages || history.isFetching
+                  }
+                  onClick={() =>
+                    setHistoryPage((page) => Math.min(historyPagination.totalPages, page + 1))
+                  }
+                  type="button"
+                >
+                  Sau →
+                </button>
+              </nav>
+            )}
           </section>
         )}
       </section>
@@ -578,7 +681,7 @@ export default function StudentProfilePage() {
   );
 }
 
-function codeforcesSubmissionUrl(transaction: StudentProfile['pointHistory'][number]) {
+function codeforcesSubmissionUrl(transaction: PointHistoryItem) {
   if (transaction.contest_id && transaction.source_submission_id) {
     return `https://codeforces.com/contest/${transaction.contest_id}/submission/${transaction.source_submission_id}`;
   }
@@ -586,6 +689,12 @@ function codeforcesSubmissionUrl(transaction: StudentProfile['pointHistory'][num
     return `https://codeforces.com/problemset/problem/${transaction.contest_id}/${transaction.problem_index}`;
   }
   return 'https://codeforces.com/problemset';
+}
+
+function paginationPages(current: number, total: number) {
+  const count = Math.min(total, 5);
+  const start = Math.max(1, Math.min(current - 2, total - count + 1));
+  return Array.from({ length: count }, (_, index) => start + index);
 }
 
 function signedPoint(value: string) {

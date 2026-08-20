@@ -724,6 +724,19 @@ describe('authorization matrix', () => {
       INSERT INTO motivational_quotes (content, author, active, sort_order)
       VALUES ('Danh ngôn dùng cho ảnh vinh danh.', 'Test suite', true, 1)
     `;
+    await connection`
+      INSERT INTO point_transactions (
+        user_id, type, amount, affects_wallet, affects_season, description, event_at
+      )
+      SELECT ${ids.member!}, 'BONUS', 1, true, false,
+        'Điểm thưởng kiểm thử #' || value, now() - (value || ' minutes')::interval
+      FROM generate_series(1, 21) AS value
+    `;
+    await connection`
+      INSERT INTO point_transactions (
+        user_id, type, amount, affects_wallet, affects_season, description, event_at
+      ) VALUES (${ids.member!}, 'REDEEM', -5, true, false, 'Đổi quà kiểm thử', now())
+    `;
     const dashboard = await insights.dashboard(authUser(ids.member!));
     expect(dashboard.profile).toMatchObject({
       id: ids.member!,
@@ -759,6 +772,34 @@ describe('authorization matrix', () => {
     expect(publicProfile.pointHistory).toEqual([]);
     const ownerProfile = await insights.studentProfile(ids.member!, authUser(ids.member!));
     expect(ownerProfile).toHaveProperty('pointHistory');
+    expect(ownerProfile.pointHistory).toHaveLength(20);
+    const pointPage = await insights.studentPointHistory(
+      ids.member!,
+      { page: '2', pageSize: '5', metric: 'CC_POINT' },
+      authUser(ids.member!),
+    );
+    expect(pointPage.pagination).toEqual({ page: 2, pageSize: 5, total: 21, totalPages: 5 });
+    expect(pointPage.items).toHaveLength(5);
+    expect(pointPage.items.every((item) => item.cc_point_delta === '1.00')).toBe(true);
+    const balancePage = await insights.studentPointHistory(
+      ids.member!,
+      { page: '1', pageSize: '50', metric: 'CC_BALANCE' },
+      authUser(ids.member!),
+    );
+    expect(balancePage.pagination.total).toBe(22);
+    expect(balancePage.items[0]).toMatchObject({
+      type: 'REDEEM',
+      cc_point_delta: '0',
+      cc_balance_delta: '-5.00',
+      cc_balance_after: '16.00',
+    });
+    await expect(
+      insights.studentPointHistory(
+        ids.member!,
+        { page: '1', pageSize: '20', metric: 'ALL' },
+        authUser(ids.teacher!),
+      ),
+    ).rejects.toThrow('không có quyền');
     const adminProfile = await insights.studentProfile(
       ids.systemAdmin!,
       authUser(ids.systemAdmin!, 'SYSTEM_ADMIN'),

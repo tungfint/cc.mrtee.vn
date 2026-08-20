@@ -60,6 +60,12 @@ const leaderboardQuery = z.object({
   shareKey: z.string().trim().min(20).max(180).optional(),
 });
 
+const pointHistoryQuery = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(5).max(50).default(20),
+  metric: z.enum(['ALL', 'CC_LEVEL', 'CC_POINT', 'CC_BALANCE']).default('ALL'),
+});
+
 @Controller()
 export class InsightsController {
   constructor(
@@ -246,8 +252,26 @@ export class InsightsController {
   async studentProfile(@Param('userId') userIdInput: string, @OptionalUser() viewer?: AuthUser) {
     const userId = z.string().uuid().safeParse(userIdInput);
     if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
-    const canViewPointHistory = viewer?.userId === userId.data || viewer?.systemRole !== 'USER';
+    const canViewPointHistory = Boolean(
+      viewer && (viewer.userId === userId.data || viewer.systemRole !== 'USER'),
+    );
     return this.recognition(userId.data, canViewPointHistory);
+  }
+
+  @Get('students/:userId/point-history')
+  async studentPointHistory(
+    @Param('userId') userIdInput: string,
+    @Query() raw: unknown,
+    @CurrentUser() viewer: AuthUser,
+  ) {
+    const userId = z.string().uuid().safeParse(userIdInput);
+    if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
+    if (viewer.userId !== userId.data && viewer.systemRole === 'USER') {
+      throw new BadRequestException('Bạn không có quyền xem lịch sử điểm của học sinh này');
+    }
+    const query = pointHistoryQuery.safeParse(raw);
+    if (!query.success) throw new BadRequestException('Bộ lọc lịch sử điểm không hợp lệ');
+    return this.pointHistory(userId.data, query.data);
   }
 
   @RequireSystemRole('SYSTEM_ADMIN')
@@ -576,54 +600,9 @@ export class InsightsController {
         ORDER BY achievements.required_longest_streak, achievements.id
       `,
       includePointHistory
-        ? this.database.sql`
-            WITH history AS (
-              SELECT transactions.*,
-                sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
-                  ORDER BY event_at, created_at, id
-                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS cc_point_after_value,
-                sum(amount) FILTER (WHERE affects_wallet) OVER (
-                  ORDER BY event_at, created_at, id
-                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                ) AS cc_balance_after_value
-              FROM point_transactions AS transactions
-              WHERE user_id = ${userId}
-            ), earn_levels AS (
-              SELECT id,
-                lead(cc_level_before) OVER (ORDER BY event_at, created_at, id)
-                  AS next_cc_level_before
-              FROM point_transactions
-              WHERE user_id = ${userId} AND type = 'EARN'
-            )
-            SELECT history.id, history.type, history.amount::text, history.description,
-              history.event_at, history.created_at, history.source_submission_id::text,
-              history.problem_rating_snapshot,
-              submissions.programming_language,
-              problems.problem_key, problems.contest_id::text, problems.problem_index,
-              problems.name AS problem_name,
-              history.cc_level_before::text,
-              CASE WHEN history.type = 'EARN' THEN COALESCE(
-                history.metadata->>'ccLevelAfter',
-                earn_levels.next_cc_level_before::text,
-                skill.cc_level::text,
-                history.cc_level_before::text
-              ) ELSE NULL END AS cc_level_after,
-              CASE WHEN history.type NOT IN ('REDEEM', 'REFUND') THEN history.amount ELSE 0 END::text
-                AS cc_point_delta,
-              CASE WHEN history.affects_wallet THEN history.amount ELSE 0 END::text
-                AS cc_balance_delta,
-              COALESCE(history.cc_point_after_value, 0)::text AS cc_point_after,
-              COALESCE(history.cc_balance_after_value, 0)::text AS cc_balance_after
-            FROM history
-            LEFT JOIN earn_levels ON earn_levels.id = history.id
-            LEFT JOIN cf_submissions AS submissions
-              ON submissions.cf_submission_id = history.source_submission_id
-            LEFT JOIN cf_problems AS problems ON problems.problem_key = submissions.problem_key
-            LEFT JOIN user_skill_state AS skill ON skill.user_id = history.user_id
-            ORDER BY history.event_at DESC, history.created_at DESC, history.id DESC
-            LIMIT 50
-          `
+        ? this.pointHistory(userId, { page: 1, pageSize: 20, metric: 'ALL' }).then(
+            (result) => result.items,
+          )
         : Promise.resolve([]),
     ]);
     const profile = profiles[0];
@@ -646,6 +625,88 @@ export class InsightsController {
       pointHistory,
       quote: recognitionQuotes[0] ?? null,
       generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async pointHistory(
+    userId: string,
+    input: z.infer<typeof pointHistoryQuery>,
+  ) {
+    const offset = (input.page - 1) * input.pageSize;
+    const rows = await this.database.sql`
+      WITH history AS (
+        SELECT transactions.*,
+          sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
+            ORDER BY event_at, created_at, id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) AS cc_point_after_value,
+          sum(amount) FILTER (WHERE affects_wallet) OVER (
+            ORDER BY event_at, created_at, id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) AS cc_balance_after_value
+        FROM point_transactions AS transactions
+        WHERE user_id = ${userId}
+      ), earn_levels AS (
+        SELECT id,
+          lead(cc_level_before) OVER (ORDER BY event_at, created_at, id)
+            AS next_cc_level_before
+        FROM point_transactions
+        WHERE user_id = ${userId} AND type = 'EARN'
+      ), details AS (
+        SELECT history.id, history.type, history.amount::text, history.description,
+          history.event_at, history.created_at, history.source_submission_id::text,
+          history.source_reward_order_id::text, history.problem_rating_snapshot,
+          submissions.programming_language,
+          problems.problem_key, problems.contest_id::text, problems.problem_index,
+          problems.name AS problem_name, rewards.name AS reward_name,
+          history.cc_level_before::text,
+          CASE WHEN history.type = 'EARN' THEN COALESCE(
+            history.metadata->>'ccLevelAfter',
+            earn_levels.next_cc_level_before::text,
+            skill.cc_level::text,
+            history.cc_level_before::text
+          ) ELSE NULL END AS cc_level_after,
+          CASE WHEN history.type NOT IN ('REDEEM', 'REFUND') THEN history.amount ELSE 0 END::text
+            AS cc_point_delta,
+          CASE WHEN history.affects_wallet THEN history.amount ELSE 0 END::text
+            AS cc_balance_delta,
+          COALESCE(history.cc_point_after_value, 0)::text AS cc_point_after,
+          COALESCE(history.cc_balance_after_value, 0)::text AS cc_balance_after
+        FROM history
+        LEFT JOIN earn_levels ON earn_levels.id = history.id
+        LEFT JOIN cf_submissions AS submissions
+          ON submissions.cf_submission_id = history.source_submission_id
+        LEFT JOIN cf_problems AS problems ON problems.problem_key = submissions.problem_key
+        LEFT JOIN reward_orders AS orders ON orders.id = history.source_reward_order_id
+        LEFT JOIN rewards ON rewards.id = orders.reward_id
+        LEFT JOIN user_skill_state AS skill ON skill.user_id = history.user_id
+      ), filtered AS (
+        SELECT *, count(*) OVER ()::int AS total_count
+        FROM details
+        WHERE ${input.metric === 'ALL'}
+          OR (${input.metric === 'CC_LEVEL'} AND type = 'EARN'
+            AND cc_level_before::numeric IS DISTINCT FROM cc_level_after::numeric)
+          OR (${input.metric === 'CC_POINT'} AND type NOT IN ('REDEEM', 'REFUND'))
+          OR (${input.metric === 'CC_BALANCE'} AND cc_balance_delta::numeric <> 0)
+      )
+      SELECT * FROM filtered
+      ORDER BY event_at DESC, created_at DESC, id DESC
+      LIMIT ${input.pageSize} OFFSET ${offset}
+    `;
+    const total = Number(rows[0]?.total_count ?? 0);
+    return {
+      items: rows.map((row) => {
+        const item = { ...row };
+        delete item.total_count;
+        return item;
+      }),
+      pagination: {
+        page: input.page,
+        pageSize: input.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / input.pageSize)),
+      },
+      metric: input.metric,
     };
   }
 

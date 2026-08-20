@@ -10,7 +10,8 @@
     "pretest": "npm run build --workspace @cc/core && npm run build --workspace @cc/database",
     "test": "vitest run --passWithNoTests",
     "bootstrap-admin": "tsx --env-file-if-exists=../../.env src/auth/bootstrap-admin.ts",
-    "seed:dev": "tsx --env-file-if-exists=../../.env src/dev-seed.ts"
+    "seed:dev": "tsx --env-file-if-exists=../../.env src/dev-seed.ts",
+    "seed:demo-student": "node --env-file-if-exists=../../.env dist/demo-student-seed.js"
   },
   "dependencies": {
     "@cc/core": "0.1.0",

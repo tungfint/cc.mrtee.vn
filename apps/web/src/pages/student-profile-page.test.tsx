@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../lib/api';
@@ -21,6 +21,36 @@ describe('StudentProfilePage', () => {
             systemRole: 'USER',
             mustChangePassword: false,
           },
+        });
+      }
+      if (path.startsWith('/students/') && path.includes('/point-history')) {
+        return Promise.resolve({
+          items: [
+            {
+              id: '44444444-4444-4444-8444-444444444444',
+              type: 'EARN',
+              amount: '10.49',
+              description: 'Ghi nhận bài giải Watermelon',
+              event_at: '2026-08-19T08:00:00Z',
+              source_submission_id: '500',
+              source_reward_order_id: null,
+              problem_rating_snapshot: 800,
+              programming_language: 'GNU C++20',
+              problem_key: 'contest:4:A',
+              contest_id: '4',
+              problem_index: 'A',
+              problem_name: 'Watermelon',
+              reward_name: null,
+              cc_level_before: '800',
+              cc_level_after: '800',
+              cc_point_delta: '10.49',
+              cc_balance_delta: '10.49',
+              cc_point_after: '10.49',
+              cc_balance_after: '10.49',
+            },
+          ],
+          pagination: { page: 1, pageSize: 20, total: 21, totalPages: 2 },
+          metric: path.includes('metric=CC_BALANCE') ? 'CC_BALANCE' : 'ALL',
         });
       }
       return Promise.resolve({
@@ -148,5 +178,12 @@ describe('StudentProfilePage', () => {
     expect(screen.getByText('800 → 800')).toBeInTheDocument();
     expect(screen.getByText(/Submission #500/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hi sinh 1 linh vật' })).toBeDisabled();
+    expect(screen.getByText('21 giao dịch')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /CC Balance/ }));
+    await waitFor(() =>
+      expect(api).toHaveBeenCalledWith(expect.stringContaining('metric=CC_BALANCE')),
+    );
   });
 });
