@@ -1,5 +1,6 @@
 ﻿import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../lib/api';
 import RewardsPage from './rewards-page';
@@ -12,6 +13,7 @@ vi.mock('../lib/api', async (importOriginal) => {
 describe('RewardsPage', () => {
   beforeEach(() => {
     vi.mocked(api).mockResolvedValue({
+      walletBalance: '600.00',
       rewards: [
         {
           id: 'mascot',
@@ -29,6 +31,7 @@ describe('RewardsPage', () => {
           achievement_tier: null,
           achievement_color: null,
           owned_quantity: 2,
+          requires_approval: false,
         },
         {
           id: 'title',
@@ -46,6 +49,7 @@ describe('RewardsPage', () => {
           achievement_tier: 'SILVER',
           achievement_color: '#64748b',
           owned_quantity: 0,
+          requires_approval: false,
         },
         {
           id: 'cash',
@@ -63,6 +67,7 @@ describe('RewardsPage', () => {
           achievement_tier: null,
           achievement_color: null,
           owned_quantity: 0,
+          requires_approval: false,
         },
       ],
     });
@@ -72,7 +77,9 @@ describe('RewardsPage', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
-        <RewardsPage />
+        <MemoryRouter>
+          <RewardsPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
 
@@ -88,5 +95,7 @@ describe('RewardsPage', () => {
     expect(screen.getByText('DANH HIỆU · Bạc')).toBeInTheDocument();
     expect(screen.getByText('⚡ CC Level 800')).toBeInTheDocument();
     expect(screen.getByText(/10\.000/)).toBeInTheDocument();
+    expect(screen.getAllByText(/600 CC Balance/)).toHaveLength(1);
+    expect(screen.getByText(/không cần chờ Admin duyệt/i)).toBeInTheDocument();
   });
 });

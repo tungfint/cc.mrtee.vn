@@ -529,6 +529,7 @@ export const rewards = pgTable(
     cashValueVnd: integer('cash_value_vnd'),
     category: varchar('category', { length: 20 }).default('STANDARD').notNull(),
     requiredCcLevel: integer('required_cc_level').default(0).notNull(),
+    requiresApproval: boolean('requires_approval').default(false).notNull(),
     achievementId: uuid('achievement_id').references(() => achievements.id, {
       onDelete: 'restrict',
     }),

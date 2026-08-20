@@ -18,6 +18,7 @@ export interface RewardRow {
   cash_value_vnd: number | null;
   category: 'STANDARD' | 'MASCOT' | 'ACHIEVEMENT';
   required_cc_level: number;
+  requires_approval: boolean;
   achievement_id: string | null;
 }
 
@@ -40,7 +41,7 @@ export class RewardsService {
     return this.database.sql<RewardRow[]>`
       SELECT rewards.id, rewards.name, rewards.description, rewards.cost, rewards.stock,
         rewards.active, rewards.image_url, rewards.cash_value_vnd, rewards.category,
-        rewards.required_cc_level, rewards.achievement_id,
+        rewards.required_cc_level, rewards.requires_approval, rewards.achievement_id,
         achievements.name AS achievement_name, achievements.icon AS achievement_icon,
         achievements.tier AS achievement_tier, achievements.color AS achievement_color,
         COALESCE(owned.quantity, 0)::int AS owned_quantity
@@ -56,6 +57,14 @@ export class RewardsService {
       WHERE rewards.active = true AND (rewards.stock IS NULL OR rewards.stock > 0)
       ORDER BY rewards.cost, rewards.name
     `;
+  }
+
+  async walletBalance(userId?: string) {
+    if (!userId) return null;
+    const [wallet] = await this.database.sql<{ balance: string }[]>`
+      SELECT balance::text FROM user_wallets WHERE user_id = ${userId}
+    `;
+    return wallet?.balance ?? '0.00';
   }
 
   async orders(userId: string) {
@@ -110,7 +119,7 @@ export class RewardsService {
       `;
       const [reward] = await transaction<RewardRow[]>`
         SELECT id, name, description, cost, stock, active, image_url, cash_value_vnd,
-          category, required_cc_level, achievement_id
+          category, required_cc_level, requires_approval, achievement_id
         FROM rewards WHERE id = ${rewardId} FOR UPDATE
       `;
       if (!reward || !reward.active) throw new NotFoundException('Phần thưởng không khả dụng');
@@ -133,10 +142,17 @@ export class RewardsService {
         throw new BadRequestException('Số dư không đủ để đổi phần thưởng');
       }
 
+      const initialStatus: OrderRow['status'] = reward.requires_approval
+        ? 'REQUESTED'
+        : 'FULFILLED';
       const [order] = await transaction<OrderRow[]>`
         INSERT INTO reward_orders (
-          user_id, reward_id, cost_snapshot, idempotency_key
-        ) VALUES (${userId}, ${reward.id}, ${reward.cost}, ${idempotencyKey})
+          user_id, reward_id, cost_snapshot, idempotency_key, status, reviewed_at, note
+        ) VALUES (
+          ${userId}, ${reward.id}, ${reward.cost}, ${idempotencyKey}, ${initialStatus},
+          CASE WHEN ${!reward.requires_approval} THEN now() ELSE NULL END,
+          ${reward.requires_approval ? null : 'Tự động hoàn tất — phần thưởng không yêu cầu xác nhận'}
+        )
         RETURNING *
       `;
       if (!order) throw new Error('Failed to create reward order');
@@ -157,6 +173,16 @@ export class RewardsService {
       if (reward.stock !== null) {
         await transaction`
           UPDATE rewards SET stock = stock - 1, updated_at = now() WHERE id = ${reward.id}
+        `;
+      }
+      if (!reward.requires_approval && reward.achievement_id) {
+        await transaction`
+          INSERT INTO user_achievements (
+            user_id, achievement_id, source, reward_order_id, note
+          ) VALUES (
+            ${userId}, ${reward.achievement_id}, 'REWARD', ${order.id},
+            'Tự động trao danh hiệu sau khi đổi thưởng'
+          ) ON CONFLICT (user_id, achievement_id) DO NOTHING
         `;
       }
       return { order, replayed: false };

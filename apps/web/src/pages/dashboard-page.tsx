@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { api, formatDate, formatNumber } from '../lib/api';
+import { api, formatDate, formatNumber, formatVnd } from '../lib/api';
 import { recommendedRange } from './dashboard-recommendation';
 import {
   Avatar,
@@ -29,6 +29,7 @@ interface Dashboard {
     cc_level: string;
     cc_point: string;
     wallet_balance: string;
+    cash_received_vnd: string;
     total_solves: number;
     highest_problem_rating: number | null;
     highest_problem_name: string | null;
@@ -147,6 +148,7 @@ export default function DashboardPage() {
   const data = dashboard.data;
   const profile = data.profile;
   const recommendation = recommendedRange(profile.recent_five_average_rating);
+  const cashReceived = Number(profile.cash_received_vnd);
   const submitHandle = (event: FormEvent) => {
     event.preventDefault();
     link.mutate();
@@ -256,16 +258,28 @@ export default function DashboardPage() {
             <h2>Danh hiệu & phần thưởng đã đạt</h2>
           </div>
           <span className="achievement-count">
-            {data.achievements.length + data.fulfilledRewards.length} mục sưu tầm
+            {data.achievements.length + data.fulfilledRewards.length + (cashReceived > 0 ? 1 : 0)}{' '}
+            mục sưu tầm
           </span>
         </div>
-        {data.achievements.length === 0 && data.fulfilledRewards.length === 0 ? (
+        {data.achievements.length === 0 &&
+        data.fulfilledRewards.length === 0 &&
+        cashReceived <= 0 ? (
           <EmptyState
             title="Chưa mở khóa thành tựu"
             detail="Duy trì Streak, chinh phục thử thách và nâng CC Level để nhận huy chương."
           />
         ) : (
           <div className="achievement-grid">
+            {cashReceived > 0 && (
+              <article className="achievement-card cash-achievement-card">
+                <span className="achievement-icon">💵</span>
+                <div>
+                  <strong>Tổng tiền thưởng đã nhận</strong>
+                  <p>{formatVnd(cashReceived)}</p>
+                </div>
+              </article>
+            )}
             {data.achievements.map((achievement) => (
               <article
                 className="achievement-card title-achievement"

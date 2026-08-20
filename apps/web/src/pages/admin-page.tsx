@@ -98,6 +98,7 @@ interface Reward {
   cash_value_vnd: number | null;
   category: 'STANDARD' | 'MASCOT' | 'ACHIEVEMENT';
   required_cc_level: number;
+  requires_approval: boolean;
   achievement_id: string | null;
   achievement_name: string | null;
   achievement_icon: string | null;
@@ -111,6 +112,7 @@ interface RewardOrder {
   reward_name: string;
   cost_snapshot: string;
   cash_value_vnd: number | null;
+  requires_approval: boolean;
   status: string;
   note: string | null;
   created_at: string;
@@ -302,6 +304,7 @@ const auditFieldLabels: Record<string, string> = {
   cash_value_vnd: 'Giá trị tiền',
   category: 'Loại quà',
   required_cc_level: 'CC Level yêu cầu',
+  requires_approval: 'Cần xác nhận',
   required_longest_streak: 'Mốc Streak dài nhất',
   tier: 'Cấp bậc',
   color: 'Màu cấp bậc',
@@ -361,6 +364,7 @@ export default function AdminPage() {
     'STANDARD',
   );
   const [rewardRequiredLevel, setRewardRequiredLevel] = useState('0');
+  const [rewardRequiresApproval, setRewardRequiresApproval] = useState(false);
   const [rewardAchievementId, setRewardAchievementId] = useState('');
   const [editingReward, setEditingReward] = useState<Reward | null>(null);
   const rewardFormRef = useRef<HTMLFormElement>(null);
@@ -803,6 +807,7 @@ export default function AdminPage() {
     setRewardCashValue(reward.cash_value_vnd === null ? '' : String(reward.cash_value_vnd));
     setRewardCategory(reward.category);
     setRewardRequiredLevel(String(reward.required_cc_level));
+    setRewardRequiresApproval(reward.requires_approval);
     setRewardAchievementId(reward.achievement_id ?? '');
     setRewardActive(reward.active);
     window.requestAnimationFrame(() =>
@@ -2788,6 +2793,7 @@ export default function AdminPage() {
                         cashValueVnd: rewardCashValue === '' ? null : Number(rewardCashValue),
                         category: rewardCategory,
                         requiredCcLevel: Number(rewardRequiredLevel),
+                        requiresApproval: rewardCashValue === '' ? rewardRequiresApproval : false,
                         achievementId:
                           rewardCategory === 'ACHIEVEMENT' ? rewardAchievementId : null,
                       },
@@ -2812,6 +2818,7 @@ export default function AdminPage() {
                           setRewardCashValue('');
                           setRewardCategory('STANDARD');
                           setRewardRequiredLevel('0');
+                          setRewardRequiresApproval(false);
                           setRewardAchievementId('');
                           setRewardActive(true);
                         }}
@@ -2853,7 +2860,10 @@ export default function AdminPage() {
                     <input
                       disabled={rewardCategory === 'ACHIEVEMENT'}
                       min="1"
-                      onChange={(event) => setRewardCashValue(event.target.value)}
+                      onChange={(event) => {
+                        setRewardCashValue(event.target.value);
+                        if (event.target.value) setRewardRequiresApproval(false);
+                      }}
                       placeholder="Ví dụ: 100000"
                       step="1"
                       type="number"
@@ -2889,6 +2899,21 @@ export default function AdminPage() {
                       />
                     </label>
                   </div>
+                  <label className="approval-toggle mt-4">
+                    <input
+                      checked={rewardRequiresApproval}
+                      disabled={rewardCashValue !== ''}
+                      onChange={(event) => setRewardRequiresApproval(event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>Cần GV/Admin xác nhận</strong>
+                      <small>
+                        Bỏ chọn để học sinh nhận quà ngay khi đủ CC Balance. Quy đổi tiền mặt luôn
+                        được hoàn tất tự động.
+                      </small>
+                    </span>
+                  </label>
                   {rewardCategory === 'ACHIEVEMENT' && (
                     <label className="field mt-4">
                       <span>Danh hiệu được trao khi hoàn tất đổi thưởng</span>
@@ -2957,6 +2982,11 @@ export default function AdminPage() {
                               Danh hiệu · {reward.achievement_icon} {reward.achievement_name}
                             </p>
                           )}
+                          <p className="m-0 text-xs text-[var(--muted)]">
+                            {reward.requires_approval
+                              ? 'Cần GV/Admin xác nhận'
+                              : 'Tự động nhận ngay'}
+                          </p>
                           {reward.cash_value_vnd !== null && (
                             <p className="cash-reward-value">
                               Nhận {formatVnd(reward.cash_value_vnd)}
@@ -3050,6 +3080,9 @@ export default function AdminPage() {
                           <p className="cash-reward-value">
                             Quà tiền {formatVnd(order.cash_value_vnd)}
                           </p>
+                        )}
+                        {!order.requires_approval && (
+                          <p className="m-0 text-xs text-[var(--muted)]">Đã hoàn tất tự động</p>
                         )}
                         <small>{formatDate(order.created_at)}</small>
                       </div>

@@ -662,8 +662,8 @@ describe('authorization matrix', () => {
       INSERT INTO user_wallets (user_id, balance) VALUES (${ids.member!}, 100)
     `;
     const [reward] = await connection<{ id: string }[]>`
-      INSERT INTO rewards (name, description, cost, stock)
-      VALUES ('Mentor session', 'One mentoring session', 80, 1)
+      INSERT INTO rewards (name, description, cost, stock, requires_approval)
+      VALUES ('Mentor session', 'One mentoring session', 80, 1, true)
       RETURNING id
     `;
     if (!reward) throw new Error('Failed to create reward fixture');
@@ -800,6 +800,46 @@ describe('authorization matrix', () => {
     await expect(
       rewards.redeem(ids.member!, String(created.reward.id), 'mascot-level-ready'),
     ).resolves.toMatchObject({ replayed: false });
+  });
+
+  it('automatically completes rewards without approval and reports current CC Balance', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const created = await rewardsAdmin.create(
+      {
+        name: 'Quy đổi tự động 10.000đ',
+        description: 'Mức tiền mặt hoàn tất ngay khi đủ số dư.',
+        cost: 120,
+        stock: null,
+        active: true,
+        imageUrl: null,
+        cashValueVnd: 10_000,
+        category: 'STANDARD',
+        requiredCcLevel: 0,
+        requiresApproval: false,
+      },
+      actor,
+    );
+    await connection`
+      INSERT INTO user_wallets (user_id, balance) VALUES (${ids.member!}, 200)
+      ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance
+    `;
+    const redeemed = await rewards.redeem(
+      ids.member!,
+      String(created.reward.id),
+      'automatic-cash-reward',
+    );
+    expect(redeemed).toMatchObject({ replayed: false, order: { status: 'FULFILLED' } });
+    await expect(rewards.walletBalance(ids.member)).resolves.toBe('80.00');
+    const dashboard = await insights.dashboard(authUser(ids.member!));
+    expect(dashboard.profile).toMatchObject({ cash_received_vnd: '10000' });
+    expect(dashboard.fulfilledRewards).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: created.reward.id })]),
+    );
+    const orderHistory = await rewards.orders(ids.member!);
+    expect(orderHistory.cashSummary).toEqual({
+      fulfilledCount: 1,
+      fulfilledValueVnd: 10_000,
+    });
   });
 
   it('sacrifices one fulfilled mascot for each missing Streak day', async () => {
@@ -992,6 +1032,7 @@ describe('authorization matrix', () => {
         category: 'ACHIEVEMENT',
         requiredCcLevel: 0,
         achievementId: String(created.achievement.id),
+        requiresApproval: true,
       },
       actor,
     );

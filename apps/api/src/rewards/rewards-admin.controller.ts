@@ -40,6 +40,7 @@ const rewardSchema = z
     cashValueVnd: z.coerce.number().int().positive().max(100_000_000).nullable().default(null),
     category: z.enum(['STANDARD', 'MASCOT', 'ACHIEVEMENT']).default('STANDARD'),
     requiredCcLevel: z.coerce.number().int().min(0).max(10_000).default(0),
+    requiresApproval: z.boolean().default(false),
     achievementId: z.string().uuid().nullable().default(null),
   })
   .superRefine((input, context) => {
@@ -55,6 +56,13 @@ const rewardSchema = z
         code: 'custom',
         path: ['cashValueVnd'],
         message: 'Danh hiệu không thể đồng thời là quà tiền mặt',
+      });
+    }
+    if (input.cashValueVnd !== null && input.requiresApproval) {
+      context.addIssue({
+        code: 'custom',
+        path: ['requiresApproval'],
+        message: 'Quy đổi tiền mặt được hoàn tất tự động, không cần duyệt',
       });
     }
   });
@@ -88,7 +96,7 @@ export class RewardsAdminController {
     return {
       orders: await this.database.sql`
         SELECT orders.*, users.display_name, users.full_name, rewards.name AS reward_name,
-          rewards.cash_value_vnd
+          rewards.cash_value_vnd, rewards.requires_approval
         FROM reward_orders AS orders
         JOIN users ON users.id = orders.user_id
         JOIN rewards ON rewards.id = orders.reward_id
@@ -174,6 +182,7 @@ export class RewardsAdminController {
               stock = ${input.stock}, active = ${input.active}, image_url = ${input.imageUrl},
               cash_value_vnd = ${input.cashValueVnd},
               category = ${input.category}, required_cc_level = ${input.requiredCcLevel},
+              requires_approval = ${input.requiresApproval},
               achievement_id = ${input.achievementId},
               updated_at = now()
             WHERE id = ${id} RETURNING *
@@ -181,12 +190,13 @@ export class RewardsAdminController {
         : await transaction`
             INSERT INTO rewards (
               name, description, cost, stock, active, image_url, cash_value_vnd,
-              category, required_cc_level, achievement_id
+              category, required_cc_level, requires_approval, achievement_id
             )
             VALUES (
               ${input.name}, ${input.description}, ${input.cost}, ${input.stock},
               ${input.active}, ${input.imageUrl}, ${input.cashValueVnd},
-              ${input.category}, ${input.requiredCcLevel}, ${input.achievementId}
+              ${input.category}, ${input.requiredCcLevel}, ${input.requiresApproval},
+              ${input.achievementId}
             ) RETURNING *
           `;
       if (!reward) throw new BadRequestException('Không tìm thấy phần thưởng');

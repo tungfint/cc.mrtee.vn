@@ -108,6 +108,13 @@ export class InsightsController {
           COALESCE(skill.cc_level, 800)::text AS cc_level,
           COALESCE(wallet.balance, 0)::text AS wallet_balance,
           COALESCE(points.cc_point, 0)::text AS cc_point,
+          COALESCE((
+            SELECT sum(rewards.cash_value_vnd)
+            FROM reward_orders AS cash_orders
+            JOIN rewards ON rewards.id = cash_orders.reward_id
+            WHERE cash_orders.user_id = users.id AND cash_orders.status = 'FULFILLED'
+              AND rewards.cash_value_vnd IS NOT NULL
+          ), 0)::text AS cash_received_vnd,
           (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves,
           (SELECT max(rating_snapshot)::int FROM user_problem_solves WHERE user_id = users.id)
             AS highest_problem_rating,
@@ -195,6 +202,7 @@ export class InsightsController {
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
         WHERE orders.user_id = ${user.userId} AND orders.status = 'FULFILLED'
           AND rescues.id IS NULL AND rewards.category <> 'ACHIEVEMENT'
+          AND rewards.cash_value_vnd IS NULL
         GROUP BY rewards.id
         ORDER BY max(orders.reviewed_at) DESC NULLS LAST LIMIT 12
       `,

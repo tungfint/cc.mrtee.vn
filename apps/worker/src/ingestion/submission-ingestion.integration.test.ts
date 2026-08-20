@@ -318,6 +318,57 @@ describe('submission ingestion', () => {
     ).rejects.toThrow('append-only');
   });
 
+  it('increases CC Level, CC Point and CC Balance after an eligible rated first solve', async () => {
+    const [user] = await client.connection<{ id: string }[]>`
+      INSERT INTO users (full_name, display_name) VALUES ('Progress', 'Progress') RETURNING id
+    `;
+    if (!user) throw new Error('Missing progress fixture user');
+
+    for (let index = 0; index < 40; index += 1) {
+      const historical = await service.ingest(
+        user.id,
+        makeSubmission({
+          id: 10_000 + index,
+          problem: {
+            ...makeSubmission().problem,
+            contestId: 20_000 + index,
+            rating: 1400,
+          },
+        }),
+      );
+      await rewards.process(user.id, historical, null);
+    }
+    const [before] = await client.connection<{ cc_level: string }[]>`
+      SELECT cc_level::text FROM user_skill_state WHERE user_id = ${user.id}
+    `;
+    if (!before) throw new Error('Missing CC Level before new solve');
+
+    const accepted = await service.ingest(
+      user.id,
+      makeSubmission({
+        id: 20_100,
+        problem: { ...makeSubmission().problem, contestId: 30_100, rating: 1600 },
+      }),
+    );
+    const result = await rewards.process(user.id, accepted, new Date(0));
+    const [after] = await client.connection<
+      { cc_level: string; cc_point: string; cc_balance: string }[]
+    >`
+      SELECT skill.cc_level::text,
+        COALESCE((SELECT sum(amount) FROM point_transactions
+          WHERE user_id = ${user.id} AND type = 'EARN'), 0)::text AS cc_point,
+        wallets.balance::text AS cc_balance
+      FROM user_skill_state AS skill
+      JOIN user_wallets AS wallets ON wallets.user_id = skill.user_id
+      WHERE skill.user_id = ${user.id}
+    `;
+    expect(result).toMatchObject({ firstSolveCreated: true, awarded: true });
+    expect(result.amount).toBeGreaterThan(0);
+    expect(Number(after?.cc_level)).toBeGreaterThan(Number(before.cc_level));
+    expect(Number(after?.cc_point)).toBe(result.amount);
+    expect(after?.cc_balance).toBe(after?.cc_point);
+  });
+
   it('coordinates multiple schedulers and recovers due state after queue loss', async () => {
     const [user] = await client.connection<{ id: string }[]>`
       INSERT INTO users (full_name, display_name) VALUES ('Scheduled', 'Scheduled') RETURNING id

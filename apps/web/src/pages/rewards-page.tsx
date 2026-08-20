@@ -1,4 +1,5 @@
 ﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 import { api, formatNumber, formatVnd } from '../lib/api';
 
@@ -18,17 +19,28 @@ interface Reward {
   achievement_tier: string | null;
   achievement_color: string | null;
   owned_quantity: number;
+  requires_approval: boolean;
+}
+
+interface RewardCatalog {
+  rewards: Reward[];
+  walletBalance: string | null;
+}
+
+interface RedeemResult {
+  order: { id: string; status: string };
+  replayed: boolean;
 }
 
 export default function RewardsPage() {
   const queryClient = useQueryClient();
   const rewards = useQuery({
     queryKey: ['rewards'],
-    queryFn: () => api<{ rewards: Reward[] }>('/rewards'),
+    queryFn: () => api<RewardCatalog>('/rewards'),
   });
   const redeem = useMutation({
     mutationFn: (id: string) =>
-      api(`/rewards/${id}/redeem`, {
+      api<RedeemResult>(`/rewards/${id}/redeem`, {
         method: 'POST',
         body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
       }),
@@ -50,6 +62,8 @@ export default function RewardsPage() {
     ) ?? [];
   const achievementRewards =
     rewards.data?.rewards.filter((reward) => reward.category === 'ACHIEVEMENT') ?? [];
+  const walletBalance = rewards.data?.walletBalance ?? null;
+  const walletBalanceValue = walletBalance === null ? null : Number(walletBalance);
   const redeemReward = (reward: Reward) => {
     if (window.confirm(`Đổi “${reward.name}” với ${formatNumber(reward.cost)} CC Balance?`)) {
       redeem.mutate(reward.id);
@@ -62,10 +76,20 @@ export default function RewardsPage() {
         eyebrow="REWARD STORE"
         title="Đổi nỗ lực thành trải nghiệm"
         detail="Đổi quà chỉ trừ CC Balance; CC Point, CC Level và thành tích của bạn được giữ nguyên."
+        action={
+          walletBalance !== null ? (
+            <div className="reward-balance-hero">
+              <span>CC Balance hiện có</span>
+              <strong>◈ {formatNumber(walletBalance, 2)}</strong>
+            </div>
+          ) : undefined
+        }
       />
       {redeem.isSuccess && (
         <p className="notice success">
-          Đã tạo yêu cầu đổi thưởng. Bạn có thể theo dõi tại “Quà của tôi”.
+          {redeem.data?.order?.status === 'FULFILLED'
+            ? 'Đổi thưởng thành công. Phần thưởng đã được cập nhật ngay vào tài khoản.'
+            : 'Đã tạo yêu cầu đổi thưởng. Bạn có thể theo dõi tại “Quà của tôi”.'}
         </p>
       )}
       {redeem.error && <p className="notice error">{redeem.error.message}</p>}
@@ -86,6 +110,7 @@ export default function RewardsPage() {
                 title="Đồng đội đáng yêu của dân Cầy Cốt"
                 onRedeem={redeemReward}
                 pending={redeem.isPending}
+                walletBalance={walletBalanceValue}
               />
             )}
             {achievementRewards.length > 0 && (
@@ -96,6 +121,7 @@ export default function RewardsPage() {
                 title="Dấu ấn cho hành trình bền bỉ"
                 onRedeem={redeemReward}
                 pending={redeem.isPending}
+                walletBalance={walletBalanceValue}
               />
             )}
             {regularRewards.length > 0 && (
@@ -106,40 +132,61 @@ export default function RewardsPage() {
                 title="Chọn món quà phù hợp với bạn"
                 onRedeem={redeemReward}
                 pending={redeem.isPending}
+                walletBalance={walletBalanceValue}
               />
             )}
           </div>
 
           {cashRewards.length > 0 && (
-            <aside className="panel cash-tier-panel overflow-hidden">
-              <div className="cash-tier-heading">
-                <span className="cash-tier-icon">₫</span>
-                <div>
-                  <p className="eyebrow">QUY ĐỔI TIỀN MẶT</p>
-                  <h2>CC Balance thành tiền</h2>
-                  <p>Chọn một mức phù hợp với số dư hiện có.</p>
-                </div>
-              </div>
-              <div className="cash-tier-list">
-                {cashRewards.map((reward) => (
-                  <div className="cash-tier-row" key={reward.id}>
-                    <div>
-                      <span>◈ {formatNumber(reward.cost)}</span>
-                      <strong>{formatVnd(reward.cash_value_vnd)}</strong>
-                    </div>
-                    <button
-                      className="button-primary"
-                      disabled={redeem.isPending}
-                      onClick={() => redeemReward(reward)}
-                      type="button"
-                    >
-                      Đổi
-                    </button>
+            <div className="reward-side-column">
+              <aside className="panel cash-tier-panel overflow-hidden">
+                <div className="cash-tier-heading">
+                  <span className="cash-tier-icon">₫</span>
+                  <div>
+                    <p className="eyebrow">QUY ĐỔI TIỀN MẶT</p>
+                    <h2>CC Balance thành tiền</h2>
+                    <p>Chọn một mức phù hợp với số dư hiện có.</p>
                   </div>
-                ))}
-              </div>
-              <p className="cash-tier-note">Admin sẽ xác nhận khi quà tiền đã được gửi.</p>
-            </aside>
+                </div>
+                <div className="cash-tier-list">
+                  {cashRewards.map((reward) => {
+                    const canAfford =
+                      walletBalanceValue === null || walletBalanceValue >= Number(reward.cost);
+                    return (
+                      <div
+                        className={`cash-tier-row ${canAfford ? '' : 'unaffordable'}`}
+                        key={reward.id}
+                      >
+                        <div>
+                          <span>◈ {formatNumber(reward.cost)}</span>
+                          <strong>{formatVnd(reward.cash_value_vnd)}</strong>
+                        </div>
+                        <button
+                          className="button-primary"
+                          disabled={redeem.isPending || !canAfford}
+                          onClick={() => redeemReward(reward)}
+                          type="button"
+                        >
+                          {canAfford ? 'Đổi' : 'Chưa đủ'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="cash-tier-note">
+                  Đủ CC Balance là quy đổi thành công ngay, không cần chờ Admin duyệt.
+                </p>
+              </aside>
+              <aside className="panel reward-wallet-panel">
+                <div className="reward-wallet-icon">◈</div>
+                <div>
+                  <span>SỐ DƯ CỦA BẠN</span>
+                  <strong>{formatNumber(walletBalance ?? 0, 2)} CC Balance</strong>
+                  <p>Phần thưởng không yêu cầu xác nhận sẽ được ghi nhận ngay sau khi đổi.</p>
+                  <Link to="/orders">Xem Quà của tôi →</Link>
+                </div>
+              </aside>
+            </div>
           )}
         </div>
       )}
@@ -153,6 +200,7 @@ function RewardSection({
   detail,
   rewards,
   pending,
+  walletBalance,
   onRedeem,
 }: {
   eyebrow: string;
@@ -160,6 +208,7 @@ function RewardSection({
   detail: string;
   rewards: Reward[];
   pending: boolean;
+  walletBalance: number | null;
   onRedeem: (reward: Reward) => void;
 }) {
   return (
@@ -219,11 +268,15 @@ function RewardSection({
                 </strong>
                 <button
                   className="button-primary"
-                  disabled={pending}
+                  disabled={
+                    pending || (walletBalance !== null && walletBalance < Number(reward.cost))
+                  }
                   onClick={() => onRedeem(reward)}
                   type="button"
                 >
-                  Đổi ngay
+                  {walletBalance !== null && walletBalance < Number(reward.cost)
+                    ? 'Chưa đủ CC Balance'
+                    : 'Đổi ngay'}
                 </button>
               </div>
             </div>

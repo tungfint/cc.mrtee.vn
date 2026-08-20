@@ -28,7 +28,11 @@ export class RewardsController {
   @OptionalAuth()
   @Get('rewards')
   async catalog(@OptionalUser() user?: AuthUser) {
-    return { rewards: await this.rewards.catalog(user?.userId) };
+    const [rewards, walletBalance] = await Promise.all([
+      this.rewards.catalog(user?.userId),
+      this.rewards.walletBalance(user?.userId),
+    ]);
+    return { rewards, walletBalance };
   }
 
   @Post('rewards/:id/redeem')
