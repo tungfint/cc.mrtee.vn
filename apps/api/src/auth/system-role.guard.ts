@@ -14,7 +14,11 @@ export class SystemRoleGuard implements CanActivate {
     );
     if (!roles?.length) return true;
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    if (!request.auth || !roles.includes(request.auth.systemRole)) {
+    const authorized =
+      request.auth &&
+      (roles.includes(request.auth.systemRole) ||
+        (roles.includes('SYSTEM_ADMIN') && request.auth.systemRole === 'ADMIN'));
+    if (!authorized) {
       throw new ForbiddenException('Không đủ quyền hệ thống');
     }
     return true;

@@ -7,7 +7,7 @@ export interface AuthUser {
   sessionId: string;
   userId: string;
   displayName: string;
-  systemRole: 'USER' | 'SYSTEM_ADMIN';
+  systemRole: 'USER' | 'ADMIN' | 'SYSTEM_ADMIN';
   csrfTokenHash: string;
   mustChangePassword?: boolean;
 }

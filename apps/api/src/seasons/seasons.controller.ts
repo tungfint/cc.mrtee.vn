@@ -36,7 +36,7 @@ export class SeasonsController {
         AND memberships.user_id = ${user.userId}
         AND memberships.status = 'ACTIVE'
       WHERE seasons.organization_id IS NULL
-        OR ${user.systemRole === 'SYSTEM_ADMIN'}
+        OR ${user.systemRole !== 'USER'}
         OR memberships.id IS NOT NULL
       ORDER BY seasons.start_at DESC
     `;
@@ -52,7 +52,7 @@ export class SeasonsController {
     if (parsed.data.organizationId) {
       const access = await this.authorization.organizationAccess(parsed.data.organizationId, actor);
       this.authorization.assertCanManage(access, actor);
-    } else if (actor.systemRole !== 'SYSTEM_ADMIN') {
+    } else if (actor.systemRole === 'USER') {
       throw new BadRequestException('Chỉ system admin được tạo season toàn hệ thống');
     }
 
@@ -109,7 +109,7 @@ export class SeasonsController {
     if (current.organization_id) {
       const access = await this.authorization.organizationAccess(current.organization_id, actor);
       this.authorization.assertCanManage(access, actor);
-    } else if (actor.systemRole !== 'SYSTEM_ADMIN') {
+    } else if (actor.systemRole === 'USER') {
       throw new BadRequestException('Không đủ quyền');
     }
     const allowed =

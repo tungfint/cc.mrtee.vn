@@ -426,15 +426,16 @@ export default function StudentProfilePage() {
             </div>
           </section>
         </div>
-        {(isOwner || session.data?.user.systemRole === 'SYSTEM_ADMIN') && (
+        {(isOwner || session.data?.user.systemRole !== 'USER') && (
           <section className="panel point-history-panel p-6">
             <div className="section-heading">
               <div>
                 <p className="eyebrow">LỊCH SỬ ĐIỂM</p>
                 <h2>Biến động CC Point và CC Balance</h2>
                 <p>
-                  Bài first-solve có rating có thể tăng CC Level; bài đủ điều kiện thưởng sẽ cộng
-                  đồng thời CC Point và CC Balance. Bài unrated chỉ ghi nhận hoạt động/Streak.
+                  Mỗi first-solve có rating đều đóng góp vào năng lực, nhưng CC Level chỉ đổi khi
+                  tổng mức hệ thống tính vượt mức hiện tại/CC Base. Bài đủ điều kiện thưởng cộng
+                  đồng thời CC Point và CC Balance; bài unrated chỉ ghi nhận hoạt động/Streak.
                 </p>
               </div>
               <strong>{pointHistory.length} giao dịch gần nhất</strong>

@@ -50,7 +50,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export interface SessionUser {
   userId: string;
   displayName: string;
-  systemRole: 'USER' | 'SYSTEM_ADMIN';
+  systemRole: 'USER' | 'ADMIN' | 'SYSTEM_ADMIN';
   mustChangePassword: boolean;
 }
 

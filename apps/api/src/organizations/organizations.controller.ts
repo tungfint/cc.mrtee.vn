@@ -88,7 +88,7 @@ export class OrganizationsController {
     const id = this.uuid(idInput);
     const access = await this.authorization.organizationAccess(id, user);
     this.authorization.assertCanView(access, user);
-    if (user.systemRole !== 'SYSTEM_ADMIN' && !access.membershipRole) {
+    if (user.systemRole === 'USER' && !access.membershipRole) {
       throw new BadRequestException('Chỉ thành viên được xem danh sách thành viên');
     }
     const members = await this.database.sql`

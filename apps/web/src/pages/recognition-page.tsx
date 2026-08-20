@@ -55,7 +55,7 @@ const VI_FONT = '"Segoe UI", "Noto Sans", Arial, sans-serif';
 
 export default function RecognitionPage() {
   const session = useSession();
-  const isAdmin = session.data?.user.systemRole === 'SYSTEM_ADMIN';
+  const isAdmin = session.data?.user.systemRole !== 'USER';
   const [studentId, setStudentId] = useState('');
   const [hasImage, setHasImage] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -72,7 +72,7 @@ export default function RecognitionPage() {
       students.data?.users.filter(
         (student) =>
           student.status === 'ACTIVE' &&
-          (student.system_role === 'SYSTEM_ADMIN' ||
+          (['ADMIN', 'SYSTEM_ADMIN'].includes(student.system_role) ||
             !student.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))),
       ) ?? [],
     [students.data],
@@ -225,7 +225,7 @@ export default function RecognitionPage() {
             <div className="recognition-metrics">
               <Metric
                 label="CC Level"
-                value={`⚡ ${formatNumber(recognition.data.profile.cc_level, 2)}`}
+                value={`⚡ ${formatNumber(recognition.data.profile.cc_level)}`}
               />
               <Metric
                 label="CC Point"
@@ -264,10 +264,6 @@ export default function RecognitionPage() {
                   {recognition.data.profile.highest_problem_rating ?? '—'} ·{' '}
                   {recognition.data.profile.highest_problem_name ?? 'Chưa có'}
                 </strong>
-              </div>
-              <div>
-                <span>Quà tiền đã nhận</span>
-                <strong>{formatVnd(recognition.data.profile.cash_received_vnd)}</strong>
               </div>
             </div>
             <div className="recognition-tags">
@@ -444,10 +440,10 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
 
   roundRect(context, 78, 72, 350, 54, 27, mixHex(accent, '#ffffff', 0.86));
   context.fillStyle = accent;
-  context.font = `900 20px ${VI_FONT}`;
+  context.font = `900 22px ${VI_FONT}`;
   context.fillText('✦  CẦY CỐT · MRTEE.VN', 106, 107);
   context.fillStyle = muted;
-  context.font = `700 15px ${VI_FONT}`;
+  context.font = `700 17px ${VI_FONT}`;
   context.textAlign = 'right';
   context.fillText('ACHIEVEMENT CARD  /  01', 1110, 105);
   context.textAlign = 'start';
@@ -492,13 +488,13 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   }
 
   context.fillStyle = accent;
-  context.font = `900 18px ${VI_FONT}`;
+  context.font = `900 20px ${VI_FONT}`;
   context.fillText('VINH DANH HÀNH TRÌNH CẦY CỐT', 410, 194);
   context.fillStyle = ink;
   context.font = `950 58px ${VI_FONT}`;
   fitText(context, data.profile.display_name, 410, 260, 650, 58);
   context.fillStyle = muted;
-  context.font = `650 21px ${VI_FONT}`;
+  context.font = `650 23px ${VI_FONT}`;
   fitText(
     context,
     data.profile.codeforces_handle
@@ -509,20 +505,23 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
     650,
     21,
   );
-  roundRect(context, 410, 334, 410, 58, 29, accent);
+  roundRect(context, 410, 334, 310, 58, 29, accent);
   context.fillStyle = '#ffffff';
-  context.font = `900 23px ${VI_FONT}`;
-  context.fillText(
+  context.font = `900 21px ${VI_FONT}`;
+  fitText(
+    context,
     `${data.profile.level_rank_icon ?? '✦'}  ${data.profile.level_rank_name ?? 'KHỞI ĐẦU'}`,
     438,
     371,
+    252,
+    21,
   );
   context.fillStyle = accent;
   context.font = `950 82px ${VI_FONT}`;
   context.textAlign = 'right';
-  context.fillText(formatNumber(data.profile.cc_level, 2), 1070, 375);
+  context.fillText(formatNumber(data.profile.cc_level), 1070, 375);
   context.fillStyle = muted;
-  context.font = `800 15px ${VI_FONT}`;
+  context.font = `800 17px ${VI_FONT}`;
   context.fillText('CC LEVEL', 1070, 401);
   context.textAlign = 'start';
 
@@ -564,10 +563,9 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
       `${data.profile.solves_last_30_days} bài`,
       `Streak dài nhất ${data.streak.longest_streak} ngày`,
     ],
-    ['QUÀ TIỀN ĐÃ NHẬN', formatVnd(data.profile.cash_received_vnd), 'Thành quả đã quy đổi'],
   ];
   facts.forEach(([label, value, note], index) => {
-    const x = 104 + index * 255;
+    const x = 104 + index * 340;
     if (index) {
       context.strokeStyle = 'rgba(255,255,255,0.15)';
       context.beginPath();
@@ -576,18 +574,18 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
       context.stroke();
     }
     context.fillStyle = index === 0 ? '#f9a8d4' : '#67e8f9';
-    context.font = `850 13px ${VI_FONT}`;
+    context.font = `850 15px ${VI_FONT}`;
     context.fillText(label ?? '', x, 658);
     context.fillStyle = '#ffffff';
-    context.font = `900 22px ${VI_FONT}`;
-    fitText(context, value ?? '', x, 699, 220, 22);
+    context.font = `900 24px ${VI_FONT}`;
+    fitText(context, value ?? '', x, 699, 290, 24);
     context.fillStyle = '#a8b4c7';
-    context.font = `650 13px ${VI_FONT}`;
-    fitText(context, note ?? '', x, 728, 220, 13);
+    context.font = `650 15px ${VI_FONT}`;
+    fitText(context, note ?? '', x, 728, 290, 15);
   });
 
   context.fillStyle = muted;
-  context.font = `850 14px ${VI_FONT}`;
+  context.font = `850 16px ${VI_FONT}`;
   context.fillText('VÙNG NĂNG LỰC NỔI BẬT', 82, 808);
   drawTagCloud(context, data.topTags.slice(0, 6), 82, 828, accent, cyan);
 
@@ -604,21 +602,19 @@ async function drawRecognition(canvas: HTMLCanvasElement, data: Recognition) {
   context.font = `950 56px ${VI_FONT}`;
   context.fillText('“', 104, 1314);
   context.fillStyle = ink;
-  context.font = `800 20px ${VI_FONT}`;
+  context.font = `800 22px ${VI_FONT}`;
   drawWrappedText(context, quote, 158, 1290, 900, 30, 2);
   context.fillStyle = muted;
-  context.font = `700 14px ${VI_FONT}`;
+  context.font = `700 16px ${VI_FONT}`;
   context.textAlign = 'right';
   context.fillText(`— ${author}`, 1080, 1355);
   context.textAlign = 'start';
 
   context.fillStyle = accent;
-  context.beginPath();
-  context.arc(92, 1415, 6, 0, Math.PI * 2);
-  context.fill();
+  context.font = `900 16px ${VI_FONT}`;
+  context.fillText('CẦY CỐT · MRTEE.VN', 82, 1420);
   context.fillStyle = muted;
-  context.font = `700 14px ${VI_FONT}`;
-  context.fillText('Mỗi Accepted là một dấu mốc có thể chứng minh.', 112, 1420);
+  context.font = `700 16px ${VI_FONT}`;
   context.textAlign = 'right';
   context.fillText(
     new Intl.DateTimeFormat('vi-VN', { dateStyle: 'long' }).format(new Date(data.generatedAt)),
@@ -713,7 +709,7 @@ function drawMetricCard(
   context.fillText(icon, x + 40, y + 49);
   context.textAlign = 'start';
   context.fillStyle = '#64748b';
-  context.font = `850 13px ${VI_FONT}`;
+  context.font = `850 15px ${VI_FONT}`;
   context.fillText(label, x + 76, y + 45);
   context.fillStyle = '#172033';
   context.font = `950 28px ${VI_FONT}`;
@@ -734,7 +730,7 @@ function drawTagCloud(
     : [{ tag: 'Bắt đầu hành trình', solved_count: 0, max_rating: null }];
   values.forEach((tag, index) => {
     const text = `${tag.tag} · ${tag.solved_count}`;
-    context.font = `800 15px ${VI_FONT}`;
+    context.font = `800 17px ${VI_FONT}`;
     const pillWidth = Math.min(205, context.measureText(text).width + 34);
     if (cursor + pillWidth > 1122) return;
     const color = index % 2 ? cyan : accent;
@@ -779,8 +775,8 @@ function drawAchievementPanel(
     context.font = `800 17px ${VI_FONT}`;
     fitText(context, award.title, x + 54, rowY + 13, width - 80, 17);
     context.fillStyle = '#64748b';
-    context.font = `650 13px ${VI_FONT}`;
-    fitText(context, award.season_name, x + 54, rowY + 34, width - 80, 13);
+    context.font = `650 15px ${VI_FONT}`;
+    fitText(context, award.season_name, x + 54, rowY + 36, width - 80, 15);
   });
 }
 
@@ -824,14 +820,14 @@ async function drawRewardPanel(
     context.font = `800 17px ${VI_FONT}`;
     fitText(context, reward.name, x + 78, rowY + 18, width - 106, 17);
     context.fillStyle = '#64748b';
-    context.font = `650 13px ${VI_FONT}`;
+    context.font = `650 15px ${VI_FONT}`;
     fitText(
       context,
       reward.cash_value_vnd ? formatVnd(reward.cash_value_vnd) : reward.description,
       x + 78,
       rowY + 39,
       width - 106,
-      13,
+      15,
     );
   }
 }

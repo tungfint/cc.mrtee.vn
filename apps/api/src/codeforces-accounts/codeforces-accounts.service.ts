@@ -224,7 +224,7 @@ export class CodeforcesAccountsService {
   }): Promise<{ scope: string; matched: number; queued: number; skipped: number }> {
     let accounts: AccountRow[];
     if (input.scope === 'ALL') {
-      if (input.actor.systemRole !== 'SYSTEM_ADMIN') {
+      if (input.actor.systemRole === 'USER') {
         throw new ForbiddenException('Chỉ System Admin được đồng bộ toàn hệ thống');
       }
       accounts = await this.database.sql<AccountRow[]>`
@@ -235,7 +235,7 @@ export class CodeforcesAccountsService {
       `;
     } else if (input.scope === 'USER') {
       if (!input.targetUserId) throw new BadRequestException('Chọn tài khoản cần đồng bộ');
-      if (input.actor.systemRole === 'SYSTEM_ADMIN') {
+      if (input.actor.systemRole !== 'USER') {
         accounts = await this.database.sql<AccountRow[]>`
           SELECT accounts.* FROM codeforces_accounts AS accounts
           JOIN users ON users.id = accounts.user_id
@@ -317,7 +317,7 @@ export class CodeforcesAccountsService {
     const access = input.organizationId
       ? await this.authorization.organizationAccess(input.organizationId, input.actor)
       : null;
-    if (input.actor.systemRole !== 'SYSTEM_ADMIN') {
+    if (input.actor.systemRole === 'USER') {
       if (!input.organizationId || !access) {
         throw new ForbiddenException('Giáo viên chỉ được xác minh học sinh trong lớp của mình');
       }
@@ -334,7 +334,7 @@ export class CodeforcesAccountsService {
     }
 
     const verificationStatus =
-      input.actor.systemRole === 'SYSTEM_ADMIN' || access?.membershipRole === 'ORG_ADMIN'
+      input.actor.systemRole !== 'USER' || access?.membershipRole === 'ORG_ADMIN'
         ? 'ADMIN_VERIFIED'
         : 'TEACHER_VERIFIED';
     return this.database.sql.begin(async (transaction) => {
@@ -388,7 +388,7 @@ export class CodeforcesAccountsService {
     actor: AuthUser;
     reason: string;
   }): Promise<{ requested: number; verified: number; skipped: number; results: object[] }> {
-    if (input.actor.systemRole !== 'SYSTEM_ADMIN' && !input.organizationId) {
+    if (input.actor.systemRole === 'USER' && !input.organizationId) {
       throw new ForbiddenException('Giáo viên phải chọn lớp cần xác minh');
     }
     const targetUserIds = [...new Set(input.targetUserIds)];
@@ -433,7 +433,7 @@ export class CodeforcesAccountsService {
     targetUserId: string,
     actor: AuthUser,
   ): Promise<void> {
-    if (actor.systemRole === 'SYSTEM_ADMIN') return;
+    if (actor.systemRole !== 'USER') return;
     if (!organizationId) {
       throw new ForbiddenException('Admin lớp phải chọn lớp của học sinh');
     }

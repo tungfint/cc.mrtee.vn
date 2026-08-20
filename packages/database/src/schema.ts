@@ -29,7 +29,7 @@ const citext = customType<{ data: string }>({
 });
 
 export const userStatus = pgEnum('user_status', ['ACTIVE', 'INACTIVE', 'SUSPENDED']);
-export const systemRole = pgEnum('system_role', ['USER', 'SYSTEM_ADMIN']);
+export const systemRole = pgEnum('system_role', ['USER', 'ADMIN', 'SYSTEM_ADMIN']);
 export const organizationVisibility = pgEnum('organization_visibility', [
   'PUBLIC',
   'CLOSED',
@@ -86,6 +86,7 @@ export const users = pgTable(
     avatarUrl: text('avatar_url'),
     status: userStatus('status').default('ACTIVE').notNull(),
     systemRole: systemRole('system_role').default('USER').notNull(),
+    leaderboardVisible: boolean('leaderboard_visible').default(true).notNull(),
     timezone: varchar('timezone', { length: 100 }).default('Asia/Ho_Chi_Minh').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

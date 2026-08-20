@@ -34,8 +34,8 @@ async function main(): Promise<void> {
         TRUNCATE users, organizations, rewards, cf_problems RESTART IDENTITY CASCADE
       `;
       const [administrator] = await transaction<{ id: string }[]>`
-        INSERT INTO users (full_name, display_name, system_role)
-        VALUES (${input.DEV_ADMIN_NAME}, ${input.DEV_ADMIN_NAME}, 'SYSTEM_ADMIN')
+        INSERT INTO users (full_name, display_name, system_role, leaderboard_visible)
+        VALUES (${input.DEV_ADMIN_NAME}, ${input.DEV_ADMIN_NAME}, 'SYSTEM_ADMIN', false)
         RETURNING id
       `;
       if (!administrator) throw new Error('Could not create the local administrator');

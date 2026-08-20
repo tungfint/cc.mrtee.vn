@@ -30,16 +30,18 @@ export function AppShell({ user }: { user: SessionUser }) {
       }>('/me'),
   });
   const canAdmin =
-    user.systemRole === 'SYSTEM_ADMIN' ||
+    user.systemRole !== 'USER' ||
     profile.data?.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
   const accountRoleLabel =
     user.systemRole === 'SYSTEM_ADMIN'
-      ? 'System Admin · Học sinh'
-      : profile.data?.memberships.some(({ role }) => role === 'ORG_ADMIN')
-        ? 'Quản trị lớp học'
-        : profile.data?.memberships.some(({ role }) => role === 'TEACHER')
-          ? 'Giáo viên'
-          : 'Học sinh';
+      ? 'S-Admin · Học sinh'
+      : user.systemRole === 'ADMIN'
+        ? 'Admin · Học sinh'
+        : profile.data?.memberships.some(({ role }) => role === 'ORG_ADMIN')
+          ? 'Quản trị lớp học'
+          : profile.data?.memberships.some(({ role }) => role === 'TEACHER')
+            ? 'Giáo viên'
+            : 'Học sinh';
   const logout = useMutation({
     mutationFn: () => api('/auth/logout', { method: 'POST' }),
     onSuccess: () => {

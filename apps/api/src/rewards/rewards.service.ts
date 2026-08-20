@@ -162,7 +162,7 @@ export class RewardsService {
       `;
       if (!order) throw new NotFoundException('Không tìm thấy đơn đổi thưởng');
       const isOwnerCancellation = status === 'CANCELLED' && order.user_id === actor.userId;
-      if (!isOwnerCancellation && actor.systemRole !== 'SYSTEM_ADMIN') {
+      if (!isOwnerCancellation && actor.systemRole === 'USER') {
         throw new BadRequestException('Không đủ quyền xử lý đơn đổi thưởng');
       }
       if (order.status === status) return { order, replayed: true };

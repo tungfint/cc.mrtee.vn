@@ -203,8 +203,7 @@ export class InsightsController {
   async studentProfile(@Param('userId') userIdInput: string, @OptionalUser() viewer?: AuthUser) {
     const userId = z.string().uuid().safeParse(userIdInput);
     if (!userId.success) throw new BadRequestException('ID học sinh không hợp lệ');
-    const canViewPointHistory =
-      viewer?.userId === userId.data || viewer?.systemRole === 'SYSTEM_ADMIN';
+    const canViewPointHistory = viewer?.userId === userId.data || viewer?.systemRole !== 'USER';
     return this.recognition(userId.data, canViewPointHistory);
   }
 
@@ -314,7 +313,7 @@ export class InsightsController {
         ORDER BY min_level DESC LIMIT 1
       ) AS level_rank ON true
       WHERE users.status = 'ACTIVE' AND (
-        users.system_role = 'SYSTEM_ADMIN' OR (
+        (users.system_role IN ('ADMIN', 'SYSTEM_ADMIN') AND users.leaderboard_visible = true) OR (
           users.system_role = 'USER' AND NOT EXISTS (
             SELECT 1 FROM organization_memberships AS staff_memberships
             WHERE staff_memberships.user_id = users.id
@@ -335,7 +334,7 @@ export class InsightsController {
       SELECT count(*)::text AS count FROM users
       ${organizationId ? this.database.sql`JOIN organization_memberships AS memberships ON memberships.user_id = users.id AND memberships.organization_id = ${organizationId} AND memberships.status = 'ACTIVE' AND memberships.role = 'MEMBER'` : this.database.sql``}
       WHERE users.status = 'ACTIVE' AND (
-        users.system_role = 'SYSTEM_ADMIN' OR (
+        (users.system_role IN ('ADMIN', 'SYSTEM_ADMIN') AND users.leaderboard_visible = true) OR (
           users.system_role = 'USER' AND NOT EXISTS (
             SELECT 1 FROM organization_memberships AS staff_memberships
             WHERE staff_memberships.user_id = users.id
@@ -396,7 +395,7 @@ export class InsightsController {
         WHERE seasons.status <> 'DRAFT' AND (
           seasons.organization_id IS NULL OR organizations.visibility = 'PUBLIC'
           OR (${Boolean(user)} AND organizations.visibility = 'CLOSED')
-          OR memberships.id IS NOT NULL OR ${user?.systemRole === 'SYSTEM_ADMIN'}
+          OR memberships.id IS NOT NULL OR ${user?.systemRole !== 'USER'}
         )
         ORDER BY seasons.start_at DESC
       `,
@@ -417,7 +416,7 @@ export class InsightsController {
         WHERE organizations.status = 'ACTIVE' AND (
           organizations.visibility = 'PUBLIC'
           OR (${Boolean(user)} AND organizations.visibility = 'CLOSED')
-          OR memberships.id IS NOT NULL OR ${user?.systemRole === 'SYSTEM_ADMIN'}
+          OR memberships.id IS NOT NULL OR ${user?.systemRole !== 'USER'}
         ) ORDER BY organizations.name
       `,
     };

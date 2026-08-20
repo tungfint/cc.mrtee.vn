@@ -105,13 +105,20 @@ describe('authorization matrix', () => {
         reward_min, reward_max, reward_midpoint_delta, reward_scale, effective_from
       ) VALUES ('v2.0', 0.95, 20, 800, 0.05, 30, 50, 80, now())
     `;
-    for (const name of ['member', 'teacher', 'orgAdmin', 'systemAdmin']) {
+    for (const name of ['member', 'teacher', 'orgAdmin', 'admin', 'otherAdmin', 'systemAdmin']) {
+      const systemRole =
+        name === 'systemAdmin'
+          ? 'SYSTEM_ADMIN'
+          : ['admin', 'otherAdmin'].includes(name)
+            ? 'ADMIN'
+            : 'USER';
       const [user] = await connection<{ id: string }[]>`
-        INSERT INTO users (full_name, display_name, system_role)
+        INSERT INTO users (full_name, display_name, system_role, leaderboard_visible)
         VALUES (
           ${name},
           ${name},
-          ${name === 'systemAdmin' ? 'SYSTEM_ADMIN' : 'USER'}
+          ${systemRole},
+          ${systemRole === 'USER'}
         ) RETURNING id
       `;
       if (!user) throw new Error('Failed to create authorization fixture');
@@ -268,6 +275,53 @@ describe('authorization matrix', () => {
       SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${userId}
     `;
     expect(skill).toMatchObject({ cc_base: '800.00', cc_level: '800.00' });
+  });
+
+  it('enforces the S-Admin and Admin account-management hierarchy', async () => {
+    const admin = authUser(ids.admin!, 'ADMIN');
+    const systemAdmin = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+
+    await expect(
+      usersController.updateUser(
+        ids.member!,
+        { displayName: 'Managed by Admin', reason: 'Admin manages a student' },
+        admin,
+      ),
+    ).resolves.toMatchObject({ user: { display_name: 'Managed by Admin' } });
+    await expect(
+      usersController.updateUser(
+        ids.otherAdmin!,
+        { displayName: 'Forbidden change', reason: 'Admin targets another admin' },
+        admin,
+      ),
+    ).rejects.toThrow('Admin không được sửa hoặc xoá tài khoản Admin/S-Admin');
+    await expect(
+      usersController.deleteUser(ids.systemAdmin!, admin, { reason: 'Forbidden delete' }),
+    ).rejects.toThrow('Admin không được sửa hoặc xoá tài khoản Admin/S-Admin');
+    await expect(
+      usersController.createUser(
+        {
+          email: 'forbidden-admin@example.com',
+          password: 'correct horse battery staple',
+          fullName: 'Forbidden Admin',
+          displayName: 'Forbidden Admin',
+          systemRole: 'ADMIN',
+        },
+        admin,
+      ),
+    ).rejects.toThrow('Admin chỉ được tạo tài khoản học sinh');
+    await expect(
+      usersController.updateUser(
+        ids.admin!,
+        { leaderboardVisible: true, reason: 'Admin opts into leaderboard' },
+        admin,
+      ),
+    ).resolves.toMatchObject({ user: { leaderboard_visible: true } });
+    await expect(
+      usersController.deleteUser(ids.otherAdmin!, systemAdmin, {
+        reason: 'S-Admin removes another admin',
+      }),
+    ).resolves.toMatchObject({ user: { status: 'INACTIVE' } });
   });
 
   it('keeps linked handles unverified until an authorized atomic verification', async () => {
@@ -678,10 +732,10 @@ describe('authorization matrix', () => {
     });
     expect(dashboard.streak).toMatchObject({ longest_streak: 0, current_streak: 0 });
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
-    expect(leaderboard.entries).toHaveLength(2);
+    expect(leaderboard.entries).toHaveLength(1);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
-    expect(leaderboard.total).toBe(2);
+    expect(leaderboard.total).toBe(1);
     const balanceLeaderboard = await insights.leaderboard({
       page: '1',
       pageSize: '2',

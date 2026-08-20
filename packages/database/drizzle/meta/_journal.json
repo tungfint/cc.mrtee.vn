@@ -85,6 +85,13 @@
       "when": 1787172916200,
       "tag": "0011_normal_sleepwalker",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787203234225,
+      "tag": "0012_worthless_wild_child",
+      "breakpoints": true
     }
   ]
 }

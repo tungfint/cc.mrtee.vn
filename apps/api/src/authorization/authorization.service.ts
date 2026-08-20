@@ -42,19 +42,19 @@ export class AuthorizationService {
   assertCanView(access: OrganizationAccess, user?: AuthUser): void {
     if (access.visibility === 'PUBLIC') return;
     if (!user) throw new ForbiddenException('Tổ chức này yêu cầu đăng nhập');
-    if (user.systemRole === 'SYSTEM_ADMIN') return;
+    if (user.systemRole !== 'USER') return;
     if (access.visibility === 'CLOSED') return;
     if (!access.membershipRole) throw new ForbiddenException('Không thuộc tổ chức riêng tư này');
   }
 
   assertCanManage(access: OrganizationAccess, user: AuthUser): void {
-    if (user.systemRole === 'SYSTEM_ADMIN' || access.membershipRole === 'ORG_ADMIN') return;
+    if (user.systemRole !== 'USER' || access.membershipRole === 'ORG_ADMIN') return;
     throw new ForbiddenException('Chỉ quản trị viên tổ chức được thực hiện thao tác này');
   }
 
   assertCanTeach(access: OrganizationAccess, user: AuthUser): void {
     if (
-      user.systemRole === 'SYSTEM_ADMIN' ||
+      user.systemRole !== 'USER' ||
       access.membershipRole === 'ORG_ADMIN' ||
       access.membershipRole === 'TEACHER'
     ) {

@@ -39,7 +39,7 @@ export class ScoringAdminController {
     if (!userId.success || !input.success) throw new BadRequestException('Dữ liệu không hợp lệ');
     const access = await this.authorization.organizationAccess(input.data.organizationId, actor);
     this.authorization.assertCanTeach(access, actor);
-    if (actor.systemRole !== 'SYSTEM_ADMIN') {
+    if (actor.systemRole === 'USER') {
       const [membership] = await this.database.sql`
         SELECT id FROM organization_memberships
         WHERE organization_id = ${input.data.organizationId}
@@ -99,12 +99,12 @@ export class ScoringAdminController {
     if (!organizationId.success || !limit.success) {
       throw new BadRequestException('Dữ liệu không hợp lệ');
     }
-    if (actor.systemRole !== 'SYSTEM_ADMIN') {
+    if (actor.systemRole === 'USER') {
       const access = await this.authorization.organizationAccess(organizationId.data, actor);
       this.authorization.assertCanTeach(access, actor);
     }
     const scope =
-      actor.systemRole === 'SYSTEM_ADMIN'
+      actor.systemRole !== 'USER'
         ? this.database.sql``
         : this.database.sql`
           WHERE logs.entity_id = ${organizationId.data}

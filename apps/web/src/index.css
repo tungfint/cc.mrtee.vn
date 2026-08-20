@@ -1237,7 +1237,7 @@ textarea:focus {
 .account-row,
 .organization-row {
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) 150px 160px 100px;
+  grid-template-columns: minmax(230px, 1fr) 135px 145px 145px 100px;
   align-items: center;
   gap: 14px;
   border-top: 1px solid var(--line);
@@ -1258,6 +1258,22 @@ textarea:focus {
 .compact-actions button {
   min-height: 38px;
   padding-inline: 13px;
+}
+
+.leaderboard-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.leaderboard-visibility-toggle input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
 }
 
 .password-input {
@@ -2956,7 +2972,7 @@ textarea:focus {
 .recognition-rank-banner small,
 .recognition-facts span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2964,13 +2980,13 @@ textarea:focus {
 
 .recognition-rank-banner strong {
   color: var(--recognition-accent);
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .recognition-rank-banner p {
   margin: 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .recognition-facts {
@@ -2990,7 +3006,7 @@ textarea:focus {
 
 .recognition-facts strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 13px;
   text-overflow: ellipsis;
 }
 

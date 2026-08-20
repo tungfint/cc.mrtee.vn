@@ -129,6 +129,7 @@ export class AuthService {
       fullName: string;
       displayName: string;
       systemRole?: AuthUser['systemRole'];
+      leaderboardVisible?: boolean;
       organizationId?: string;
       codeforcesHandle?: string;
       initialCcLevel?: number;
@@ -146,11 +147,12 @@ export class AuthService {
     const created = await this.database.sql.begin(async (transaction) => {
       const [user] = await transaction<{ id: string }[]>`
         WITH new_user AS (
-          INSERT INTO users (full_name, display_name, system_role)
+          INSERT INTO users (full_name, display_name, system_role, leaderboard_visible)
           VALUES (
             ${input.fullName.trim()},
             ${input.displayName.trim()},
-            ${input.systemRole ?? 'USER'}
+            ${input.systemRole ?? 'USER'},
+            ${input.leaderboardVisible ?? (input.systemRole === undefined || input.systemRole === 'USER')}
           )
           RETURNING id
         )

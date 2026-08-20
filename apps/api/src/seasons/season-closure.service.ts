@@ -56,7 +56,7 @@ export class SeasonClosureService {
     if (season.organization_id) {
       const access = await this.authorization.organizationAccess(season.organization_id, actor);
       this.authorization.assertCanManage(access, actor);
-    } else if (actor.systemRole !== 'SYSTEM_ADMIN') {
+    } else if (actor.systemRole === 'USER') {
       throw new BadRequestException('Không đủ quyền đóng season');
     }
     if (season.status !== 'CLOSING') {

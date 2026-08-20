@@ -51,6 +51,7 @@ interface UserAccount {
   avatar_url: string | null;
   status: string;
   system_role: string;
+  leaderboard_visible: boolean;
   initial_cc_level: string;
   cc_level: string;
   codeforces_handle: string | null;
@@ -305,7 +306,8 @@ function auditChanges(log: AuditLog) {
 export default function AdminPage() {
   const queryClient = useQueryClient();
   const session = useSession();
-  const isSystemAdmin = session.data?.user.systemRole === 'SYSTEM_ADMIN';
+  const isSystemAdmin = session.data?.user.systemRole !== 'USER';
+  const isSuperAdmin = session.data?.user.systemRole === 'SYSTEM_ADMIN';
   const [tab, setTab] = useState(isSystemAdmin ? 'accounts' : 'members');
   const [organizationId, setOrganizationId] = useState('');
   const [targetId, setTargetId] = useState('');
@@ -343,6 +345,7 @@ export default function AdminPage() {
   const [mustChangePassword, setMustChangePassword] = useState(true);
   const [fullName, setFullName] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [newSystemRole, setNewSystemRole] = useState<'USER' | 'ADMIN' | 'SYSTEM_ADMIN'>('USER');
   const [codeforcesHandle, setCodeforcesHandle] = useState('');
   const [initialCcLevel, setInitialCcLevel] = useState('800');
   const [classId, setClassId] = useState('');
@@ -657,7 +660,7 @@ export default function AdminPage() {
   const globalStudents =
     users.data?.users.filter((item) => {
       if (
-        item.system_role !== 'SYSTEM_ADMIN' &&
+        !['ADMIN', 'SYSTEM_ADMIN'].includes(item.system_role) &&
         item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))
       ) {
         return false;
@@ -689,7 +692,7 @@ export default function AdminPage() {
     }) ?? [];
   const selectableAccountStudents = accountRows.filter(
     (item) =>
-      (item.system_role === 'SYSTEM_ADMIN' ||
+      (['ADMIN', 'SYSTEM_ADMIN'].includes(item.system_role) ||
         !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))) &&
       Boolean(item.codeforces_handle) &&
       item.verification_status === 'UNVERIFIED',
@@ -851,7 +854,8 @@ export default function AdminPage() {
                         password,
                         fullName,
                         displayName,
-                        systemRole: 'USER',
+                        systemRole: isSuperAdmin ? newSystemRole : 'USER',
+                        leaderboardVisible: newSystemRole === 'USER',
                         initialCcLevel: Number(initialCcLevel),
                         mustChangePassword,
                         ...(classId ? { organizationId: classId } : {}),
@@ -861,7 +865,7 @@ export default function AdminPage() {
                   }}
                 >
                   <p className="eyebrow">NEW ACCOUNT</p>
-                  <h2 className="mt-2 text-xl font-black">Tạo tài khoản học sinh</h2>
+                  <h2 className="mt-2 text-xl font-black">Tạo tài khoản</h2>
                   <div className="form-grid mt-5">
                     <label className="field">
                       <span>Email</span>
@@ -897,6 +901,23 @@ export default function AdminPage() {
                         value={displayName}
                       />
                     </label>
+                    {isSuperAdmin && (
+                      <label className="field">
+                        <span>Quyền hệ thống</span>
+                        <select
+                          onChange={(event) =>
+                            setNewSystemRole(
+                              event.target.value as 'USER' | 'ADMIN' | 'SYSTEM_ADMIN',
+                            )
+                          }
+                          value={newSystemRole}
+                        >
+                          <option value="USER">Học sinh</option>
+                          <option value="ADMIN">Admin</option>
+                          <option value="SYSTEM_ADMIN">S-Admin</option>
+                        </select>
+                      </label>
+                    )}
                     <label className="field">
                       <span>Tài khoản Codeforces</span>
                       <input
@@ -969,11 +990,13 @@ export default function AdminPage() {
                       value={resetUserId}
                     >
                       <option value="">Chọn tài khoản</option>
-                      {users.data?.users.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.display_name} · {item.email}
-                        </option>
-                      ))}
+                      {users.data?.users
+                        .filter((item) => isSuperAdmin || item.system_role === 'USER')
+                        .map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.display_name} · {item.email}
+                          </option>
+                        ))}
                     </select>
                   </label>
                   <label className="field mt-4">
@@ -1243,13 +1266,17 @@ export default function AdminPage() {
                 ) : (
                   accountRows.map((item) => {
                     const isStudent =
-                      item.system_role === 'SYSTEM_ADMIN' ||
+                      ['ADMIN', 'SYSTEM_ADMIN'].includes(item.system_role) ||
                       !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
                     const canVerify =
                       isStudent &&
                       Boolean(item.codeforces_handle) &&
                       item.verification_status === 'UNVERIFIED';
                     const checked = selectedStudentIds.includes(item.id);
+                    const isPrivileged = ['ADMIN', 'SYSTEM_ADMIN'].includes(item.system_role);
+                    const canManageAccount = isSuperAdmin || !isPrivileged;
+                    const canChangeRankVisibility =
+                      isSuperAdmin || item.id === session.data?.user.userId;
                     return (
                       <div className="account-row" key={item.id}>
                         <div className="member">
@@ -1328,6 +1355,7 @@ export default function AdminPage() {
                             })
                           }
                           value={item.status}
+                          disabled={!canManageAccount}
                         >
                           <option>ACTIVE</option>
                           <option>INACTIVE</option>
@@ -1341,24 +1369,50 @@ export default function AdminPage() {
                               method: 'PATCH',
                               body: {
                                 systemRole: e.target.value,
+                                leaderboardVisible: e.target.value === 'USER',
                                 reason: 'Cập nhật quyền hệ thống từ trang quản trị',
                               },
                             })
                           }
                           value={item.system_role}
+                          disabled={!isSuperAdmin}
                         >
-                          <option>USER</option>
-                          <option>SYSTEM_ADMIN</option>
+                          <option value="USER">Học sinh</option>
+                          <option value="ADMIN">Admin</option>
+                          <option value="SYSTEM_ADMIN">S-Admin</option>
                         </select>
+                        {isPrivileged && (
+                          <label className="leaderboard-visibility-toggle">
+                            <input
+                              checked={item.leaderboard_visible}
+                              disabled={!canChangeRankVisibility}
+                              onChange={(event) =>
+                                mutation.mutate({
+                                  path: `/admin/users/${item.id}`,
+                                  method: 'PATCH',
+                                  body: {
+                                    leaderboardVisible: event.target.checked,
+                                    reason:
+                                      'Cập nhật hiển thị tài khoản quản trị trên bảng xếp hạng',
+                                  },
+                                })
+                              }
+                              type="checkbox"
+                            />
+                            Hiện trên BXH
+                          </label>
+                        )}
                         <div className="compact-actions">
-                          <button
-                            className="button-secondary"
-                            onClick={() => setEditingUser(item)}
-                            type="button"
-                          >
-                            Sửa
-                          </button>
-                          {item.id !== session.data?.user.userId && (
+                          {canManageAccount && (
+                            <button
+                              className="button-secondary"
+                              onClick={() => setEditingUser(item)}
+                              type="button"
+                            >
+                              Sửa
+                            </button>
+                          )}
+                          {canManageAccount && item.id !== session.data?.user.userId && (
                             <button
                               className="button-danger"
                               onClick={() => {

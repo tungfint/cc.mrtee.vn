@@ -4,6 +4,7 @@ import {
   ConflictException,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -40,7 +41,8 @@ const createUserSchema = z.object({
   password: z.string().min(12).max(200),
   fullName: profileFields.fullName,
   displayName: profileFields.displayName,
-  systemRole: z.enum(['USER', 'SYSTEM_ADMIN']).default('USER'),
+  systemRole: z.enum(['USER', 'ADMIN', 'SYSTEM_ADMIN']).default('USER'),
+  leaderboardVisible: z.boolean().optional(),
   organizationId: z.string().uuid().optional(),
   codeforcesHandle: codeforcesHandleSchema.optional(),
   initialCcLevel: initialCcLevelSchema.default(800),
@@ -70,7 +72,8 @@ const updateUserSchema = z
     displayName: profileFields.displayName.optional(),
     avatarUrl: profileFields.avatarUrl.optional(),
     status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
-    systemRole: z.enum(['USER', 'SYSTEM_ADMIN']).optional(),
+    systemRole: z.enum(['USER', 'ADMIN', 'SYSTEM_ADMIN']).optional(),
+    leaderboardVisible: z.boolean().optional(),
     initialCcLevel: initialCcLevelSchema.optional(),
     classId: z.string().uuid().nullable().optional(),
     codeforcesHandle: codeforcesHandleSchema.optional(),
@@ -98,7 +101,8 @@ export class UsersController {
     const [profile] = await this.database.sql`
       SELECT users.id, credentials.email, credentials.must_change_password,
         users.full_name, users.display_name,
-        users.avatar_url, users.status, users.system_role, users.created_at,
+        users.avatar_url, users.status, users.system_role, users.leaderboard_visible,
+        users.created_at,
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank
@@ -189,7 +193,7 @@ export class UsersController {
     const users = await this.database.sql`
       SELECT users.id, credentials.email, credentials.must_change_password,
         users.full_name, users.display_name, users.avatar_url,
-        users.status, users.system_role, users.created_at,
+        users.status, users.system_role, users.leaderboard_visible, users.created_at,
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank,
@@ -240,6 +244,9 @@ export class UsersController {
   @Post('admin/users')
   async createUser(@Body() body: unknown, @CurrentUser() actor: AuthUser) {
     const input = this.parse(createUserSchema, body);
+    if (actor.systemRole === 'ADMIN' && input.systemRole !== 'USER') {
+      throw new ForbiddenException('Admin chỉ được tạo tài khoản học sinh');
+    }
     try {
       const userId = await this.auth.createUser(
         {
@@ -248,6 +255,7 @@ export class UsersController {
           fullName: input.fullName,
           displayName: input.displayName,
           systemRole: input.systemRole,
+          leaderboardVisible: input.leaderboardVisible ?? input.systemRole === 'USER',
           initialCcLevel: input.initialCcLevel,
           mustChangePassword: input.mustChangePassword,
           verifyCodeforces: Boolean(input.codeforcesHandle),
@@ -261,6 +269,7 @@ export class UsersController {
             fullName: input.fullName,
             displayName: input.displayName,
             systemRole: input.systemRole,
+            leaderboardVisible: input.leaderboardVisible ?? input.systemRole === 'USER',
             organizationId: input.organizationId ?? null,
             codeforcesHandle: input.codeforcesHandle ?? null,
             initialCcLevel: input.initialCcLevel,
@@ -280,7 +289,7 @@ export class UsersController {
     const userId = this.uuid(id);
     const [user] = await this.database.sql`
       SELECT users.id, credentials.email, users.full_name, users.display_name, users.avatar_url,
-        users.status, users.system_role, users.created_at,
+        users.status, users.system_role, users.leaderboard_visible, users.created_at,
         skill.cc_base::text AS initial_cc_level, skill.cc_level::text AS cc_level,
         accounts.handle AS codeforces_handle, accounts.pending_handle,
         accounts.verification_status, accounts.current_rating, accounts.rank
@@ -301,7 +310,7 @@ export class UsersController {
     if (userId === actor.userId && input.status && input.status !== 'ACTIVE') {
       throw new BadRequestException('Không thể tự vô hiệu hóa tài khoản đang đăng nhập');
     }
-    if (userId === actor.userId && input.systemRole === 'USER') {
+    if (userId === actor.userId && input.systemRole && input.systemRole !== actor.systemRole) {
       throw new BadRequestException('Không thể tự gỡ quyền quản trị hệ thống');
     }
     const avatarUrl = input.avatarUrl === '' ? null : input.avatarUrl;
@@ -309,7 +318,7 @@ export class UsersController {
       const updated = await this.database.sql.begin(async (transaction) => {
         const [before] = await transaction`
           SELECT users.full_name, users.display_name, users.avatar_url, users.status,
-            users.system_role, credentials.email, skill.cc_base,
+            users.system_role, users.leaderboard_visible, credentials.email, skill.cc_base,
             accounts.handle AS codeforces_handle, accounts.pending_handle
           FROM users
           LEFT JOIN user_credentials AS credentials ON credentials.user_id = users.id
@@ -318,17 +327,22 @@ export class UsersController {
           WHERE users.id = ${userId} FOR UPDATE OF users
         `;
         if (!before) throw new BadRequestException('Không tìm thấy tài khoản');
+        this.assertCanManageTarget(actor, userId, String(before.system_role), input);
         const [user] = await transaction`
           UPDATE users SET
             full_name = COALESCE(${input.fullName ?? null}, full_name),
             display_name = COALESCE(${input.displayName ?? null}, display_name),
             status = COALESCE(${input.status ?? null}::user_status, status),
             system_role = COALESCE(${input.systemRole ?? null}::system_role, system_role),
+            leaderboard_visible = COALESCE(
+              ${input.leaderboardVisible ?? null}, leaderboard_visible
+            ),
             avatar_url = CASE WHEN ${input.avatarUrl !== undefined} THEN ${avatarUrl ?? null}
               ELSE avatar_url END,
             updated_at = now()
           WHERE id = ${userId}
-          RETURNING id, full_name, display_name, avatar_url, status, system_role, updated_at
+          RETURNING id, full_name, display_name, avatar_url, status, system_role,
+            leaderboard_visible, updated_at
         `;
         if (input.email) {
           await transaction`
@@ -393,7 +407,7 @@ export class UsersController {
         }
         const [after] = await transaction`
           SELECT users.full_name, users.display_name, users.avatar_url, users.status,
-            users.system_role, credentials.email, skill.cc_base,
+            users.system_role, users.leaderboard_visible, credentials.email, skill.cc_base,
             accounts.handle AS codeforces_handle, accounts.pending_handle
           FROM users
           LEFT JOIN user_credentials AS credentials ON credentials.user_id = users.id
@@ -426,6 +440,11 @@ export class UsersController {
     const input = this.parse(resetPasswordSchema, body);
     const passwordHash = await hashPassword(input.password);
     await this.database.sql.begin(async (transaction) => {
+      const [target] = await transaction<{ system_role: string }[]>`
+        SELECT system_role FROM users WHERE id = ${userId} FOR UPDATE
+      `;
+      if (!target) throw new BadRequestException('Không tìm thấy tài khoản');
+      this.assertCanManageTarget(actor, userId, target.system_role, { passwordReset: true });
       const [credential] = await transaction`
         UPDATE user_credentials SET password_hash = ${passwordHash}, password_updated_at = now(),
           must_change_password = ${input.mustChangePassword}, failed_login_attempts = 0,
@@ -461,6 +480,7 @@ export class UsersController {
         FROM users WHERE id = ${userId} FOR UPDATE
       `;
       if (!before) throw new BadRequestException('Không tìm thấy tài khoản');
+      this.assertCanManageTarget(actor, userId, String(before.system_role), { delete: true });
       await transaction`
         UPDATE auth_sessions SET revoked_at = now()
         WHERE user_id = ${userId} AND revoked_at IS NULL
@@ -492,6 +512,30 @@ export class UsersController {
     const parsed = z.string().uuid().safeParse(value);
     if (!parsed.success) throw new BadRequestException('ID không hợp lệ');
     return parsed.data;
+  }
+
+  private assertCanManageTarget(
+    actor: AuthUser,
+    targetUserId: string,
+    targetRole: string,
+    changes: Record<string, unknown>,
+  ) {
+    if (actor.systemRole !== 'ADMIN') return;
+    if (changes.systemRole && changes.systemRole !== 'USER') {
+      throw new ForbiddenException('Admin không được cấp quyền Admin hoặc S-Admin');
+    }
+    if (targetRole === 'USER') return;
+    const changedKeys = Object.entries(changes)
+      .filter(([key, value]) => key !== 'reason' && value !== undefined)
+      .map(([key]) => key);
+    if (
+      targetUserId === actor.userId &&
+      changedKeys.length === 1 &&
+      changedKeys[0] === 'leaderboardVisible'
+    ) {
+      return;
+    }
+    throw new ForbiddenException('Admin không được sửa hoặc xoá tài khoản Admin/S-Admin');
   }
 
   private parse<T>(schema: z.ZodType<T>, value: unknown): T {

@@ -17,8 +17,10 @@ async function main(): Promise<void> {
     const passwordHash = await hashPassword(input.BOOTSTRAP_ADMIN_PASSWORD);
     const [created] = await connection<{ id: string }[]>`
       WITH new_user AS (
-        INSERT INTO users (full_name, display_name, system_role)
-        VALUES (${input.BOOTSTRAP_ADMIN_NAME}, ${input.BOOTSTRAP_ADMIN_NAME}, 'SYSTEM_ADMIN')
+        INSERT INTO users (full_name, display_name, system_role, leaderboard_visible)
+        VALUES (
+          ${input.BOOTSTRAP_ADMIN_NAME}, ${input.BOOTSTRAP_ADMIN_NAME}, 'SYSTEM_ADMIN', false
+        )
         RETURNING id
       )
       INSERT INTO user_credentials (user_id, email, password_hash)
