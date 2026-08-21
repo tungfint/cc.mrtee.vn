@@ -126,7 +126,7 @@ export default function AboutPage() {
   return (
     <div className="about-page">
       <PageTitle
-        eyebrow="GIỚI THIỆU CẦY CỐT"
+        eyebrow="CÙNG CẦY ĐỀU · CÙNG TIẾN BỘ"
         title="Nỗ lực nhìn thấy được. Tiến bộ chứng minh được."
         detail="Cầy Cốt MrTee.VN biến hành trình luyện Codeforces thành những chỉ số dễ hiểu, hồ sơ có minh chứng và phần thưởng có ý nghĩa — để mỗi bài toán đều trở thành một bước tiến rõ ràng."
         action={
@@ -143,8 +143,8 @@ export default function AboutPage() {
 
       <section className="about-hero panel">
         <div className="about-hero-copy">
-          <span className="about-kicker">CODEFORCES GAMIFICATION TRACKER</span>
-          <h2>Không chỉ đếm số bài. Cầy Cốt ghi nhận cả năng lực, sự bền bỉ và hành trình trưởng thành.</h2>
+          <span className="about-kicker">LUYỆN CODE CÓ MỤC TIÊU · TIẾN BỘ CÓ DẤU ẤN</span>
+          <h2>Mỗi bài giải là một bước tiến. Mỗi ngày bền bỉ là một dấu mốc đáng tự hào.</h2>
           <p>
             Mục tiêu của hệ thống là giúp học sinh duy trì thói quen luyện tập, chọn bài phù hợp và
             nhìn thấy tiến bộ bằng dữ liệu thật từ Codeforces. Giáo viên có công cụ theo dõi lớp,
