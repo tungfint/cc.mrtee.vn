@@ -15,6 +15,7 @@ const AboutPage = lazy(() => import('./pages/about-page'));
 const RecognitionPage = lazy(() => import('./pages/recognition-page'));
 const PublicLeaderboardPage = lazy(() => import('./pages/public-leaderboard-page'));
 const StudentProfilePage = lazy(() => import('./pages/student-profile-page'));
+const NotificationsPage = lazy(() => import('./pages/notifications-page'));
 
 function RequireAuth() {
   const session = useSession();
@@ -33,13 +34,14 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/leaderboard/:shareKey" element={<PublicLeaderboardPage />} />
-        <Route path="/students/:userId" element={<StudentProfilePage />} />
         <Route element={<RequireAuth />}>
           <Route index element={<DashboardPage />} />
           <Route path="leaderboard" element={<LeaderboardPage />} />
           <Route path="rewards" element={<RewardsPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="about" element={<AboutPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="students/:userId" element={<StudentProfilePage />} />
           <Route path="recognition" element={<RecognitionPage />} />
           <Route path="account" element={<AccountPage />} />
           <Route path="admin" element={<AdminPage />} />

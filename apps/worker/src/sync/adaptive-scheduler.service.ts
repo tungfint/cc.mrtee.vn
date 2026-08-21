@@ -4,14 +4,14 @@ import { Queue } from 'bullmq';
 import { EnvironmentService } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
-import { cadenceHours, syncTier } from './sync-cadence';
+import { cadenceMinutes, syncTier } from './sync-cadence';
 
 interface DueAccount {
   id: string;
   user_id: string;
   handle: string;
   backfill_completed_at: Date | string | null;
-  latest_activity_at: Date | string | null;
+  last_seen_at: Date | string | null;
 }
 
 interface QueueJobLike {
@@ -67,8 +67,6 @@ export class AdaptiveSchedulerService implements OnModuleInit, OnApplicationShut
     const room = Math.max(0, scheduledCapacity - backlog);
     if (room === 0) return { acquired: false, enqueued: 0, backlog };
     const limit = Math.min(environment.SCHEDULER_BATCH_SIZE, room);
-    const pressure = backlog / scheduledCapacity;
-
     return this.database.sql.begin(async (transaction) => {
       const [{ acquired } = { acquired: false }] = await transaction<{ acquired: boolean }[]>`
         SELECT pg_try_advisory_xact_lock(hashtextextended('cc:adaptive-scheduler', 0)) AS acquired
@@ -76,13 +74,13 @@ export class AdaptiveSchedulerService implements OnModuleInit, OnApplicationShut
       if (!acquired) return { acquired: false, enqueued: 0, backlog };
       const accounts = await transaction<DueAccount[]>`
         SELECT accounts.id, accounts.user_id, accounts.handle, accounts.backfill_completed_at,
-          activity.latest_activity_at
+          presence.last_seen_at
         FROM codeforces_accounts AS accounts
         JOIN users ON users.id = accounts.user_id
         LEFT JOIN LATERAL (
-          SELECT max(creation_time) AS latest_activity_at
-          FROM cf_submissions WHERE user_id = accounts.user_id
-        ) AS activity ON true
+          SELECT max(last_seen_at) AS last_seen_at FROM auth_sessions
+          WHERE user_id = accounts.user_id AND revoked_at IS NULL AND expires_at > now()
+        ) AS presence ON true
         WHERE users.status = 'ACTIVE'
           AND accounts.verification_status <> 'UNVERIFIED'
           AND accounts.sync_status NOT IN ('UNVERIFIED', 'INACTIVE', 'SYNCING')
@@ -100,19 +98,15 @@ export class AdaptiveSchedulerService implements OnModuleInit, OnApplicationShut
           mode: account.backfill_completed_at ? 'INCREMENTAL' : 'BACKFILL',
         };
         if (await this.enqueue(queue, data)) enqueued += 1;
-        const tier = syncTier(account.latest_activity_at);
-        const hours = cadenceHours(
-          tier,
-          {
-            hot: environment.SYNC_HOT_TARGET_HOURS,
-            warm: environment.SYNC_WARM_TARGET_HOURS,
-            cold: environment.SYNC_COLD_TARGET_HOURS,
-          },
-          pressure,
-        );
+        const tier = syncTier(account.last_seen_at);
+        const minutes = cadenceMinutes(tier, {
+          online: environment.SYNC_ONLINE_TARGET_MINUTES,
+          recent: environment.SYNC_RECENT_TARGET_MINUTES,
+          offline: environment.SYNC_OFFLINE_TARGET_MINUTES,
+        });
         await transaction`
           UPDATE codeforces_accounts
-          SET next_sync_at = now() + ((${hours})::double precision * interval '1 hour'),
+          SET next_sync_at = now() + ((${minutes})::double precision * interval '1 minute'),
             updated_at = now()
           WHERE id = ${account.id}
         `;

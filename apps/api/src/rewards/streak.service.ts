@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { calculateStreakBonus, currentDateStreak } from '@cc/core';
+import { calculateDailyStreakBonus, calculateStreakBonus, currentDateStreak } from '@cc/core';
 import { DatabaseService } from '../database/database.service';
 
 export interface StreakDay {
@@ -11,6 +11,7 @@ export interface StreakDay {
   codeforcesUrl: string | null;
   mascotName: string | null;
   mascotImageUrl: string | null;
+  bonusAmount: number;
 }
 
 interface ActivitySummary {
@@ -43,13 +44,18 @@ export class StreakService {
         SELECT COALESCE(sum(amount), 0)::text AS settled_bonus
         FROM point_transactions
         WHERE user_id = ${userId} AND type = 'BONUS'
-          AND metadata ->> 'source' = 'STREAK'
+          AND COALESCE(
+            metadata ->> 'source',
+            CASE WHEN jsonb_typeof(metadata) = 'string'
+              THEN ((metadata #>> '{}')::jsonb) ->> 'source'
+            END
+          ) = 'STREAK'
       `,
     ]);
     return {
       currentStreak: activity.currentStreak,
       longestStreak: activity.longestStreak,
-      pendingBonus: calculateStreakBonus(activity.currentStreak),
+      nextBonus: calculateDailyStreakBonus(activity.currentStreak + 1),
       settledBonus: Number(bonus?.settled_bonus ?? 0),
       timeline: activity.timeline,
       rescue: {
@@ -109,9 +115,49 @@ export class StreakService {
           VALUES (${userId}, ${orderId}, ${rescuedDate})
         `;
       }
+      const rescuedActivity = await this.activity(transaction, userId);
+      const expectedTodayBonus = calculateDailyStreakBonus(rescuedActivity.currentStreak);
+      const [todayBonus] = await transaction<{ amount: string }[]>`
+        SELECT COALESCE(sum(amount), 0)::text AS amount
+        FROM point_transactions
+        WHERE user_id = ${userId} AND type = 'BONUS'
+          AND metadata ->> 'source' = 'STREAK'
+          AND metadata ->> 'activityDate' = ${activity.today}
+      `;
+      const bonusAdjustment = Math.max(
+        0,
+        Math.round((expectedTodayBonus - Number(todayBonus?.amount ?? 0)) * 100) / 100,
+      );
+      if (bonusAdjustment > 0) {
+        const [created] = await transaction<{ id: string }[]>`
+          INSERT INTO point_transactions (
+            user_id, type, amount, idempotency_key, affects_wallet, affects_season,
+            description, metadata, event_at
+          ) VALUES (
+            ${userId}, 'BONUS', ${bonusAdjustment},
+            ${`streak-rescue-adjustment:${userId}:${activity.today}`}, true, false,
+            ${`Bù thưởng Streak ngày thứ ${rescuedActivity.currentStreak} sau khi nối chuỗi`},
+            ${JSON.stringify({
+              source: 'STREAK',
+              mode: 'RESCUE_ADJUSTMENT',
+              streakDay: rescuedActivity.currentStreak,
+              activityDate: activity.today,
+            })}::text::jsonb,
+            now()
+          ) ON CONFLICT DO NOTHING RETURNING id
+        `;
+        if (created) {
+          await transaction`
+            INSERT INTO user_wallets (user_id, balance) VALUES (${userId}, ${bonusAdjustment})
+            ON CONFLICT (user_id) DO UPDATE SET
+              balance = user_wallets.balance + EXCLUDED.balance, updated_at = now()
+          `;
+        }
+      }
       const after = {
         rescuedDates: activity.missingDates,
         mascots: rewardOrderIds.map((id) => ({ orderId: id, name: nameByOrder.get(id) })),
+        bonusAdjustment,
       };
       await transaction`
         INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id, after, reason)
@@ -150,17 +196,26 @@ export class StreakService {
       ORDER BY (solves.first_solved_at AT TIME ZONE users.timezone)::date,
         solves.first_solved_at, solves.first_ok_submission_id
     `;
-    const rescueDays = await sql<
-      { day: string; mascot_name: string; mascot_image_url: string | null }[]
-    >`
-      SELECT rescues.rescued_date::text AS day, rewards.name AS mascot_name,
-        rewards.image_url AS mascot_image_url
-      FROM streak_rescues AS rescues
-      JOIN reward_orders AS orders ON orders.id = rescues.reward_order_id
-      JOIN rewards ON rewards.id = orders.reward_id
-      WHERE rescues.user_id = ${userId}
-      ORDER BY rescues.rescued_date
-    `;
+    const [rescueDays, dailyBonuses] = await Promise.all([
+      sql<{ day: string; mascot_name: string; mascot_image_url: string | null }[]>`
+        SELECT rescues.rescued_date::text AS day, rewards.name AS mascot_name,
+          rewards.image_url AS mascot_image_url
+        FROM streak_rescues AS rescues
+        JOIN reward_orders AS orders ON orders.id = rescues.reward_order_id
+        JOIN rewards ON rewards.id = orders.reward_id
+        WHERE rescues.user_id = ${userId}
+        ORDER BY rescues.rescued_date
+      `,
+      sql<{ day: string; amount: string }[]>`
+        SELECT metadata ->> 'activityDate' AS day, sum(amount)::text AS amount
+        FROM point_transactions
+        WHERE user_id = ${userId} AND type = 'BONUS'
+          AND metadata ->> 'source' = 'STREAK'
+          AND metadata ->> 'mode' IN ('DAILY', 'RESCUE_ADJUSTMENT')
+        GROUP BY metadata ->> 'activityDate'
+      `,
+    ]);
+    const bonusByDate = new Map(dailyBonuses.map((item) => [item.day, Number(item.amount)]));
     const activityByDate = new Map<string, StreakDay>();
     for (const item of rescueDays) {
       activityByDate.set(item.day, {
@@ -172,6 +227,7 @@ export class StreakService {
         codeforcesUrl: null,
         mascotName: item.mascot_name,
         mascotImageUrl: item.mascot_image_url,
+        bonusAmount: 0,
       });
     }
     for (const item of solveDays) {
@@ -186,6 +242,7 @@ export class StreakService {
           : `https://codeforces.com/submissions/${item.first_ok_submission_id}`,
         mascotName: null,
         mascotImageUrl: null,
+        bonusAmount: bonusByDate.get(item.day) ?? 0,
       });
     }
     const allDays = [...activityByDate.values()].sort((a, b) => a.date.localeCompare(b.date));

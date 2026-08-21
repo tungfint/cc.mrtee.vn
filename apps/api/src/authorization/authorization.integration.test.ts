@@ -28,6 +28,7 @@ import { StudentImportService } from '../organizations/student-import.service';
 import { AvatarService } from '../users/avatar.service';
 import { AuthorizationService } from './authorization.service';
 import { ContentController } from '../content/content.controller';
+import { NotificationsService } from '../notifications/notifications.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -65,6 +66,7 @@ const insights = new InsightsController({ sql: connection } as DatabaseService, 
   store: () => Promise.resolve('/api/uploads/recognition/test.png'),
 } as unknown as RecognitionImageService);
 const contentController = new ContentController({ sql: connection } as DatabaseService);
+const notifications = new NotificationsService({ sql: connection } as DatabaseService);
 const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
 const bulkPointImport = new BulkPointImportService(service, adjustments, {
   sql: connection,
@@ -753,6 +755,10 @@ describe('authorization matrix', () => {
         user_id, type, amount, affects_wallet, affects_season, description, event_at
       ) VALUES (${ids.member!}, 'REDEEM', -5, true, false, 'Đổi quà kiểm thử', now())
     `;
+    await connection`
+      INSERT INTO auth_sessions (user_id, token_hash, csrf_token_hash, expires_at)
+      VALUES (${ids.member!}, ${'a'.repeat(64)}, ${'b'.repeat(64)}, now() + interval '1 day')
+    `;
     const dashboard = await insights.dashboard(authUser(ids.member!));
     expect(dashboard.profile).toMatchObject({
       id: ids.member!,
@@ -764,6 +770,7 @@ describe('authorization matrix', () => {
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
     expect(leaderboard.entries).toHaveLength(1);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
+    expect(leaderboard.entries[0]).toMatchObject({ presenceStatus: 'ONLINE' });
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
     expect(leaderboard.total).toBe(1);
     const balanceLeaderboard = await insights.leaderboard({
@@ -947,13 +954,15 @@ describe('authorization matrix', () => {
         expect.objectContaining({ id: mascot.id, category: 'MASCOT', quantity: 3 }),
       ]),
     );
-    await streaks.rescue(
+    const rescued = await streaks.rescue(
       ids.member!,
       orders.map((order) => order.id),
     );
+    expect(rescued).toMatchObject({ success: true, bonusAdjustment: 1.15 });
     const after = await streaks.summary(ids.member!);
-    expect(after).toMatchObject({ currentStreak: 2, pendingBonus: 1 });
+    expect(after).toMatchObject({ currentStreak: 2, nextBonus: 1.3 });
     expect(after.timeline.filter((day) => day.kind === 'RESCUE')).toHaveLength(3);
+    expect(after.timeline.at(-1)).toMatchObject({ bonusAmount: 1.15 });
     expect(after.rescue.mascots).toHaveLength(0);
     await expect(
       streaks.rescue(
@@ -1207,5 +1216,27 @@ describe('authorization matrix', () => {
         actor: authUser(ids.admin!, 'ADMIN'),
       }),
     ).rejects.toThrow('Cần chọn lớp học');
+  });
+
+  it('delivers a scheduled class notification and tracks unread state', async () => {
+    const created = await notifications.create(
+      {
+        title: 'Lịch học mới',
+        body: 'Lớp chuyển sang học lúc 19:30.',
+        audience: 'ORGANIZATION',
+        targetOrganizationId: ids.privateOrg!,
+        tickerText: 'Tối nay lớp học lúc 19:30',
+        tickerDurationMinutes: 60,
+        publishAt: new Date(Date.now() - 60_000),
+      },
+      authUser(ids.admin!, 'ADMIN'),
+    );
+    expect(created.recipientCount).toBeGreaterThan(0);
+    const before = await notifications.summary(ids.member!);
+    expect(before.unreadCount).toBe(1);
+    expect(before.ticker).toHaveLength(1);
+    await notifications.markRead(ids.member!, created.notification.id);
+    const after = await notifications.summary(ids.member!);
+    expect(after.unreadCount).toBe(0);
   });
 });

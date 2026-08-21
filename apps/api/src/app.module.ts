@@ -17,6 +17,7 @@ import { InsightsModule } from './insights/insights.module';
 import { RateLimitModule } from './rate-limit/rate-limit.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { ContentModule } from './content/content.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { ContentModule } from './content/content.module';
     RateLimitModule,
     ObservabilityModule,
     ContentModule,
+    NotificationsModule,
   ],
   controllers: [HealthController],
 })

@@ -17,9 +17,9 @@ const environmentSchema = z.object({
     .transform((value) => value === 'true'),
   SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
   SCHEDULER_BATCH_SIZE: z.coerce.number().int().positive().max(500).default(25),
-  SYNC_HOT_TARGET_HOURS: z.coerce.number().positive().default(2),
-  SYNC_WARM_TARGET_HOURS: z.coerce.number().positive().default(6),
-  SYNC_COLD_TARGET_HOURS: z.coerce.number().positive().default(24),
+  SYNC_ONLINE_TARGET_MINUTES: z.coerce.number().positive().default(15),
+  SYNC_RECENT_TARGET_MINUTES: z.coerce.number().positive().default(30),
+  SYNC_OFFLINE_TARGET_MINUTES: z.coerce.number().positive().default(1440),
   SYNC_CAPACITY_RESERVE_PERCENT: z.coerce.number().min(0.2).max(0.3).default(0.25),
 });
 

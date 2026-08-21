@@ -95,6 +95,7 @@ interface TopBoard {
     streak: number;
     activityRiskLevel: 'NORMAL' | 'REVIEW' | 'PRIORITY';
     activityRiskScore: number;
+    presenceStatus: 'ONLINE' | 'RECENT' | 'OFFLINE';
     levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
 }
@@ -599,6 +600,23 @@ function MiniLeaderboard({
                 url={row.avatarUrl}
               />
               <Link className="mini-rank-identity" to={`/students/${row.userId}`}>
+                <span
+                  aria-label={
+                    row.presenceStatus === 'ONLINE'
+                      ? 'Đang online'
+                      : row.presenceStatus === 'RECENT'
+                        ? 'Vừa hoạt động'
+                        : 'Đang offline'
+                  }
+                  className={`presence-dot ${row.presenceStatus.toLowerCase()}`}
+                  title={
+                    row.presenceStatus === 'ONLINE'
+                      ? 'Online'
+                      : row.presenceStatus === 'RECENT'
+                        ? 'Vừa hoạt động'
+                        : 'Offline'
+                  }
+                />
                 <StudentName name={row.displayName} rating={row.currentRating} />
                 {row.activityRiskLevel && row.activityRiskLevel !== 'NORMAL' && (
                   <span

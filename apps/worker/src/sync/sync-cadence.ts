@@ -1,18 +1,16 @@
-export type SyncTier = 'HOT' | 'WARM' | 'COLD';
+export type SyncTier = 'ONLINE' | 'RECENT' | 'OFFLINE';
 
-export function syncTier(latestActivityAt: Date | string | null, now = new Date()): SyncTier {
-  if (!latestActivityAt) return 'COLD';
-  const age = now.getTime() - new Date(latestActivityAt).getTime();
-  if (age <= 7 * 86_400_000) return 'HOT';
-  if (age <= 30 * 86_400_000) return 'WARM';
-  return 'COLD';
+export function syncTier(lastSeenAt: Date | string | null, now = new Date()): SyncTier {
+  if (!lastSeenAt) return 'OFFLINE';
+  const age = now.getTime() - new Date(lastSeenAt).getTime();
+  if (age <= 10 * 60_000) return 'ONLINE';
+  if (age <= 30 * 60_000) return 'RECENT';
+  return 'OFFLINE';
 }
 
-export function cadenceHours(
+export function cadenceMinutes(
   tier: SyncTier,
-  targets: { hot: number; warm: number; cold: number },
-  pressure = 0,
+  targets: { online: number; recent: number; offline: number },
 ): number {
-  const base = tier === 'HOT' ? targets.hot : tier === 'WARM' ? targets.warm : targets.cold;
-  return tier === 'HOT' ? base : base * (1 + Math.max(0, Math.min(2, pressure)));
+  return tier === 'ONLINE' ? targets.online : tier === 'RECENT' ? targets.recent : targets.offline;
 }

@@ -14,6 +14,7 @@ import {
 } from '../components/ui';
 import { RewardImageUploader } from '../components/reward-image-uploader';
 import { EditableImportTable, type EditableImportRow } from '../components/editable-import-table';
+import { AdminNotificationsPanel } from '../components/admin-notifications-panel';
 
 function formText(form: FormData, key: string, fallback = '') {
   const value = form.get(key);
@@ -268,6 +269,8 @@ const auditActionLabels: Record<string, string> = {
   ACHIEVEMENT_GRANTED: 'Tặng danh hiệu',
   STREAK_RESCUED: 'Hi sinh linh vật cứu Streak',
   STREAK_BONUS_AWARDED: 'Cộng thưởng Streak',
+  NOTIFICATION_CREATED: 'Tạo và gửi thông báo',
+  NOTIFICATION_ARCHIVED: 'Dừng hiển thị thông báo',
   QUOTE_CREATED: 'Tạo danh ngôn',
   QUOTE_UPDATED: 'Cập nhật danh ngôn',
   QUOTE_DELETED: 'Xoá danh ngôn',
@@ -782,8 +785,8 @@ export default function AdminPage() {
   const pointTargets = isSuperAdmin
     ? (users.data?.users.filter((item) => item.status === 'ACTIVE') ?? [])
     : (members.data?.members.filter((item) => item.status === 'ACTIVE') ?? []);
-  const selectTarget = pointTargets.some((item) =>
-    ('id' in item ? item.id : item.user_id) === targetId,
+  const selectTarget = pointTargets.some(
+    (item) => ('id' in item ? item.id : item.user_id) === targetId,
   )
     ? targetId
     : pointTargets[0]
@@ -860,6 +863,7 @@ export default function AdminPage() {
       ? [
           { id: 'rewards', label: 'Phần thưởng' },
           { id: 'content', label: 'Nội dung & cấp bậc' },
+          { id: 'notifications', label: 'Thông báo' },
           { id: 'leaderboard-links', label: 'Link BXH' },
         ]
       : []),
@@ -2677,6 +2681,12 @@ export default function AdminPage() {
                 )}
               </div>
             </section>
+          )}
+          {tab === 'notifications' && isSystemAdmin && (
+            <AdminNotificationsPanel
+              organizations={organizations.data?.organizations ?? []}
+              users={users.data?.users ?? []}
+            />
           )}
           {tab === 'audit' && !noOrganizationSelected && (
             <div className="panel audit-panel overflow-hidden">

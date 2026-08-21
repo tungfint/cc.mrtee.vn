@@ -64,7 +64,6 @@ export class SyncProcessorService {
     for (const submission of ingested) {
       results.push(await this.rewards.process(data.userId, submission, eligibleFrom));
     }
-    await this.rewards.settleExpiredStreaks(data.userId);
     await this.finish(
       data.accountId,
       submissions.map((submission) => submission.id),
@@ -120,9 +119,9 @@ export class SyncProcessorService {
 
   private async finish(accountId: string, submissionIds: number[]): Promise<void> {
     const maximum = submissionIds.length > 0 ? Math.max(...submissionIds) : 0;
-    const SYNC_HOT_TARGET_HOURS = this.environment.values.SYNC_HOT_TARGET_HOURS ?? 2;
-    const SYNC_WARM_TARGET_HOURS = this.environment.values.SYNC_WARM_TARGET_HOURS ?? 6;
-    const SYNC_COLD_TARGET_HOURS = this.environment.values.SYNC_COLD_TARGET_HOURS ?? 24;
+    const onlineMinutes = this.environment.values.SYNC_ONLINE_TARGET_MINUTES ?? 15;
+    const recentMinutes = this.environment.values.SYNC_RECENT_TARGET_MINUTES ?? 30;
+    const offlineMinutes = this.environment.values.SYNC_OFFLINE_TARGET_MINUTES ?? 1440;
     await this.database.sql`
       UPDATE codeforces_accounts
       SET
@@ -131,15 +130,17 @@ export class SyncProcessorService {
         next_sync_at = now() + (
           CASE
             WHEN (
-              SELECT max(creation_time) FROM cf_submissions
+              SELECT max(last_seen_at) FROM auth_sessions
               WHERE user_id = codeforces_accounts.user_id
-            ) >= now() - interval '7 days' THEN (${SYNC_HOT_TARGET_HOURS})::double precision
+                AND revoked_at IS NULL AND expires_at > now()
+            ) >= now() - interval '10 minutes' THEN (${onlineMinutes})::double precision
             WHEN (
-              SELECT max(creation_time) FROM cf_submissions
+              SELECT max(last_seen_at) FROM auth_sessions
               WHERE user_id = codeforces_accounts.user_id
-            ) >= now() - interval '30 days' THEN (${SYNC_WARM_TARGET_HOURS})::double precision
-            ELSE (${SYNC_COLD_TARGET_HOURS})::double precision
-          END * interval '1 hour'
+                AND revoked_at IS NULL AND expires_at > now()
+            ) >= now() - interval '30 minutes' THEN (${recentMinutes})::double precision
+            ELSE (${offlineMinutes})::double precision
+          END * interval '1 minute'
         ),
         last_seen_submission_id = GREATEST(COALESCE(last_seen_submission_id, 0), ${String(maximum)}),
         updated_at = now()

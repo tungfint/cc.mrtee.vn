@@ -122,6 +122,27 @@ export class AuthService {
     `;
   }
 
+  async touchPresence(sessionId: string, userId: string): Promise<Date> {
+    const [clock] = await this.database.sql.begin(async (transaction) => {
+      const rows = await transaction<{ observed_at: Date }[]>`
+        UPDATE auth_sessions SET last_seen_at = now()
+        WHERE id = ${sessionId} AND user_id = ${userId} AND revoked_at IS NULL
+        RETURNING last_seen_at AS observed_at
+      `;
+      await transaction`
+        UPDATE codeforces_accounts
+        SET next_sync_at = LEAST(
+          COALESCE(next_sync_at, now() + interval '15 minutes'),
+          now() + interval '15 minutes'
+        ), updated_at = now()
+        WHERE user_id = ${userId} AND verification_status <> 'UNVERIFIED'
+          AND sync_status NOT IN ('UNVERIFIED', 'INACTIVE')
+      `;
+      return rows;
+    });
+    return clock?.observed_at ?? new Date();
+  }
+
   async createUser(
     input: {
       email: unknown;

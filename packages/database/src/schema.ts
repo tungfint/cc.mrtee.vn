@@ -76,6 +76,11 @@ export const seasonAwardType = pgEnum('season_award_type', [
   'CHALLENGE',
   'CUSTOM',
 ]);
+export const notificationAudience = pgEnum('notification_audience', [
+  'ALL',
+  'USER',
+  'ORGANIZATION',
+]);
 
 export const users = pgTable(
   'users',
@@ -748,6 +753,60 @@ export const streakRescues = pgTable(
     uniqueIndex('streak_rescues_reward_order_unique').on(table.rewardOrderId),
     uniqueIndex('streak_rescues_user_date_unique').on(table.userId, table.rescuedDate),
     index('streak_rescues_user_date_idx').on(table.userId, table.rescuedDate.desc()),
+  ],
+);
+
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    title: varchar('title', { length: 200 }).notNull(),
+    body: text('body').notNull(),
+    audience: notificationAudience('audience').notNull(),
+    targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    targetOrganizationId: uuid('target_organization_id').references(() => organizations.id, {
+      onDelete: 'restrict',
+    }),
+    tickerText: varchar('ticker_text', { length: 300 }),
+    tickerDurationMinutes: integer('ticker_duration_minutes').default(0).notNull(),
+    publishAt: timestamp('publish_at', { withTimezone: true }).defaultNow().notNull(),
+    active: boolean('active').default(true).notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('notifications_publish_active_idx').on(table.active, table.publishAt.desc()),
+    index('notifications_target_user_idx').on(table.targetUserId),
+    index('notifications_target_organization_idx').on(table.targetOrganizationId),
+    check(
+      'notifications_audience_target_check',
+      sql`(${table.audience} = 'ALL' AND ${table.targetUserId} IS NULL AND ${table.targetOrganizationId} IS NULL)
+        OR (${table.audience} = 'USER' AND ${table.targetUserId} IS NOT NULL AND ${table.targetOrganizationId} IS NULL)
+        OR (${table.audience} = 'ORGANIZATION' AND ${table.targetUserId} IS NULL AND ${table.targetOrganizationId} IS NOT NULL)`,
+    ),
+    check(
+      'notifications_ticker_duration_check',
+      sql`${table.tickerDurationMinutes} >= 0 AND ${table.tickerDurationMinutes} <= 10080`,
+    ),
+  ],
+);
+
+export const notificationRecipients = pgTable(
+  'notification_recipients',
+  {
+    notificationId: uuid('notification_id')
+      .notNull()
+      .references(() => notifications.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.notificationId, table.userId] }),
+    index('notification_recipients_user_read_idx').on(table.userId, table.readAt),
   ],
 );
 

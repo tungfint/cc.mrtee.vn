@@ -8,7 +8,7 @@ const metrics = [
     shortName: 'CCL',
     note: 'Năng lực dài hạn',
     detail:
-      'Bắt đầu từ 800. Mỗi bài rated được Accepted lần đầu đều giúp CCL tăng; bài ngang hoặc cao hơn trình độ tăng nhiều hơn, bài dễ hơn vẫn tăng nhưng rất ít. Cận trên độ khó được tính là CCL +500 để hạn chế một bài bất thường làm lệch năng lực.',
+      'Bắt đầu từ 800. Mỗi bài rated Accepted lần đầu cộng một mức tăng dương theo chênh lệch giữa rating bài và CCL trước bài đó. Mức tăng tối đa 4 CCL/bài; phần vượt quá CCL +500 không làm điểm tăng thêm, nhờ vậy một bài bất thường không thể kéo năng lực lên quá nhanh.',
   },
   {
     icon: '◆',
@@ -16,7 +16,7 @@ const metrics = [
     shortName: 'CCP',
     note: 'Tổng thành tích tích luỹ',
     detail:
-      'Ghi nhận điểm đã kiếm được trong suốt hành trình. Một bài rated hợp lệ nhận khoảng 0,25–12,50 CCP tuỳ độ khó so với CCL trước bài đó. Thưởng Streak và điểm do giáo viên ghi nhận cũng được cộng vào CCP.',
+      'Một bài rated hợp lệ nhận từ 0,25 đến 12,50 CCP theo đường cong tăng mượt: bài càng khó so với CCL trước lúc giải thì thưởng càng cao. Bài quá dễ vẫn có điểm nhỏ; độ khó vượt CCL +500 không tiếp tục khuếch đại thưởng.',
   },
   {
     icon: '◈',
@@ -32,7 +32,7 @@ const metrics = [
     shortName: 'Chuỗi',
     note: 'Nhịp luyện tập liên tục',
     detail:
-      'Một ngày được ghi nhận khi có ít nhất một bài mới Accepted theo múi giờ Việt Nam. Khi chuỗi kết thúc, thưởng Streak được cộng vào cả CCP và CCB. Có thể hi sinh linh vật để nối tối đa 3 ngày bỏ lỡ.',
+      'Mỗi ngày có bài mới Accepted sẽ nhận một lần thưởng: ngày 1 là 1 CCP, sau đó tăng 0,15 mỗi ngày, đạt mốc 7 ngày được thêm 0,10 và tối đa 4 CCP/ngày. Điểm vào cả CCP lẫn CCB ngay sau đồng bộ. Linh vật có thể nối tối đa 3 ngày nhưng ngày cứu không sinh điểm.',
   },
 ];
 
@@ -63,23 +63,22 @@ const syncCadence = [
   {
     time: 'Gần như ngay',
     title: 'Lần đầu xác minh',
-    detail:
-      'Hệ thống xếp lịch đọc lịch sử để dựng CCL. Bài cũ không phát CCP hoặc CCB hồi tố.',
+    detail: 'Hệ thống xếp lịch đọc lịch sử để dựng CCL. Bài cũ không phát CCP hoặc CCB hồi tố.',
   },
   {
-    time: 'Khoảng 2 giờ',
-    title: 'Đang luyện tập',
-    detail: 'Áp dụng khi tài khoản có hoạt động Codeforces trong 7 ngày gần nhất.',
+    time: 'Mỗi 15 phút',
+    title: 'Đang Online',
+    detail: 'Áp dụng khi học sinh có hoạt động trên Cầy Cốt trong 10 phút gần nhất.',
   },
   {
-    time: 'Khoảng 6 giờ',
-    title: 'Hoạt động gần đây',
-    detail: 'Áp dụng khi lần hoạt động gần nhất cách đây từ 7 đến 30 ngày.',
+    time: 'Mỗi 30 phút',
+    title: 'Vừa hoạt động',
+    detail: 'Áp dụng khi lần hoạt động gần nhất cách đây từ 10 đến 30 phút.',
   },
   {
     time: 'Khoảng 24 giờ',
-    title: 'Ít hoạt động',
-    detail: 'Áp dụng khi chưa có dữ liệu gần đây hoặc đã nghỉ luyện tập trên 30 ngày.',
+    title: 'Đang Offline',
+    detail: 'Áp dụng khi đã quá 30 phút chưa hoạt động trên Cầy Cốt.',
   },
 ];
 
@@ -141,7 +140,16 @@ export default function AboutPage() {
         }
       />
 
-      <section className="about-hero panel">
+      <nav className="about-anchor-nav" aria-label="Nội dung trang Giới thiệu">
+        <a href="#tong-quan">Tổng quan</a>
+        <a href="#cach-tinh">Cách tính điểm</a>
+        <a href="#bat-dau">Bắt đầu</a>
+        <a href="#dong-bo">Đồng bộ</a>
+        <a href="#tinh-nang">Tính năng</a>
+        <a href="#nguyen-tac">Nguyên tắc</a>
+      </nav>
+
+      <section className="about-hero panel" id="tong-quan">
         <div className="about-hero-copy">
           <span className="about-kicker">LUYỆN CODE CÓ MỤC TIÊU · TIẾN BỘ CÓ DẤU ẤN</span>
           <h2>Mỗi bài giải là một bước tiến. Mỗi ngày bền bỉ là một dấu mốc đáng tự hào.</h2>
@@ -171,10 +179,10 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="about-section-heading">
+      <section className="about-section-heading" id="cach-tinh">
         <div>
-          <p className="eyebrow">BỘ CHỈ SỐ CỐT LÕI</p>
-          <h2>Bốn con số, bốn góc nhìn khác nhau</h2>
+          <p className="eyebrow">CÁCH HỆ THỐNG TÍNH ĐIỂM</p>
+          <h2>Bốn chỉ số, bốn vai trò rõ ràng</h2>
         </div>
         <p>Không một chỉ số đơn lẻ nào quyết định toàn bộ sự tiến bộ của học sinh.</p>
       </section>
@@ -195,7 +203,7 @@ export default function AboutPage() {
         ))}
       </section>
 
-      <section className="panel about-start-panel">
+      <section className="panel about-start-panel" id="bat-dau">
         <div className="about-section-heading compact">
           <div>
             <p className="eyebrow">BẮT ĐẦU RẤT ĐƠN GIẢN</p>
@@ -216,14 +224,14 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="about-sync-layout">
+      <section className="about-sync-layout" id="dong-bo">
         <article className="panel about-sync-intro">
           <p className="eyebrow">KHI NÀO BÀI ĐƯỢC CẬP NHẬT?</p>
           <h2>Đồng bộ tự động theo nhịp hoạt động</h2>
           <p>
-            Cầy Cốt kiểm tra các tài khoản đến hạn mỗi 30 giây. Khi job bắt đầu, hệ thống đọc dữ
-            liệu Codeforces, nhận diện bài mới rồi cập nhật CCL, CCP, CCB và Streak ngay trong lượt
-            xử lý đó.
+            Cầy Cốt kiểm tra các tài khoản đến hạn mỗi 30 giây. Khi lượt đồng bộ bắt đầu, hệ thống
+            đọc dữ liệu Codeforces, nhận diện bài mới rồi cập nhật CCL, CCP, CCB và Streak ngay
+            trong lượt xử lý đó.
           </p>
           <div className="about-manual-sync">
             <span aria-hidden>↻</span>
@@ -254,7 +262,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="about-section-heading">
+      <section className="about-section-heading" id="tinh-nang">
         <div>
           <p className="eyebrow">TÍNH NĂNG NỔI BẬT</p>
           <h2>Một nơi để học, theo dõi và được ghi nhận</h2>
@@ -272,7 +280,7 @@ export default function AboutPage() {
         ))}
       </section>
 
-      <section className="about-rules">
+      <section className="about-rules" id="nguyen-tac">
         <article className="panel about-rule-card">
           <span className="about-rule-icon" aria-hidden>
             ✓
@@ -281,9 +289,9 @@ export default function AboutPage() {
             <p className="eyebrow">BÀI NÀO ĐƯỢC GHI NHẬN?</p>
             <h2>Accepted lần đầu của một bài mới</h2>
             <p>
-              Bài rated cá nhân làm tăng CCL, CCP và CCB. Bài unrated vẫn có thể tính hoạt động và
-              Streak nhưng không sinh điểm năng lực hoặc điểm thưởng. Nộp lại bài đã giải không
-              được tính lần hai.
+              Bài rated cá nhân làm tăng CCL, CCP và CCB. Bài unrated không tăng CCL hay nhận CCP
+              của bài, nhưng vẫn có thể ghi nhận ngày Streak và nhận đúng một khoản thưởng Streak.
+              Nộp lại bài đã giải không được tính lần hai.
             </p>
           </div>
         </article>

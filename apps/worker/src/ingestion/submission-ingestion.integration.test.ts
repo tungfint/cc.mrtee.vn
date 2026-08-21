@@ -297,6 +297,7 @@ describe('submission ingestion', () => {
         ledger: string;
         wallet: string;
         season_score: string;
+        streak_bonuses: number;
         earn_metadata: {
           ccLevelAfter: number;
           ccLevelDelta: number;
@@ -311,13 +312,15 @@ describe('submission ingestion', () => {
         (SELECT COALESCE(sum(amount), 0)::text FROM point_transactions WHERE affects_wallet) AS ledger,
         (SELECT balance::text FROM user_wallets WHERE user_id = ${user.id}) AS wallet,
         (SELECT score::text FROM season_user_totals WHERE user_id = ${user.id}) AS season_score,
+        (SELECT count(*)::int FROM point_transactions
+          WHERE metadata ->> 'mode' = 'DAILY') AS streak_bonuses,
         (SELECT metadata FROM point_transactions WHERE type = 'EARN') AS earn_metadata
     `;
     expect(totals?.solves).toBe(1);
     expect(totals?.earns).toBe(1);
+    expect(totals?.streak_bonuses).toBe(1);
     expect(totals?.wallet).toBe(totals?.ledger);
-    expect(totals?.season_score).toBe(totals?.ledger);
-    expect(Number(totals?.wallet)).toBe(
+    expect(Number(totals?.season_score)).toBe(
       calculateReward(1200, 800, {
         min: 0.25,
         max: 12.5,
@@ -325,6 +328,15 @@ describe('submission ingestion', () => {
         scale: 120,
         maxPositiveDelta: 500,
       }),
+    );
+    expect(Number(totals?.wallet)).toBe(
+      calculateReward(1200, 800, {
+        min: 0.25,
+        max: 12.5,
+        midpointDelta: 50,
+        scale: 120,
+        maxPositiveDelta: 500,
+      }) + 1,
     );
     expect(totals?.earn_metadata).toEqual({
       ccLevelAfter: 803.9281,
@@ -379,7 +391,7 @@ describe('submission ingestion', () => {
     >`
       SELECT skill.cc_level::text,
         COALESCE((SELECT sum(amount) FROM point_transactions
-          WHERE user_id = ${user.id} AND type = 'EARN'), 0)::text AS cc_point,
+          WHERE user_id = ${user.id} AND type NOT IN ('REDEEM', 'REFUND')), 0)::text AS cc_point,
         wallets.balance::text AS cc_balance
       FROM user_skill_state AS skill
       JOIN user_wallets AS wallets ON wallets.user_id = skill.user_id
@@ -388,7 +400,7 @@ describe('submission ingestion', () => {
     expect(result).toMatchObject({ firstSolveCreated: true, awarded: true });
     expect(result.amount).toBeGreaterThan(0);
     expect(Number(after?.cc_level)).toBeGreaterThan(Number(before.cc_level));
-    expect(Number(after?.cc_point)).toBe(result.amount);
+    expect(Number(after?.cc_point)).toBe(result.amount + 1);
     expect(after?.cc_balance).toBe(after?.cc_point);
   });
 
@@ -479,9 +491,9 @@ describe('submission ingestion', () => {
         CF_REQUEST_INTERVAL_MS: 2200,
         SYNC_CAPACITY_RESERVE_PERCENT: 0.25,
         SCHEDULER_BATCH_SIZE: 25,
-        SYNC_HOT_TARGET_HOURS: 2,
-        SYNC_WARM_TARGET_HOURS: 6,
-        SYNC_COLD_TARGET_HOURS: 24,
+        SYNC_ONLINE_TARGET_MINUTES: 15,
+        SYNC_RECENT_TARGET_MINUTES: 30,
+        SYNC_OFFLINE_TARGET_MINUTES: 1440,
       },
     } as EnvironmentService;
     const makeScheduler = () =>

@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { cadenceHours, syncTier } from './sync-cadence';
+import { cadenceMinutes, syncTier } from './sync-cadence';
 
 describe('adaptive sync cadence', () => {
   const now = new Date('2026-08-18T00:00:00Z');
 
-  it('classifies recent activity into HOT, WARM, and COLD tiers', () => {
-    expect(syncTier('2026-08-17T00:00:00Z', now)).toBe('HOT');
-    expect(syncTier('2026-08-01T00:00:00Z', now)).toBe('WARM');
-    expect(syncTier('2026-06-01T00:00:00Z', now)).toBe('COLD');
-    expect(syncTier(null, now)).toBe('COLD');
+  it('classifies presence using the 10 and 30 minute boundaries', () => {
+    expect(syncTier('2026-08-17T23:51:00Z', now)).toBe('ONLINE');
+    expect(syncTier('2026-08-17T23:40:00Z', now)).toBe('RECENT');
+    expect(syncTier('2026-08-17T23:29:00Z', now)).toBe('OFFLINE');
+    expect(syncTier(null, now)).toBe('OFFLINE');
   });
 
-  it('keeps HOT responsive while stretching WARM and COLD under pressure', () => {
-    const targets = { hot: 2, warm: 6, cold: 24 };
-    expect(cadenceHours('HOT', targets, 1)).toBe(2);
-    expect(cadenceHours('WARM', targets, 1)).toBe(12);
-    expect(cadenceHours('COLD', targets, 0.5)).toBe(36);
+  it('uses fixed presence-aware scheduling targets', () => {
+    const targets = { online: 15, recent: 30, offline: 1440 };
+    expect(cadenceMinutes('ONLINE', targets)).toBe(15);
+    expect(cadenceMinutes('RECENT', targets)).toBe(30);
+    expect(cadenceMinutes('OFFLINE', targets)).toBe(1440);
   });
 });

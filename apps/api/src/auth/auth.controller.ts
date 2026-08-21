@@ -47,6 +47,12 @@ export class AuthController {
     return { user: this.publicUser(user) };
   }
 
+  @Post('presence')
+  async presence(@CurrentUser() user: AuthUser) {
+    const observedAt = await this.auth.touchPresence(user.sessionId, user.userId);
+    return { status: 'ONLINE', observedAt };
+  }
+
   @Post('logout')
   async logout(
     @CurrentUser() user: AuthUser,

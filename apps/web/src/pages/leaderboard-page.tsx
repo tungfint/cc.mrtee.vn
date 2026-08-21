@@ -36,6 +36,7 @@ interface Board {
     longestStreak: number;
     activityRiskLevel: 'NORMAL' | 'REVIEW' | 'PRIORITY';
     activityRiskScore: number;
+    presenceStatus: 'ONLINE' | 'RECENT' | 'OFFLINE';
     levelRank: { name: string; icon: string | null; color: string | null } | null;
   }[];
 }
@@ -105,6 +106,17 @@ export default function LeaderboardPage() {
           </button>
         ))}
       </div>
+      <div className="presence-legend" aria-label="Chú thích trạng thái hoạt động">
+        <span>
+          <i className="presence-dot online" /> Online · dưới 10 phút
+        </span>
+        <span>
+          <i className="presence-dot recent" /> Vừa hoạt động · 10–30 phút
+        </span>
+        <span>
+          <i className="presence-dot offline" /> Offline · trên 30 phút
+        </span>
+      </div>
 
       {board.isPending ? (
         <LoadingState label="Đang dựng bảng xếp hạng…" />
@@ -139,6 +151,23 @@ export default function LeaderboardPage() {
                 />
                 <span className="leader-identity-copy">
                   <span className="leader-name-row">
+                    <span
+                      aria-label={
+                        entry.presenceStatus === 'ONLINE'
+                          ? 'Đang online'
+                          : entry.presenceStatus === 'RECENT'
+                            ? 'Vừa hoạt động'
+                            : 'Đang offline'
+                      }
+                      className={`presence-dot ${entry.presenceStatus.toLowerCase()}`}
+                      title={
+                        entry.presenceStatus === 'ONLINE'
+                          ? 'Online · hoạt động trong 10 phút'
+                          : entry.presenceStatus === 'RECENT'
+                            ? 'Vừa hoạt động · trong 10–30 phút'
+                            : 'Offline · quá 30 phút'
+                      }
+                    />
                     <StudentName name={entry.displayName} rating={entry.currentRating} />
                     {entry.activityRiskLevel && entry.activityRiskLevel !== 'NORMAL' && (
                       <span

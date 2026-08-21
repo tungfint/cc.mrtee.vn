@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { api, type SessionUser } from '../lib/api';
 import { Avatar } from './ui';
@@ -29,6 +29,29 @@ export function AppShell({ user }: { user: SessionUser }) {
         memberships: { role: string }[];
       }>('/me'),
   });
+  const notificationSummary = useQuery({
+    queryKey: ['notification-summary'],
+    queryFn: () =>
+      api<{
+        unreadCount: number;
+        ticker: { id: string; ticker_text: string; publish_at: string }[];
+      }>('/notifications/summary'),
+    refetchInterval: 60_000,
+  });
+  useEffect(() => {
+    const touch = () => {
+      if (document.visibilityState === 'visible') {
+        void api('/auth/presence', { method: 'POST' }).catch(() => undefined);
+      }
+    };
+    touch();
+    const timer = window.setInterval(touch, 60_000);
+    document.addEventListener('visibilitychange', touch);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', touch);
+    };
+  }, []);
   const canAdmin =
     user.systemRole !== 'USER' ||
     profile.data?.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role));
@@ -81,6 +104,18 @@ export function AppShell({ user }: { user: SessionUser }) {
               {link.label}
             </NavLink>
           ))}
+          <NavLink
+            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+            to="/notifications"
+          >
+            <span aria-hidden>◉</span>
+            Thông báo
+            {(notificationSummary.data?.unreadCount ?? 0) > 0 && (
+              <b className="notification-count">
+                {Math.min(99, notificationSummary.data?.unreadCount ?? 0)}
+              </b>
+            )}
+          </NavLink>
           <NavLink
             className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
             to={`/students/${user.userId}`}
@@ -136,6 +171,17 @@ export function AppShell({ user }: { user: SessionUser }) {
         </div>
       </aside>
       <main className="main-content">
+        {!!notificationSummary.data?.ticker.length && (
+          <NavLink className="notification-ticker" to="/notifications">
+            <span aria-hidden>📣</span>
+            <span className="notification-ticker-window">
+              <span className="notification-ticker-track">
+                {notificationSummary.data.ticker.map((item) => item.ticker_text).join('  ◆  ')}
+              </span>
+            </span>
+            <strong>Xem</strong>
+          </NavLink>
+        )}
         <Outlet />
       </main>
     </div>

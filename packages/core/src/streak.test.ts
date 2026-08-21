@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { calculateStreakBonus, currentDateStreak, longestDateStreak } from './streak';
+import {
+  calculateDailyStreakBonus,
+  calculateStreakBonus,
+  currentDateStreak,
+  longestDateStreak,
+} from './streak';
 
 describe('date streak', () => {
   it('deduplicates days and finds the longest consecutive run', () => {
@@ -13,13 +18,24 @@ describe('date streak', () => {
 });
 
 describe('streak bonus', () => {
-  it('rewards meaningful milestones with a progressive, auditable formula', () => {
+  it('increases smoothly and caps the daily reward at four points', () => {
+    expect(calculateDailyStreakBonus(0)).toBe(0);
+    expect(calculateDailyStreakBonus(1)).toBe(1);
+    expect(calculateDailyStreakBonus(2)).toBe(1.15);
+    expect(calculateDailyStreakBonus(6)).toBe(1.75);
+    expect(calculateDailyStreakBonus(7)).toBe(2);
+    expect(calculateDailyStreakBonus(8)).toBe(2.15);
+    expect(calculateDailyStreakBonus(20)).toBe(3.95);
+    expect(calculateDailyStreakBonus(21)).toBe(4);
+    expect(calculateDailyStreakBonus(365)).toBe(4);
+  });
+
+  it('reports the accumulated value of a streak', () => {
     expect(calculateStreakBonus(0)).toBe(0);
-    expect(calculateStreakBonus(1)).toBe(0);
-    expect(calculateStreakBonus(2)).toBe(1);
-    expect(calculateStreakBonus(7)).toBe(7);
-    expect(calculateStreakBonus(14)).toBe(22);
-    expect(calculateStreakBonus(30)).toBe(71);
-    expect(calculateStreakBonus(60)).toBe(191);
+    expect(calculateStreakBonus(1)).toBe(1);
+    expect(calculateStreakBonus(7)).toBe(10.25);
+    expect(calculateStreakBonus(14)).toBe(28.45);
+    expect(calculateStreakBonus(30)).toBe(89.9);
+    expect(calculateStreakBonus(60)).toBe(209.9);
   });
 });

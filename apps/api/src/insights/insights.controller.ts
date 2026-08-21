@@ -39,6 +39,7 @@ interface LeaderboardRow {
   level_rank_name: string | null;
   level_rank_icon: string | null;
   level_rank_color: string | null;
+  presence_status: 'ONLINE' | 'RECENT' | 'OFFLINE';
 }
 
 interface AchievementRow {
@@ -233,7 +234,7 @@ export class InsightsController {
       streak: {
         current_streak: streak.currentStreak,
         longest_streak: streak.longestStreak,
-        pending_bonus: streak.pendingBonus,
+        next_bonus: streak.nextBonus,
         settled_bonus: streak.settledBonus,
       },
       tags,
@@ -342,6 +343,11 @@ export class InsightsController {
         COALESCE(wallet.balance, 0)::text AS cc_balance,
         COALESCE(streak.current_streak, 0)::int AS current_streak,
         COALESCE(streak.longest_streak, 0)::int AS longest_streak,
+        CASE
+          WHEN presence.last_seen_at >= now() - interval '10 minutes' THEN 'ONLINE'
+          WHEN presence.last_seen_at >= now() - interval '30 minutes' THEN 'RECENT'
+          ELSE 'OFFLINE'
+        END AS presence_status,
         level_rank.name AS level_rank_name, level_rank.icon AS level_rank_icon,
         level_rank.color AS level_rank_color
       FROM users
@@ -349,6 +355,10 @@ export class InsightsController {
       LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
       LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
       LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
+      LEFT JOIN LATERAL (
+        SELECT max(last_seen_at) AS last_seen_at FROM auth_sessions
+        WHERE user_id = users.id AND revoked_at IS NULL AND expires_at > now()
+      ) AS presence ON true
       LEFT JOIN LATERAL (
         SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
         FROM point_transactions WHERE user_id = users.id
@@ -435,6 +445,7 @@ export class InsightsController {
         longestStreak: row.longest_streak,
         activityRiskLevel: row.activity_risk_level,
         activityRiskScore: row.activity_risk_score,
+        presenceStatus: row.presence_status,
         levelRank: row.level_rank_name
           ? {
               name: row.level_rank_name,
@@ -623,7 +634,7 @@ export class InsightsController {
       streak: {
         current_streak: streak.currentStreak,
         longest_streak: streak.longestStreak,
-        pending_bonus: streak.pendingBonus,
+        next_bonus: streak.nextBonus,
         settled_bonus: streak.settledBonus,
         timeline: streak.timeline,
         rescue: streak.rescue,

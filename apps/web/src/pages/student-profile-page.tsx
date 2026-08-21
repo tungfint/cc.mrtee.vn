@@ -42,7 +42,7 @@ interface StudentProfile {
   streak: {
     current_streak: number;
     longest_streak: number;
-    pending_bonus: number;
+    next_bonus: number;
     settled_bonus: number;
     timeline: {
       date: string;
@@ -53,6 +53,7 @@ interface StudentProfile {
       codeforcesUrl: string | null;
       mascotName: string | null;
       mascotImageUrl: string | null;
+      bonusAmount: number;
     }[];
     rescue: {
       missingDates: string[];
@@ -289,9 +290,9 @@ export default function StudentProfilePage() {
               <p className="eyebrow">NHẬT KÝ STREAK</p>
               <h2>Bài đầu tiên được ghi nhận mỗi ngày</h2>
               <p>
-                Chuỗi hiện tại có thể nhận{' '}
-                <strong>{formatNumber(streak.pending_bonus)} CC Point</strong> khi kết thúc; CC
-                Balance cũng tăng đúng số điểm này.
+                Hoàn thành ngày tiếp theo sẽ nhận{' '}
+                <strong>{formatNumber(streak.next_bonus, 2)} CC Point</strong>; CC Balance tăng đúng
+                số điểm này ngay sau khi đồng bộ.
               </p>
             </div>
             <div className="streak-bonus-summary">
@@ -313,6 +314,7 @@ export default function StudentProfilePage() {
                 <span>Ngày</span>
                 <span>Ghi nhận đầu tiên</span>
                 <span>Rating</span>
+                <span>Thưởng ngày</span>
                 <span>Minh chứng</span>
               </div>
               {[...streak.timeline].reverse().map((day) => (
@@ -332,6 +334,11 @@ export default function StudentProfilePage() {
                     )}
                   </span>
                   <span>{day.problemRating ?? '—'}</span>
+                  <strong>
+                    {day.kind === 'SOLVE' && day.bonusAmount > 0
+                      ? `+${formatNumber(day.bonusAmount, 2)} CC`
+                      : '—'}
+                  </strong>
                   {day.codeforcesUrl ? (
                     <a
                       className="button-secondary"
