@@ -7,6 +7,7 @@ const metrics = [
     name: 'CC Level',
     shortName: 'CCL',
     note: 'Năng lực dài hạn',
+    formula: 'Mỗi bài: tăng tối đa 4 CCL',
     detail:
       'Bắt đầu từ 800. Mỗi bài rated Accepted lần đầu cộng một mức tăng dương theo chênh lệch giữa rating bài và CCL trước bài đó. Mức tăng tối đa 4 CCL/bài; phần vượt quá CCL +500 không làm điểm tăng thêm, nhờ vậy một bài bất thường không thể kéo năng lực lên quá nhanh.',
   },
@@ -15,6 +16,7 @@ const metrics = [
     name: 'CC Point',
     shortName: 'CCP',
     note: 'Tổng thành tích tích luỹ',
+    formula: 'Mỗi bài: 0,25–12,50 CCP',
     detail:
       'Một bài rated hợp lệ nhận từ 0,25 đến 12,50 CCP theo đường cong tăng mượt: bài càng khó so với CCL trước lúc giải thì thưởng càng cao. Bài quá dễ vẫn có điểm nhỏ; độ khó vượt CCL +500 không tiếp tục khuếch đại thưởng.',
   },
@@ -23,6 +25,7 @@ const metrics = [
     name: 'CC Balance',
     shortName: 'CCB',
     note: 'Số dư dùng để đổi quà',
+    formula: 'CCB tăng cùng CCP · giảm khi đổi quà',
     detail:
       'Mỗi hoạt động làm tăng CCP cũng tăng CCB đúng bằng số điểm đó. Khi đổi quà, chỉ CCB giảm; CCP vẫn giữ nguyên để phản ánh tổng thành tích bạn từng đạt được.',
   },
@@ -31,6 +34,7 @@ const metrics = [
     name: 'Streak',
     shortName: 'Chuỗi',
     note: 'Nhịp luyện tập liên tục',
+    formula: '1 → tối đa 4 CCP mỗi ngày',
     detail:
       'Mỗi ngày có bài mới Accepted sẽ nhận một lần thưởng: ngày 1 là 1 CCP, sau đó tăng 0,15 mỗi ngày, đạt mốc 7 ngày được thêm 0,10 và tối đa 4 CCP/ngày. Điểm vào cả CCP lẫn CCB ngay sau đồng bộ. Linh vật có thể nối tối đa 3 ngày nhưng ngày cứu không sinh điểm.',
   },
@@ -142,11 +146,10 @@ export default function AboutPage() {
 
       <nav className="about-anchor-nav" aria-label="Nội dung trang Giới thiệu">
         <a href="#tong-quan">Tổng quan</a>
-        <a href="#cach-tinh">Cách tính điểm</a>
+        <a href="#cach-tinh">Các chỉ số</a>
         <a href="#bat-dau">Bắt đầu</a>
         <a href="#dong-bo">Đồng bộ</a>
-        <a href="#tinh-nang">Tính năng</a>
-        <a href="#nguyen-tac">Nguyên tắc</a>
+        <a href="#kham-pha">Tính năng & nguyên tắc</a>
       </nav>
 
       <section className="about-hero panel" id="tong-quan">
@@ -180,11 +183,15 @@ export default function AboutPage() {
       </section>
 
       <section className="about-section-heading" id="cach-tinh">
+        <span className="about-section-index">01</span>
         <div>
-          <p className="eyebrow">CÁCH HỆ THỐNG TÍNH ĐIỂM</p>
+          <p className="eyebrow">HIỂU ĐÚNG CÁC CHỈ SỐ</p>
           <h2>Bốn chỉ số, bốn vai trò rõ ràng</h2>
         </div>
-        <p>Không một chỉ số đơn lẻ nào quyết định toàn bộ sự tiến bộ của học sinh.</p>
+        <p>
+          Nhìn CCL để biết năng lực, CCP để biết thành tích, CCB để đổi quà và Streak để giữ nhịp
+          học.
+        </p>
       </section>
 
       <section className="about-metric-grid">
@@ -198,6 +205,7 @@ export default function AboutPage() {
             </div>
             <h3>{metric.name}</h3>
             <strong>{metric.note}</strong>
+            <span className="about-metric-formula">{metric.formula}</span>
             <p>{metric.detail}</p>
           </article>
         ))}
@@ -205,6 +213,7 @@ export default function AboutPage() {
 
       <section className="panel about-start-panel" id="bat-dau">
         <div className="about-section-heading compact">
+          <span className="about-section-index">02</span>
           <div>
             <p className="eyebrow">BẮT ĐẦU RẤT ĐƠN GIẢN</p>
             <h2>Từ tài khoản Codeforces tới hồ sơ tiến bộ</h2>
@@ -224,10 +233,22 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="about-sync-layout" id="dong-bo">
+      <section className="about-section-heading" id="dong-bo">
+        <span className="about-section-index">03</span>
+        <div>
+          <p className="eyebrow">BÀI GIẢI ĐƯỢC GHI NHẬN KHI NÀO?</p>
+          <h2>Đồng bộ tự động theo trạng thái hoạt động</h2>
+        </div>
+        <p>
+          Đang dùng hệ thống thì cập nhật nhanh hơn; khi offline, lịch đồng bộ được giãn để dùng hợp
+          lý giới hạn Codeforces.
+        </p>
+      </section>
+
+      <section className="about-sync-layout">
         <article className="panel about-sync-intro">
-          <p className="eyebrow">KHI NÀO BÀI ĐƯỢC CẬP NHẬT?</p>
-          <h2>Đồng bộ tự động theo nhịp hoạt động</h2>
+          <p className="eyebrow">QUY TRÌNH GHI NHẬN</p>
+          <h2>Từ Accepted tới điểm số</h2>
           <p>
             Cầy Cốt kiểm tra các tài khoản đến hạn mỗi 30 giây. Khi lượt đồng bộ bắt đầu, hệ thống
             đọc dữ liệu Codeforces, nhận diện bài mới rồi cập nhật CCL, CCP, CCB và Streak ngay
@@ -262,12 +283,15 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="about-section-heading" id="tinh-nang">
+      <section className="about-section-heading" id="kham-pha">
+        <span className="about-section-index">04</span>
         <div>
-          <p className="eyebrow">TÍNH NĂNG NỔI BẬT</p>
+          <p className="eyebrow">TÍNH NĂNG & NGUYÊN TẮC</p>
           <h2>Một nơi để học, theo dõi và được ghi nhận</h2>
         </div>
-        <p>Thiết kế cho học sinh, giáo viên, lớp học và cả những người muốn theo dõi hành trình.</p>
+        <p>
+          Các công cụ được tổ chức quanh hồ sơ học sinh, dữ liệu có minh chứng và lịch sử rõ ràng.
+        </p>
       </section>
 
       <section className="about-feature-grid">
@@ -280,7 +304,7 @@ export default function AboutPage() {
         ))}
       </section>
 
-      <section className="about-rules" id="nguyen-tac">
+      <section className="about-rules">
         <article className="panel about-rule-card">
           <span className="about-rule-icon" aria-hidden>
             ✓

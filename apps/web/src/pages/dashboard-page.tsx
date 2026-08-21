@@ -600,32 +600,34 @@ function MiniLeaderboard({
                 url={row.avatarUrl}
               />
               <Link className="mini-rank-identity" to={`/students/${row.userId}`}>
-                <span
-                  aria-label={
-                    row.presenceStatus === 'ONLINE'
-                      ? 'Đang online'
-                      : row.presenceStatus === 'RECENT'
-                        ? 'Vừa hoạt động'
-                        : 'Đang offline'
-                  }
-                  className={`presence-dot ${row.presenceStatus.toLowerCase()}`}
-                  title={
-                    row.presenceStatus === 'ONLINE'
-                      ? 'Online'
-                      : row.presenceStatus === 'RECENT'
-                        ? 'Vừa hoạt động'
-                        : 'Offline'
-                  }
-                />
-                <StudentName name={row.displayName} rating={row.currentRating} />
-                {row.activityRiskLevel && row.activityRiskLevel !== 'NORMAL' && (
+                <span className="mini-rank-name-line">
                   <span
-                    className={`activity-risk-icon ${row.activityRiskLevel.toLowerCase()}`}
-                    title="Hoạt động cần kiểm tra"
-                  >
-                    ⚠
-                  </span>
-                )}
+                    aria-label={
+                      row.presenceStatus === 'ONLINE'
+                        ? 'Đang online'
+                        : row.presenceStatus === 'RECENT'
+                          ? 'Vừa hoạt động'
+                          : 'Đang offline'
+                    }
+                    className={`presence-dot ${row.presenceStatus.toLowerCase()}`}
+                    title={
+                      row.presenceStatus === 'ONLINE'
+                        ? 'Online'
+                        : row.presenceStatus === 'RECENT'
+                          ? 'Vừa hoạt động'
+                          : 'Offline'
+                    }
+                  />
+                  <StudentName name={row.displayName} rating={row.currentRating} />
+                  {row.activityRiskLevel && row.activityRiskLevel !== 'NORMAL' && (
+                    <span
+                      className={`activity-risk-icon ${row.activityRiskLevel.toLowerCase()}`}
+                      title="Hoạt động cần kiểm tra"
+                    >
+                      ⚠
+                    </span>
+                  )}
+                </span>
                 <LevelRankBadge rank={row.levelRank} />
               </Link>
               <b>{value(row)}</b>
