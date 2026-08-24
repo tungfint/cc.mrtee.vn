@@ -93,6 +93,19 @@ interface StudentProfile {
   }[];
   topTags: { tag: string; solved_count: number; max_rating: number | null }[];
   pointHistory: PointHistoryItem[];
+  riskEvents: {
+    id: string;
+    signal_code: string;
+    score: number;
+    summary: string;
+    evidence: Record<string, unknown>;
+    created_at: string;
+    reviewed_at: string | null;
+    resolution: 'VALID' | 'MONITORING' | 'VIOLATION' | null;
+    review_note: string | null;
+    reviewed_by_name: string | null;
+    source_submission_id: string | null;
+  }[];
 }
 
 interface PointHistoryItem {
@@ -185,6 +198,8 @@ export default function StudentProfilePage() {
   if (!student.data)
     return <EmptyState title="Không tìm thấy học sinh" detail="Hồ sơ không còn khả dụng." />;
   const { profile, streak, achievements, rewards, topTags } = student.data;
+  const riskEvents = student.data.riskEvents ?? [];
+  const activityRiskLevel = profile.activity_risk_level ?? 'NORMAL';
   const isOwner = session.data?.user.userId === profile.id;
   const pointHistory = history.data?.items ?? student.data.pointHistory;
   const historyPagination = history.data?.pagination ?? {
@@ -283,6 +298,56 @@ export default function StudentProfilePage() {
             note={`Kỷ lục ${streak.longest_streak} ngày`}
           />
         </section>
+
+        {(activityRiskLevel !== 'NORMAL' || riskEvents.length > 0) && (
+          <section className="panel student-risk-panel p-6">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">MINH BẠCH HOẠT ĐỘNG</p>
+                <h2>Cảnh báo và kết quả xác minh</h2>
+                <p>
+                  Cảnh báo là tín hiệu để cộng đồng và giáo viên cùng kiểm tra, không tự động kết
+                  luận gian lận hoặc giữ điểm của học sinh.
+                </p>
+              </div>
+              <span className={`activity-risk-badge ${activityRiskLevel.toLowerCase()}`}>
+                {activityRiskLevel === 'NORMAL'
+                  ? 'Đã xác nhận hợp lệ'
+                  : activityRiskLevel === 'PRIORITY'
+                    ? `Ưu tiên kiểm tra · ${profile.activity_risk_score} điểm cảnh báo`
+                    : `Cần kiểm tra · ${profile.activity_risk_score} điểm cảnh báo`}
+              </span>
+            </div>
+            <div className="student-risk-list mt-5">
+              {riskEvents.map((event) => (
+                <article
+                  className={`student-risk-event ${event.resolution?.toLowerCase() ?? ''}`}
+                  key={event.id}
+                >
+                  <div>
+                    <strong>{event.summary}</strong>
+                    <p>{riskEvidence(event.evidence)}</p>
+                    <small>
+                      {formatDate(event.created_at)} · Mức cảnh báo +{event.score}
+                      {event.source_submission_id
+                        ? ` · Submission #${event.source_submission_id}`
+                        : ''}
+                    </small>
+                  </div>
+                  <div className="text-right">
+                    <b>{riskResolutionLabel(event.resolution)}</b>
+                    {event.review_note && (
+                      <small>
+                        {event.reviewed_by_name ? `${event.reviewed_by_name}: ` : ''}
+                        {event.review_note}
+                      </small>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="panel streak-profile-panel p-6">
           <div className="section-heading">
@@ -715,6 +780,28 @@ function paginationPages(current: number, total: number) {
   const count = Math.min(total, 5);
   const start = Math.max(1, Math.min(current - 2, total - count + 1));
   return Array.from({ length: count }, (_, index) => start + index);
+}
+
+function riskEvidence(evidence: Record<string, unknown>) {
+  const parts: string[] = [];
+  if (typeof evidence.problemRating === 'number')
+    parts.push(`Rating bài ${evidence.problemRating}`);
+  if (typeof evidence.levelBefore === 'number')
+    parts.push(`CC Level trước bài ${formatNumber(evidence.levelBefore, 2)}`);
+  if (typeof evidence.delta === 'number') parts.push(`Chênh lệch +${formatNumber(evidence.delta)}`);
+  if (typeof evidence.count === 'number') parts.push(`${evidence.count} bài được ghi nhận`);
+  if (typeof evidence.windowHours === 'number') parts.push(`trong ${evidence.windowHours} giờ`);
+  return parts.join(' · ') || 'Hệ thống phát hiện nhịp hoạt động cần được xem lại.';
+}
+
+function riskResolutionLabel(resolution: string | null) {
+  return (
+    {
+      VALID: '✓ Đã xác nhận hợp lệ',
+      MONITORING: '◷ Tiếp tục theo dõi',
+      VIOLATION: '⚠ Đã xác nhận vi phạm',
+    }[resolution ?? ''] ?? 'Chưa được xác minh'
+  );
 }
 
 function signedPoint(value: string) {

@@ -6,13 +6,18 @@ import { z } from 'zod';
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
-import { ScoringAdjustmentsService, type ManualPointType } from './scoring-adjustments.service';
+import {
+  ScoringAdjustmentsService,
+  type ManualPointTarget,
+  type ManualPointType,
+} from './scoring-adjustments.service';
 
 type CellValue = string | number | boolean | Date | DateConstructor | null;
 export type EditablePointImportRow = {
   row: number;
   email: string;
   operation: string;
+  target: ManualPointTarget;
   amount: number;
   reason: string;
   affectsSeason: boolean;
@@ -68,12 +73,15 @@ export class BulkPointImportService {
         reason: String(record.ly_do ?? ''),
       });
       const type = this.pointType(String(record.thao_tac ?? ''));
+      const targetMetric = this.pointTarget(String(record.chi_so ?? 'BOTH'));
       const affectsSeason = this.booleanValue(record.anh_huong_mua);
-      if (!parsed.success || !type || affectsSeason === null) {
+      if (!parsed.success || !type || !targetMetric || affectsSeason === null) {
         const validationMessage = parsed.success
           ? !type
             ? 'Thao tác phải là CỘNG hoặc TRỪ'
-            : 'Ảnh hưởng mùa phải là CÓ hoặc KHÔNG'
+            : !targetMetric
+              ? 'Chỉ số phải là CC_POINT, CC_BALANCE hoặc BOTH'
+              : 'Ảnh hưởng mùa phải là CÓ hoặc KHÔNG'
           : parsed.error.issues.map((issue) => issue.message).join('; ');
         results.push({ row: index + 2, email, success: false, message: validationMessage });
         continue;
@@ -114,6 +122,7 @@ export class BulkPointImportService {
           organizationId,
           targetUserId: target.user_id,
           type,
+          target: targetMetric,
           amount: parsed.data.amount * (type === 'PENALTY' ? -1 : 1),
           affectsSeason,
           reason: parsed.data.reason,
@@ -166,6 +175,7 @@ export class BulkPointImportService {
       if (row.every((value) => value === null || String(value).trim() === '')) continue;
       const record = Object.fromEntries(header.map((key, column) => [key, row[column] ?? '']));
       const type = this.pointType(String(record.thao_tac ?? ''));
+      const targetMetric = this.pointTarget(String(record.chi_so ?? 'BOTH'));
       const affectsSeason = this.booleanValue(record.anh_huong_mua);
       const candidate = {
         row: index + 2,
@@ -174,6 +184,7 @@ export class BulkPointImportService {
           .toLowerCase(),
         operation:
           type === 'PENALTY' ? 'TRỪ' : type === 'BONUS' ? 'CỘNG' : String(record.thao_tac ?? ''),
+        target: targetMetric ?? 'BOTH',
         amount: Number(record.cc_point ?? 0),
         reason: String(record.ly_do ?? '').trim(),
         affectsSeason: affectsSeason ?? true,
@@ -181,6 +192,7 @@ export class BulkPointImportService {
       const parsed = rowSchema.safeParse(candidate);
       const errors = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message);
       if (!type) errors.push('Thao tác phải là CỘNG hoặc TRỪ');
+      if (!targetMetric) errors.push('Chỉ số phải là CC_POINT, CC_BALANCE hoặc BOTH');
       if (affectsSeason === null) errors.push('Ảnh hưởng mùa phải là CÓ hoặc KHÔNG');
       result.push({ ...candidate, errors });
     }
@@ -214,16 +226,19 @@ export class BulkPointImportService {
       const email = row.email.trim().toLowerCase();
       const parsed = rowSchema.safeParse({ email, amount: row.amount, reason: row.reason });
       const type = this.pointType(row.operation);
-      if (!parsed.success || !type) {
+      const targetMetric = this.pointTarget(row.target);
+      if (!parsed.success || !type || !targetMetric) {
         results.push({
           row: row.row || index + 1,
           email,
           success: false,
           message: !type
             ? 'Thao tác phải là CỘNG hoặc TRỪ'
-            : parsed.success
-              ? 'Dữ liệu không hợp lệ'
-              : parsed.error.issues.map((issue) => issue.message).join('; '),
+            : !targetMetric
+              ? 'Chỉ số phải là CC_POINT, CC_BALANCE hoặc BOTH'
+              : parsed.success
+                ? 'Dữ liệu không hợp lệ'
+                : parsed.error.issues.map((issue) => issue.message).join('; '),
         });
         continue;
       }
@@ -254,6 +269,7 @@ export class BulkPointImportService {
           organizationId,
           targetUserId: target.user_id,
           type,
+          target: targetMetric,
           amount: parsed.data.amount * (type === 'PENALTY' ? -1 : 1),
           affectsSeason: row.affectsSeason,
           reason: parsed.data.reason,
@@ -304,6 +320,14 @@ export class BulkPointImportService {
     const normalized = this.normalize(value).toUpperCase();
     if (['CONG', 'BONUS', 'ADD', '+'].includes(normalized)) return 'BONUS';
     if (['TRU', 'PENALTY', 'SUBTRACT', '-'].includes(normalized)) return 'PENALTY';
+    return null;
+  }
+
+  private pointTarget(value: string): ManualPointTarget | null {
+    const normalized = this.normalize(value).toUpperCase();
+    if (['CC_POINT', 'CCP', 'POINT'].includes(normalized)) return 'CC_POINT';
+    if (['CC_BALANCE', 'CCB', 'BALANCE'].includes(normalized)) return 'CC_BALANCE';
+    if (['BOTH', 'CA_HAI', 'CC_POINT_CC_BALANCE', ''].includes(normalized)) return 'BOTH';
     return null;
   }
 

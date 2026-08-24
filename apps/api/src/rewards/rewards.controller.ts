@@ -9,6 +9,10 @@ import { StreakService } from './streak.service';
 const redeemSchema = z.object({
   idempotencyKey: z.string().trim().min(8).max(120),
 });
+const giftSchema = redeemSchema.extend({
+  recipientUserId: z.string().uuid(),
+  message: z.string().trim().max(500).optional().default(''),
+});
 const transitionSchema = z.object({
   status: z.enum(['APPROVED', 'FULFILLED', 'REJECTED', 'CANCELLED']),
   note: z.string().trim().min(3).max(500),
@@ -42,6 +46,27 @@ export class RewardsController {
     if (!id.success || !input.success) throw new BadRequestException('Dữ liệu không hợp lệ');
     await this.rateLimit.consume(`redeem:${user.userId}`, 5, 60);
     return this.rewards.redeem(user.userId, id.data, input.data.idempotencyKey);
+  }
+
+  @Get('rewards/gift-recipients')
+  giftRecipients(@CurrentUser() user: AuthUser) {
+    return this.rewards.giftRecipients(user.userId);
+  }
+
+  @Post('rewards/:id/gift')
+  async gift(@Param('id') idInput: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    const id = z.string().uuid().safeParse(idInput);
+    const input = giftSchema.safeParse(body);
+    if (!id.success || !input.success)
+      throw new BadRequestException('Dữ liệu tặng quà không hợp lệ');
+    await this.rateLimit.consume(`gift:${user.userId}`, 5, 60);
+    return this.rewards.gift(
+      user.userId,
+      input.data.recipientUserId,
+      id.data,
+      input.data.idempotencyKey,
+      input.data.message,
+    );
   }
 
   @Get('me/reward-orders')

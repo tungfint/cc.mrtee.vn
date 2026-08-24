@@ -65,7 +65,7 @@ async function main() {
         LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
         LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
         LEFT JOIN LATERAL (
-          SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+          SELECT sum(amount) FILTER (WHERE affects_point) AS cc_point
           FROM point_transactions WHERE user_id = users.id
         ) AS points ON true
         WHERE users.id = ${USER_ID}
@@ -268,16 +268,16 @@ async function main() {
       await transaction`
       INSERT INTO point_transactions (
         user_id, type, amount, source_reward_order_id, idempotency_key,
-        affects_wallet, affects_season, description, metadata, event_at
+        affects_wallet, affects_point, affects_season, description, metadata, event_at
       ) VALUES
         (
           ${USER_ID}, 'REDEEM', -90, ${MASCOT_ORDER_ID}, 'demo:student:mascot-redeem',
-          true, false, 'Đổi Linh vật Cáo Hồng Công Nghệ',
+          true, false, false, 'Đổi Linh vật Cáo Hồng Công Nghệ',
           ${JSON.stringify({ demo: true })}::jsonb, ${iso(new Date(today.getTime() + 60_000))}
         ),
         (
           ${USER_ID}, 'REDEEM', -60, ${STANDARD_ORDER_ID}, 'demo:student:standard-redeem',
-          true, false, 'Đổi Hộp quà Cầy Cốt Bí ẩn',
+          true, false, false, 'Đổi Hộp quà Cầy Cốt Bí ẩn',
           ${JSON.stringify({ demo: true })}::jsonb, ${iso(new Date(today.getTime() + 120_000))}
         )
     `;

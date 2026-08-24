@@ -22,6 +22,7 @@ const confirmSchema = z.object({
         row: z.number().int().positive(),
         email: z.string(),
         operation: z.string(),
+        target: z.enum(['CC_POINT', 'CC_BALANCE', 'BOTH']).default('BOTH'),
         amount: z.coerce.number(),
         reason: z.string(),
         affectsSeason: z.boolean(),

@@ -29,6 +29,8 @@ import { AvatarService } from '../users/avatar.service';
 import { AuthorizationService } from './authorization.service';
 import { ContentController } from '../content/content.controller';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LevelRankAwardsService } from '../scoring/level-rank-awards.service';
+import { CcLevelRecalibrationService } from '../scoring/cc-level-recalibration.service';
 
 config({ path: resolve(__dirname, '../../../../.env'), quiet: true });
 
@@ -53,8 +55,15 @@ const codeforcesAccounts = new CodeforcesAccountsService(
   } as unknown as import('../sync/sync-queue.service').SyncQueueService,
 );
 const seasonClosure = new SeasonClosureService({ sql: connection } as DatabaseService, service);
-const rewards = new RewardsService({ sql: connection } as DatabaseService);
-const concurrentRewards = new RewardsService({ sql: concurrentConnection } as DatabaseService);
+const notifications = new NotificationsService({ sql: connection } as DatabaseService);
+const concurrentNotifications = new NotificationsService({
+  sql: concurrentConnection,
+} as DatabaseService);
+const rewards = new RewardsService({ sql: connection } as DatabaseService, notifications);
+const concurrentRewards = new RewardsService(
+  { sql: concurrentConnection } as DatabaseService,
+  concurrentNotifications,
+);
 const rewardsAdmin = new RewardsAdminController(
   { sql: connection } as DatabaseService,
   {
@@ -65,9 +74,25 @@ const streaks = new StreakService({ sql: connection } as DatabaseService);
 const insights = new InsightsController({ sql: connection } as DatabaseService, service, streaks, {
   store: () => Promise.resolve('/api/uploads/recognition/test.png'),
 } as unknown as RecognitionImageService);
-const contentController = new ContentController({ sql: connection } as DatabaseService);
-const notifications = new NotificationsService({ sql: connection } as DatabaseService);
-const adjustments = new ScoringAdjustmentsService({ sql: connection } as DatabaseService, service);
+const contentController = new ContentController(
+  { sql: connection } as DatabaseService,
+  notifications,
+);
+const adjustments = new ScoringAdjustmentsService(
+  { sql: connection } as DatabaseService,
+  service,
+  notifications,
+);
+const levelRankAwards = new LevelRankAwardsService(
+  { sql: connection } as DatabaseService,
+  notifications,
+);
+const recalibration = new CcLevelRecalibrationService(
+  { sql: connection } as DatabaseService,
+  service,
+  notifications,
+  levelRankAwards,
+);
 const bulkPointImport = new BulkPointImportService(service, adjustments, {
   sql: connection,
 } as DatabaseService);
@@ -752,8 +777,8 @@ describe('authorization matrix', () => {
     `;
     await connection`
       INSERT INTO point_transactions (
-        user_id, type, amount, affects_wallet, affects_season, description, event_at
-      ) VALUES (${ids.member!}, 'REDEEM', -5, true, false, 'Đổi quà kiểm thử', now())
+        user_id, type, amount, affects_wallet, affects_point, affects_season, description, event_at
+      ) VALUES (${ids.member!}, 'REDEEM', -5, true, false, false, 'Đổi quà kiểm thử', now())
     `;
     await connection`
       INSERT INTO auth_sessions (user_id, token_hash, csrf_token_hash, expires_at)
@@ -829,6 +854,181 @@ describe('authorization matrix', () => {
     );
     expect(adminProfile.profile).toMatchObject({ id: ids.systemAdmin! });
     expect(adminProfile).toHaveProperty('pointHistory');
+  });
+
+  it('previews and explicitly applies P70 CCL recalibration with first-rank reward', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    await connection`
+      INSERT INTO user_skill_state (user_id, cc_base, cc_calculated, cc_level)
+      VALUES (${ids.member!}, 800, 800, 800)
+    `;
+    await connection`
+      INSERT INTO cc_level_ranks (min_level, name, icon, color, reward_point)
+      VALUES (1100, 'Bạc kiểm thử', '🥈', '#94a3b8', 50)
+      ON CONFLICT (min_level) DO UPDATE SET
+        name = EXCLUDED.name, icon = EXCLUDED.icon, color = EXCLUDED.color,
+        reward_point = EXCLUDED.reward_point, active = true
+    `;
+    await connection`
+      INSERT INTO cf_problems (problem_key, contest_id, problem_index, name, type, current_rating)
+      VALUES
+        ('3100:A', 3100, 'A', 'Calibration A', 'PROGRAMMING', 1000),
+        ('3100:B', 3100, 'B', 'Calibration B', 'PROGRAMMING', 1100),
+        ('3100:C', 3100, 'C', 'Calibration C', 'PROGRAMMING', 1200),
+        ('3100:D', 3100, 'D', 'Calibration D', 'PROGRAMMING', 1300),
+        ('3100:E', 3100, 'E', 'Calibration E', 'PROGRAMMING', 1400)
+    `;
+    await connection`
+      INSERT INTO cf_submissions (
+        cf_submission_id, user_id, problem_key, creation_time, verdict, is_team,
+        problem_rating_observed
+      ) VALUES
+        (910000000001, ${ids.member!}, '3100:A', now() - interval '5 days', 'OK', false, 1000),
+        (910000000002, ${ids.member!}, '3100:B', now() - interval '4 days', 'OK', false, 1100),
+        (910000000003, ${ids.member!}, '3100:C', now() - interval '3 days', 'OK', false, 1200),
+        (910000000004, ${ids.member!}, '3100:D', now() - interval '2 days', 'OK', false, 1300),
+        (910000000005, ${ids.member!}, '3100:E', now() - interval '1 day', 'OK', false, 1400)
+    `;
+    await connection`
+      INSERT INTO user_problem_solves (
+        user_id, problem_key, first_ok_submission_id, first_solved_at, rating_snapshot
+      )
+      SELECT user_id, problem_key, cf_submission_id, creation_time, problem_rating_observed
+      FROM cf_submissions WHERE user_id = ${ids.member!}
+    `;
+
+    const preview = await recalibration.preview(
+      { scope: 'USER', targetUserId: ids.member! },
+      actor,
+    );
+    expect(preview.rows[0]).toMatchObject({
+      currentLevel: 800,
+      referenceLevel: 1280,
+      solveCount: 5,
+      eligible: true,
+      change: 480,
+    });
+    await expect(rewards.walletBalance(ids.member)).resolves.toBe('0.00');
+
+    const applied = await recalibration.apply(
+      {
+        scope: 'USER',
+        targetUserId: ids.member!,
+        reason: 'Hiệu chỉnh theo 5 bài gần nhất',
+      },
+      actor,
+    );
+    expect(applied).toMatchObject({ updated: 1 });
+    const [summary] = await connection<
+      {
+        cc_level: string;
+        balance: string;
+        rank_awards: number;
+        test_rank_awards: number;
+        notifications: number;
+      }[]
+    >`
+      SELECT skill.cc_level::text,
+        COALESCE(wallet.balance, 0)::text AS balance,
+        (SELECT count(*)::int FROM user_level_rank_awards
+          WHERE user_id = ${ids.member!}) AS rank_awards,
+        (SELECT count(*)::int FROM user_level_rank_awards AS awards
+          JOIN cc_level_ranks AS ranks ON ranks.id = awards.rank_id
+          WHERE awards.user_id = ${ids.member!} AND ranks.name = 'Bạc kiểm thử')
+          AS test_rank_awards,
+        (SELECT count(*)::int FROM notification_recipients
+          WHERE user_id = ${ids.member!}) AS notifications
+      FROM user_skill_state AS skill
+      LEFT JOIN user_wallets AS wallet ON wallet.user_id = skill.user_id
+      WHERE skill.user_id = ${ids.member!}
+    `;
+    expect(summary).toMatchObject({
+      cc_level: '1280.0000',
+      balance: '50.00',
+      test_rank_awards: 1,
+    });
+    expect(summary?.notifications).toBe((summary?.rank_awards ?? 0) + 1);
+  });
+
+  it('adjusts CC Point and CC Balance independently and notifies the student', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    await adjustments.apply({
+      targetUserId: ids.member!,
+      type: 'BONUS',
+      amount: 10,
+      target: 'CC_POINT',
+      affectsSeason: false,
+      reason: 'Thưởng thành tích học tập',
+      idempotencyKey: 'point-only-adjustment',
+      actor,
+    });
+    await adjustments.apply({
+      targetUserId: ids.member!,
+      type: 'BONUS',
+      amount: 7,
+      target: 'CC_BALANCE',
+      affectsSeason: false,
+      reason: 'Bổ sung số dư đổi quà',
+      idempotencyKey: 'balance-only-adjustment',
+      actor,
+    });
+    const [summary] = await connection<
+      { cc_point: string; balance: string; notifications: number }[]
+    >`
+      SELECT
+        COALESCE((SELECT sum(amount) FROM point_transactions
+          WHERE user_id = ${ids.member!} AND affects_point), 0)::text AS cc_point,
+        COALESCE((SELECT balance FROM user_wallets WHERE user_id = ${ids.member!}), 0)::text
+          AS balance,
+        (SELECT count(*)::int FROM notification_recipients
+          WHERE user_id = ${ids.member!}) AS notifications
+    `;
+    expect(summary).toEqual({ cc_point: '10.00', balance: '7.00', notifications: 2 });
+  });
+
+  it('lets a student buy a non-cash gift for another active account', async () => {
+    const actor = authUser(ids.systemAdmin!, 'SYSTEM_ADMIN');
+    const created = await rewardsAdmin.create(
+      {
+        name: 'Quà tặng bạn bè',
+        description: 'Phần thưởng dùng để kiểm tra luồng tặng quà.',
+        cost: 25,
+        stock: null,
+        active: true,
+        imageUrl: null,
+        category: 'STANDARD',
+        requiredCcLevel: 0,
+        requiresApproval: false,
+      },
+      actor,
+    );
+    await connection`
+      INSERT INTO user_wallets (user_id, balance) VALUES (${ids.member!}, 100)
+    `;
+    const gifted = await rewards.gift(
+      ids.member!,
+      ids.teacher!,
+      String(created.reward.id),
+      'gift-to-teacher-fixture',
+      'Chúc bạn học tốt!',
+    );
+    expect(gifted).toMatchObject({
+      replayed: false,
+      order: { recipient_user_id: ids.teacher!, status: 'FULFILLED' },
+    });
+    await expect(rewards.walletBalance(ids.member)).resolves.toBe('75.00');
+    const recipientCatalog = await rewards.catalog(ids.teacher);
+    expect(recipientCatalog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: created.reward.id, owned_quantity: 1 }),
+      ]),
+    );
+    const recipientOrders = await rewards.orders(ids.teacher!);
+    expect(recipientOrders.orders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ gift_direction: 'RECEIVED', gift_message: 'Chúc bạn học tốt!' }),
+      ]),
+    );
   });
 
   it('requires the configured CC Level before redeeming a mascot', async () => {

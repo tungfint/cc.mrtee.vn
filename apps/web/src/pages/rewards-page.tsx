@@ -1,5 +1,6 @@
 ﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 import { api, formatNumber, formatVnd } from '../lib/api';
 
@@ -32,8 +33,19 @@ interface RedeemResult {
   replayed: boolean;
 }
 
+interface GiftRecipient {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  codeforces_handle: string | null;
+  current_rating: number | null;
+}
+
 export default function RewardsPage() {
   const queryClient = useQueryClient();
+  const [giftReward, setGiftReward] = useState<Reward | null>(null);
+  const [giftRecipientId, setGiftRecipientId] = useState('');
+  const [giftMessage, setGiftMessage] = useState('');
   const rewards = useQuery({
     queryKey: ['rewards'],
     queryFn: () => api<RewardCatalog>('/rewards'),
@@ -48,6 +60,34 @@ export default function RewardsPage() {
       void queryClient.invalidateQueries({ queryKey: ['rewards'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+  const giftRecipients = useQuery({
+    queryKey: ['gift-recipients'],
+    queryFn: () => api<{ users: GiftRecipient[] }>('/rewards/gift-recipients'),
+    enabled: Boolean(giftReward),
+  });
+  const gift = useMutation({
+    mutationFn: () => {
+      if (!giftReward || !giftRecipientId) throw new Error('Chọn người nhận quà');
+      return api<RedeemResult>(`/rewards/${giftReward.id}/gift`, {
+        method: 'POST',
+        body: JSON.stringify({
+          recipientUserId: giftRecipientId,
+          message: giftMessage,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      });
+    },
+    onSuccess: async () => {
+      setGiftReward(null);
+      setGiftRecipientId('');
+      setGiftMessage('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['rewards'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+      ]);
     },
   });
   const cashRewards =
@@ -93,6 +133,63 @@ export default function RewardsPage() {
         </p>
       )}
       {redeem.error && <p className="notice error">{redeem.error.message}</p>}
+      {gift.isSuccess && <p className="notice success">Đã gửi quà tới tài khoản được chọn.</p>}
+      {gift.error && <p className="notice error">{gift.error.message}</p>}
+      {giftReward && (
+        <section className="panel reward-gift-panel p-6">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">TẶNG QUÀ</p>
+              <h2>Tặng “{giftReward.name}” cho tài khoản khác</h2>
+              <p>
+                Bạn thanh toán {formatNumber(giftReward.cost)} CC Balance; quà sẽ thuộc sở hữu của
+                người nhận.
+              </p>
+            </div>
+            <button className="button-secondary" onClick={() => setGiftReward(null)} type="button">
+              Đóng
+            </button>
+          </div>
+          <div className="form-grid mt-4">
+            <label className="field">
+              <span>Người nhận</span>
+              <select
+                onChange={(event) => setGiftRecipientId(event.target.value)}
+                required
+                value={giftRecipientId}
+              >
+                <option value="">Chọn tài khoản</option>
+                {giftRecipients.data?.users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.display_name}
+                    {user.codeforces_handle ? ` · @${user.codeforces_handle}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Lời nhắn (không bắt buộc)</span>
+              <input
+                maxLength={500}
+                onChange={(event) => setGiftMessage(event.target.value)}
+                value={giftMessage}
+              />
+            </label>
+          </div>
+          <button
+            className="button-primary mt-4"
+            disabled={!giftRecipientId || gift.isPending}
+            onClick={() => {
+              if (!window.confirm(`Xác nhận tặng “${giftReward.name}” cho tài khoản đã chọn?`))
+                return;
+              gift.mutate();
+            }}
+            type="button"
+          >
+            {gift.isPending ? 'Đang gửi quà…' : 'Xác nhận tặng quà'}
+          </button>
+        </section>
+      )}
       {rewards.isPending ? (
         <LoadingState label="Đang tải quà…" />
       ) : rewards.error ? (
@@ -109,6 +206,7 @@ export default function RewardsPage() {
                 rewards={mascotRewards}
                 title="Đồng đội đáng yêu của dân Cầy Cốt"
                 onRedeem={redeemReward}
+                onGift={setGiftReward}
                 pending={redeem.isPending}
                 walletBalance={walletBalanceValue}
               />
@@ -120,6 +218,7 @@ export default function RewardsPage() {
                 rewards={achievementRewards}
                 title="Dấu ấn cho hành trình bền bỉ"
                 onRedeem={redeemReward}
+                onGift={setGiftReward}
                 pending={redeem.isPending}
                 walletBalance={walletBalanceValue}
               />
@@ -131,6 +230,7 @@ export default function RewardsPage() {
                 rewards={regularRewards}
                 title="Chọn món quà phù hợp với bạn"
                 onRedeem={redeemReward}
+                onGift={setGiftReward}
                 pending={redeem.isPending}
                 walletBalance={walletBalanceValue}
               />
@@ -202,6 +302,7 @@ function RewardSection({
   pending,
   walletBalance,
   onRedeem,
+  onGift,
 }: {
   eyebrow: string;
   title: string;
@@ -210,6 +311,7 @@ function RewardSection({
   pending: boolean;
   walletBalance: number | null;
   onRedeem: (reward: Reward) => void;
+  onGift: (reward: Reward) => void;
 }) {
   return (
     <section className="reward-section">
@@ -277,6 +379,16 @@ function RewardSection({
                   {walletBalance !== null && walletBalance < Number(reward.cost)
                     ? 'Chưa đủ CC Balance'
                     : 'Đổi ngay'}
+                </button>
+                <button
+                  className="button-secondary"
+                  disabled={
+                    pending || (walletBalance !== null && walletBalance < Number(reward.cost))
+                  }
+                  onClick={() => onGift(reward)}
+                  type="button"
+                >
+                  Tặng bạn bè
                 </button>
               </div>
             </div>

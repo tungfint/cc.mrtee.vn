@@ -122,7 +122,8 @@ export class InsightsController {
             SELECT sum(rewards.cash_value_vnd)
             FROM reward_orders AS cash_orders
             JOIN rewards ON rewards.id = cash_orders.reward_id
-            WHERE cash_orders.user_id = users.id AND cash_orders.status = 'FULFILLED'
+            WHERE COALESCE(cash_orders.recipient_user_id, cash_orders.user_id) = users.id
+              AND cash_orders.status = 'FULFILLED'
               AND rewards.cash_value_vnd IS NOT NULL
           ), 0)::text AS cash_received_vnd,
           (SELECT count(*)::int FROM user_problem_solves WHERE user_id = users.id) AS total_solves,
@@ -148,7 +149,7 @@ export class InsightsController {
         LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
         LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
         LEFT JOIN LATERAL (
-          SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+          SELECT sum(amount) FILTER (WHERE affects_point) AS cc_point
           FROM point_transactions WHERE user_id = users.id
         ) AS points ON true
         WHERE users.id = ${user.userId}
@@ -210,7 +211,8 @@ export class InsightsController {
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
-        WHERE orders.user_id = ${user.userId} AND orders.status = 'FULFILLED'
+        WHERE COALESCE(orders.recipient_user_id, orders.user_id) = ${user.userId}
+          AND orders.status = 'FULFILLED'
           AND rescues.id IS NULL AND rewards.category <> 'ACHIEVEMENT'
           AND rewards.cash_value_vnd IS NULL
         GROUP BY rewards.id
@@ -360,7 +362,7 @@ export class InsightsController {
         WHERE user_id = users.id AND revoked_at IS NULL AND expires_at > now()
       ) AS presence ON true
       LEFT JOIN LATERAL (
-        SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+        SELECT sum(amount) FILTER (WHERE affects_point) AS cc_point
         FROM point_transactions WHERE user_id = users.id
       ) AS points ON true
       LEFT JOIN LATERAL (
@@ -516,6 +518,7 @@ export class InsightsController {
       recognitionQuotes,
       achievementRows,
       pointHistory,
+      riskEvents,
     ] = await Promise.all([
       this.database.sql`
         SELECT users.id, users.full_name, users.display_name, users.avatar_url,
@@ -555,14 +558,15 @@ export class InsightsController {
         LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
         LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
         LEFT JOIN LATERAL (
-          SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+          SELECT sum(amount) FILTER (WHERE affects_point) AS cc_point
           FROM point_transactions WHERE user_id = users.id
         ) AS points ON true
         LEFT JOIN LATERAL (
           SELECT sum(rewards.cash_value_vnd) AS fulfilled_vnd
           FROM reward_orders AS orders
           JOIN rewards ON rewards.id = orders.reward_id
-          WHERE orders.user_id = users.id AND orders.status = 'FULFILLED'
+          WHERE COALESCE(orders.recipient_user_id, orders.user_id) = users.id
+            AND orders.status = 'FULFILLED'
             AND rewards.cash_value_vnd IS NOT NULL
         ) AS cash ON true
         LEFT JOIN LATERAL (
@@ -587,7 +591,8 @@ export class InsightsController {
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
-        WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
+        WHERE COALESCE(orders.recipient_user_id, orders.user_id) = ${userId}
+          AND orders.status = 'FULFILLED'
           AND rescues.id IS NULL AND rewards.category <> 'ACHIEVEMENT'
         GROUP BY rewards.id
         ORDER BY max(orders.reviewed_at) DESC NULLS LAST LIMIT 16
@@ -626,6 +631,17 @@ export class InsightsController {
             (result) => result.items,
           )
         : Promise.resolve([]),
+      this.database.sql`
+        SELECT events.id, events.signal_code, events.score, events.summary, events.evidence,
+          events.created_at, events.reviewed_at, events.resolution, events.review_note,
+          reviewers.display_name AS reviewed_by_name,
+          events.source_submission_id::text
+        FROM activity_risk_events AS events
+        LEFT JOIN users AS reviewers ON reviewers.id = events.reviewed_by
+        WHERE events.user_id = ${userId}
+        ORDER BY events.created_at DESC
+        LIMIT 30
+      `,
     ]);
     const profile = profiles[0];
     if (!profile) throw new BadRequestException('Không tìm thấy học sinh');
@@ -645,6 +661,7 @@ export class InsightsController {
       achievements: this.earnedAchievements(achievementRows, streak.longestStreak),
       topTags,
       pointHistory,
+      riskEvents,
       quote: recognitionQuotes[0] ?? null,
       generatedAt: new Date().toISOString(),
     };
@@ -655,7 +672,7 @@ export class InsightsController {
     const rows = await this.database.sql`
       WITH history AS (
         SELECT transactions.*,
-          sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) OVER (
+          sum(amount) FILTER (WHERE affects_point) OVER (
             ORDER BY event_at, created_at, id
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
           ) AS cc_point_after_value,
@@ -680,7 +697,8 @@ export class InsightsController {
               THEN 'Đổi thưởng: ' || rewards.name
             ELSE history.description
           END AS description,
-          history.event_at, history.created_at, history.source_submission_id::text,
+          history.event_at, history.created_at, history.affects_point,
+          history.source_submission_id::text,
           history.source_reward_order_id::text, history.problem_rating_snapshot,
           submissions.programming_language,
           problems.problem_key, problems.contest_id::text, problems.problem_index,
@@ -695,7 +713,7 @@ export class InsightsController {
             skill.cc_level::text,
             history.cc_level_before::text
           ) ELSE NULL END AS cc_level_after,
-          CASE WHEN history.type NOT IN ('REDEEM', 'REFUND') THEN history.amount ELSE 0 END::text
+          CASE WHEN history.affects_point THEN history.amount ELSE 0 END::text
             AS cc_point_delta,
           CASE WHEN history.affects_wallet THEN history.amount ELSE 0 END::text
             AS cc_balance_delta,
@@ -715,7 +733,7 @@ export class InsightsController {
         WHERE ${input.metric === 'ALL'}
           OR (${input.metric === 'CC_LEVEL'} AND type = 'EARN'
             AND cc_level_before::numeric IS DISTINCT FROM cc_level_after::numeric)
-          OR (${input.metric === 'CC_POINT'} AND type NOT IN ('REDEEM', 'REFUND'))
+          OR (${input.metric === 'CC_POINT'} AND affects_point)
           OR (${input.metric === 'CC_BALANCE'} AND cc_balance_delta::numeric <> 0)
       )
       SELECT * FROM filtered

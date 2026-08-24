@@ -110,6 +110,7 @@ interface RewardOrder {
   id: string;
   display_name: string;
   full_name: string;
+  recipient_name: string | null;
   reward_name: string;
   cost_snapshot: string;
   cash_value_vnd: number | null;
@@ -140,6 +141,7 @@ interface LevelRank {
   name: string;
   icon: string;
   color: string;
+  reward_point: string;
   active: boolean;
 }
 interface Achievement {
@@ -177,6 +179,7 @@ interface StudentImportRow extends EditableImportRow {
 interface PointImportRow extends EditableImportRow {
   email: string;
   operation: string;
+  target: 'CC_POINT' | 'CC_BALANCE' | 'BOTH';
   amount: number;
   reason: string;
   affectsSeason: boolean;
@@ -211,7 +214,18 @@ const pointImportColumns = [
     ],
     width: '105px',
   },
-  { key: 'amount', label: 'CC Point', type: 'number' as const, width: '110px' },
+  {
+    key: 'target',
+    label: 'Chỉ số',
+    type: 'select' as const,
+    options: [
+      { value: 'CC_POINT', label: 'CC Point' },
+      { value: 'CC_BALANCE', label: 'CC Balance' },
+      { value: 'BOTH', label: 'Cả hai' },
+    ],
+    width: '135px',
+  },
+  { key: 'amount', label: 'Số lượng', type: 'number' as const, width: '110px' },
   { key: 'reason', label: 'Lý do', width: '240px' },
   { key: 'affectsSeason', label: 'Tính vào mùa', type: 'checkbox' as const, width: '100px' },
 ];
@@ -232,6 +246,26 @@ interface AuditLog {
   after: Record<string, unknown> | null;
   reason: string | null;
   created_at: string;
+}
+
+interface CcLevelRecalibrationRow {
+  userId: string;
+  displayName: string;
+  codeforcesHandle: string | null;
+  currentLevel: number;
+  solveCount: number;
+  ratings: number[];
+  percentile70: number | null;
+  referenceLevel: number;
+  nextLevel: number;
+  change: number;
+  eligible: boolean;
+  confidence: 'RELIABLE' | 'FAIR' | 'INSUFFICIENT';
+}
+
+interface CcLevelRecalibrationPreview {
+  rows: CcLevelRecalibrationRow[];
+  summary: { total: number; eligible: number; increases: number; insufficient: number };
 }
 
 const auditActionLabels: Record<string, string> = {
@@ -277,6 +311,9 @@ const auditActionLabels: Record<string, string> = {
   CC_LEVEL_RANK_CREATED: 'Tạo cấp bậc CC Level',
   CC_LEVEL_RANK_UPDATED: 'Cập nhật cấp bậc CC Level',
   CC_LEVEL_RANK_DELETED: 'Xoá cấp bậc CC Level',
+  CC_LEVEL_RECALIBRATED: 'Hiệu chỉnh CC Level',
+  ACTIVITY_RISK_REVIEWED: 'Xác minh cảnh báo hoạt động',
+  ACTIVITY_RISK_BULK_VALIDATED: 'Xác minh hợp lệ nhiều tài khoản',
   LEADERBOARD_LINK_GENERATED: 'Tạo liên kết bảng xếp hạng',
   LEADERBOARD_LINK_REVOKED: 'Thu hồi liên kết bảng xếp hạng',
   SEASON_CREATED: 'Tạo mùa giải',
@@ -308,6 +345,8 @@ const auditFieldLabels: Record<string, string> = {
   tier: 'Cấp bậc',
   color: 'Màu cấp bậc',
   achievement_id: 'Danh hiệu liên kết',
+  reward_point: 'Thưởng cấp bậc',
+  targetMetric: 'Chỉ số điều chỉnh',
 };
 
 function auditValue(value: unknown): string {
@@ -350,6 +389,7 @@ export default function AdminPage() {
   const [pointAmount, setPointAmount] = useState('10');
   const [pointReason, setPointReason] = useState('');
   const [pointType, setPointType] = useState('BONUS');
+  const [pointTarget, setPointTarget] = useState<'CC_POINT' | 'CC_BALANCE' | 'BOTH'>('BOTH');
   const [rewardName, setRewardName] = useState('');
   const [rewardCost, setRewardCost] = useState('100');
   const [rewardDescription, setRewardDescription] = useState('');
@@ -375,6 +415,7 @@ export default function AdminPage() {
   const [rankName, setRankName] = useState('');
   const [rankIcon, setRankIcon] = useState('🏅');
   const [rankColor, setRankColor] = useState('#22d3ee');
+  const [rankRewardPoint, setRankRewardPoint] = useState('0');
   const [rankActive, setRankActive] = useState(true);
   const [editingRank, setEditingRank] = useState<LevelRank | null>(null);
   const [achievementName, setAchievementName] = useState('');
@@ -418,8 +459,16 @@ export default function AdminPage() {
   const [syncUserId, setSyncUserId] = useState('');
   const [studentClassFilter, setStudentClassFilter] = useState('ALL');
   const [accountSearch, setAccountSearch] = useState('');
+  const [accountRiskFilter, setAccountRiskFilter] = useState('ALL');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [classEmailPaste, setClassEmailPaste] = useState('');
+  const [recalibrationScope, setRecalibrationScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>(
+    'USER',
+  );
+  const [recalibrationUserId, setRecalibrationUserId] = useState('');
+  const [recalibrationReason, setRecalibrationReason] = useState(
+    'Admin hiệu chỉnh CC Level theo các bài rated gần nhất',
+  );
   useEffect(() => {
     if (isSystemAdmin && tab === 'members') setTab('accounts');
   }, [isSystemAdmin, tab]);
@@ -643,6 +692,44 @@ export default function AdminPage() {
       ),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
   });
+  const recalibrationPreview = useMutation({
+    mutationFn: () =>
+      api<CcLevelRecalibrationPreview>('/admin/cc-level/recalibration/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          scope: recalibrationScope,
+          ...(recalibrationScope === 'USER'
+            ? { targetUserId: recalibrationUserId || selectSyncTarget }
+            : {}),
+          ...(recalibrationScope === 'ORGANIZATION' || !isSystemAdmin ? { organizationId } : {}),
+        }),
+      }),
+  });
+  const applyRecalibration = useMutation({
+    mutationFn: () =>
+      api<{ total: number; updated: number; skipped: number }>(
+        '/admin/cc-level/recalibration/apply',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            scope: recalibrationScope,
+            ...(recalibrationScope === 'USER'
+              ? { targetUserId: recalibrationUserId || selectSyncTarget }
+              : {}),
+            ...(recalibrationScope === 'ORGANIZATION' || !isSystemAdmin ? { organizationId } : {}),
+            reason: recalibrationReason,
+          }),
+        },
+      ),
+    onSuccess: async () => {
+      recalibrationPreview.reset();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-members'] }),
+        queryClient.invalidateQueries({ queryKey: ['notifications-summary'] }),
+      ]);
+    },
+  });
   const verifyStudents = useMutation({
     mutationFn: (userIds: string[]) =>
       api<{ requested: number; verified: number; skipped: number }>(
@@ -740,10 +827,16 @@ export default function AdminPage() {
         return false;
       }
       const classes = item.memberships.filter(({ role }) => role === 'MEMBER');
-      if (studentClassFilter === 'UNASSIGNED') return classes.length === 0;
+      if (studentClassFilter === 'UNASSIGNED' && classes.length !== 0) return false;
       if (studentClassFilter !== 'ALL') {
-        return classes.some(({ organizationId: id }) => id === studentClassFilter);
+        if (!classes.some(({ organizationId: id }) => id === studentClassFilter)) return false;
       }
+      if (accountRiskFilter === 'WARNING' && item.activity_risk_level === 'NORMAL') return false;
+      if (
+        ['REVIEW', 'PRIORITY'].includes(accountRiskFilter) &&
+        item.activity_risk_level !== accountRiskFilter
+      )
+        return false;
       return true;
     }) ?? [];
   const selectableAccountStudents = accountRows.filter(
@@ -752,6 +845,10 @@ export default function AdminPage() {
         !item.memberships.some(({ role }) => ['TEACHER', 'ORG_ADMIN'].includes(role))) &&
       Boolean(item.codeforces_handle) &&
       item.verification_status === 'UNVERIFIED',
+  );
+  const warningAccounts = accountRows.filter(
+    (item) =>
+      item.activity_risk_level !== 'NORMAL' && (isSuperAdmin || item.system_role === 'USER'),
   );
   const verifiableStudents = globalStudents.filter(
     (item) => item.codeforces_handle && item.verification_status === 'UNVERIFIED',
@@ -811,6 +908,7 @@ export default function AdminPage() {
       body: {
         ...(organizationId && targetBelongsToSelectedOrganization ? { organizationId } : {}),
         type: pointType,
+        target: pointTarget,
         amount: Math.abs(Number(pointAmount)) * (pointType === 'PENALTY' ? -1 : 1),
         affectsSeason: Boolean(organizationId && targetBelongsToSelectedOrganization),
         reason: pointReason,
@@ -1292,6 +1390,21 @@ export default function AdminPage() {
                           ))}
                       </select>
                     </label>
+                    <label className="field compact-field">
+                      <span>Lọc cảnh báo</span>
+                      <select
+                        onChange={(event) => {
+                          setAccountRiskFilter(event.target.value);
+                          setSelectedStudentIds([]);
+                        }}
+                        value={accountRiskFilter}
+                      >
+                        <option value="ALL">Tất cả trạng thái</option>
+                        <option value="WARNING">Tất cả tài khoản cảnh báo</option>
+                        <option value="REVIEW">Cần kiểm tra</option>
+                        <option value="PRIORITY">Ưu tiên kiểm tra</option>
+                      </select>
+                    </label>
                     <button
                       className="button-secondary"
                       disabled={!selectableAccountStudents.length}
@@ -1309,6 +1422,24 @@ export default function AdminPage() {
                       type="button"
                     >
                       Xác minh CF ({selectedStudentIds.length})
+                    </button>
+                    <button
+                      className="button-secondary"
+                      disabled={!warningAccounts.length || mutation.isPending}
+                      onClick={() => {
+                        const note = window.prompt(
+                          `Xác nhận hợp lệ ${warningAccounts.length} tài khoản đang hiển thị. Ghi chú:`,
+                          'Đã kiểm tra lịch sử và xác nhận các hoạt động hợp lệ',
+                        );
+                        if (!note) return;
+                        mutation.mutate({
+                          path: '/admin/users/activity-risk/review-all',
+                          body: { userIds: warningAccounts.map((item) => item.id), note },
+                        });
+                      }}
+                      type="button"
+                    >
+                      Xác nhận hợp lệ tất cả ({warningAccounts.length})
                     </button>
                   </div>
                 </div>
@@ -2341,8 +2472,8 @@ export default function AdminPage() {
                   <p className="eyebrow">CC POINT COMMAND</p>
                   <h2 className="mt-2 text-xl font-black">Cộng / trừ một tài khoản</h2>
                   <p className="mt-2 text-sm text-[var(--muted)]">
-                    Điều chỉnh đồng thời CC Point và CC Balance. Mỗi lệnh có khóa chống ghi trùng và
-                    được lưu trong nhật ký.
+                    Chọn điều chỉnh riêng CC Point, riêng CC Balance hoặc cả hai. Mỗi lệnh có khóa
+                    chống ghi trùng, được lưu nhật ký và gửi thông báo tới tài khoản liên quan.
                   </p>
                   <button
                     className="template-link mt-3"
@@ -2373,6 +2504,19 @@ export default function AdminPage() {
                   </label>
                   <div className="form-grid mt-4">
                     <label className="field">
+                      <span>Chỉ số được điều chỉnh</span>
+                      <select
+                        onChange={(event) =>
+                          setPointTarget(event.target.value as 'CC_POINT' | 'CC_BALANCE' | 'BOTH')
+                        }
+                        value={pointTarget}
+                      >
+                        <option value="CC_POINT">Chỉ CC Point</option>
+                        <option value="CC_BALANCE">Chỉ CC Balance</option>
+                        <option value="BOTH">CC Point và CC Balance</option>
+                      </select>
+                    </label>
+                    <label className="field">
                       <span>Loại</span>
                       <select onChange={(e) => setPointType(e.target.value)} value={pointType}>
                         <option value="BONUS">CỘNG</option>
@@ -2381,7 +2525,7 @@ export default function AdminPage() {
                       </select>
                     </label>
                     <label className="field">
-                      <span>CC Point</span>
+                      <span>Số lượng thay đổi</span>
                       <input
                         min="0.01"
                         onChange={(e) => setPointAmount(e.target.value)}
@@ -2420,8 +2564,8 @@ export default function AdminPage() {
                   <h2 className="mt-2 text-xl font-black">Cộng / trừ hàng loạt</h2>
                   <p className="mt-2 text-sm text-[var(--muted)]">
                     Nhận file CSV hoặc Excel (.xlsx), tối đa 500 tài khoản. Cột thao tác dùng
-                    CỘNG/TRỪ; CC Point luôn nhập số dương. Tải lại cùng một file sẽ không ghi trùng
-                    giao dịch đã thành công.
+                    CỘNG/TRỪ; cột chỉ số chọn CC_POINT, CC_BALANCE hoặc BOTH. Số lượng luôn nhập số
+                    dương. Tải lại cùng một file sẽ không ghi trùng giao dịch đã thành công.
                   </p>
                 </div>
                 <div className="import-actions">
@@ -2575,6 +2719,143 @@ export default function AdminPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+              <div className="panel p-6 lg:col-span-2">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">CC LEVEL RECALIBRATION</p>
+                    <h2>Khởi tạo / hiệu chỉnh theo bài rated gần nhất</h2>
+                    <p>
+                      Chỉ đủ điều kiện khi có ít nhất 5 first-solve rated hợp lệ. Hệ thống lấy tối
+                      đa 10 bài gần nhất, tính P70 và không giới hạn mức tăng. Chức năng này chỉ
+                      chạy khi bạn bấm xác nhận; không tự động thay đổi tài khoản hiện có.
+                    </p>
+                  </div>
+                </div>
+                <div className="form-grid mt-5">
+                  <label className="field">
+                    <span>Phạm vi hiệu chỉnh</span>
+                    <select
+                      onChange={(event) => {
+                        setRecalibrationScope(
+                          event.target.value as 'USER' | 'ORGANIZATION' | 'ALL',
+                        );
+                        recalibrationPreview.reset();
+                      }}
+                      value={recalibrationScope}
+                    >
+                      <option value="USER">Một tài khoản</option>
+                      <option value="ORGANIZATION">Cả lớp đang chọn</option>
+                      {isSystemAdmin && <option value="ALL">Toàn hệ thống</option>}
+                    </select>
+                  </label>
+                  {recalibrationScope === 'USER' && (
+                    <label className="field">
+                      <span>Tài khoản</span>
+                      <select
+                        onChange={(event) => {
+                          setRecalibrationUserId(event.target.value);
+                          recalibrationPreview.reset();
+                        }}
+                        value={recalibrationUserId || selectSyncTarget}
+                      >
+                        {syncEligibleMembers.map((member) => (
+                          <option key={member.user_id} value={member.user_id}>
+                            {member.display_name} · {member.codeforces_handle}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className="field form-span-2">
+                    <span>Lý do hiệu chỉnh</span>
+                    <textarea
+                      minLength={3}
+                      onChange={(event) => setRecalibrationReason(event.target.value)}
+                      value={recalibrationReason}
+                    />
+                  </label>
+                </div>
+                <div className="compact-actions mt-4">
+                  <button
+                    className="button-secondary"
+                    disabled={
+                      recalibrationPreview.isPending ||
+                      (recalibrationScope === 'USER' && !(recalibrationUserId || selectSyncTarget))
+                    }
+                    onClick={() => recalibrationPreview.mutate()}
+                    type="button"
+                  >
+                    {recalibrationPreview.isPending ? 'Đang tính…' : 'Xem trước CCL'}
+                  </button>
+                  <button
+                    className="button-primary"
+                    disabled={
+                      !recalibrationPreview.data?.summary.increases ||
+                      applyRecalibration.isPending ||
+                      recalibrationReason.trim().length < 3
+                    }
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Cập nhật ${recalibrationPreview.data?.summary.increases ?? 0} tài khoản có CCL đề xuất cao hơn?`,
+                        )
+                      )
+                        return;
+                      applyRecalibration.mutate();
+                    }}
+                    type="button"
+                  >
+                    {applyRecalibration.isPending ? 'Đang hiệu chỉnh…' : 'Xác nhận hiệu chỉnh'}
+                  </button>
+                </div>
+                {recalibrationPreview.error && (
+                  <p className="notice error mt-4">{recalibrationPreview.error.message}</p>
+                )}
+                {applyRecalibration.error && (
+                  <p className="notice error mt-4">{applyRecalibration.error.message}</p>
+                )}
+                {applyRecalibration.data && (
+                  <p className="notice success mt-4">
+                    Đã cập nhật {applyRecalibration.data.updated}/{applyRecalibration.data.total}{' '}
+                    tài khoản; bỏ qua {applyRecalibration.data.skipped}.
+                  </p>
+                )}
+                {recalibrationPreview.data && (
+                  <div className="cc-level-preview mt-5">
+                    <div className="cc-level-preview-summary">
+                      <strong>{recalibrationPreview.data.summary.total} tài khoản</strong>
+                      <span>{recalibrationPreview.data.summary.increases} sẽ tăng CCL</span>
+                      <span>
+                        {recalibrationPreview.data.summary.insufficient} chưa đủ 5 bài hợp lệ
+                      </span>
+                    </div>
+                    {recalibrationPreview.data.rows.map((row) => (
+                      <div className="cc-level-preview-row" key={row.userId}>
+                        <div>
+                          <Link to={`/students/${row.userId}`}>{row.displayName}</Link>
+                          <small>
+                            @{row.codeforcesHandle ?? 'chưa có CF'} · {row.solveCount} bài dùng để
+                            tính
+                          </small>
+                        </div>
+                        <span>
+                          Hiện tại <strong>{formatNumber(row.currentLevel)}</strong>
+                        </span>
+                        <span>
+                          P70{' '}
+                          <strong>
+                            {row.percentile70 === null ? 'Chưa đủ dữ liệu' : row.percentile70}
+                          </strong>
+                        </span>
+                        <span className={row.change > 0 ? 'positive' : ''}>
+                          Sau hiệu chỉnh <strong>{formatNumber(row.nextLevel)}</strong>
+                          {row.change > 0 && <small>+{formatNumber(row.change)}</small>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -3041,6 +3322,11 @@ export default function AdminPage() {
                         <p>
                           {order.reward_name} · {formatNumber(order.cost_snapshot)} CC Balance
                         </p>
+                        {order.recipient_name && (
+                          <p className="m-0 text-sm font-semibold text-[var(--accent)]">
+                            Tặng cho: {order.recipient_name}
+                          </p>
+                        )}
                         {order.cash_value_vnd !== null && (
                           <p className="cash-reward-value">
                             Quà tiền {formatVnd(order.cash_value_vnd)}
@@ -3322,6 +3608,7 @@ export default function AdminPage() {
                         setRankName('');
                         setRankIcon('🏅');
                         setRankColor('#22d3ee');
+                        setRankRewardPoint('0');
                         setRankActive(true);
                       }}
                       type="button"
@@ -3331,8 +3618,9 @@ export default function AdminPage() {
                   )}
                 </div>
                 <p className="admin-helper-copy">
-                  Hệ thống chọn mốc cao nhất không vượt quá CC Level hiện tại. Icon có thể là emoji
-                  hoặc URL ảnh.
+                  Hệ thống chọn mốc cao nhất không vượt quá CC Level hiện tại. Mỗi mốc có thể thưởng
+                  đồng thời CC Point và CC Balance đúng một lần khi học sinh lần đầu đạt tới. Thay
+                  đổi mức thưởng không tự động truy thưởng dữ liệu cũ.
                 </p>
                 <form
                   onSubmit={(event) => {
@@ -3347,6 +3635,7 @@ export default function AdminPage() {
                         name: rankName,
                         icon: rankIcon,
                         color: rankColor,
+                        rewardPoint: Number(rankRewardPoint),
                         active: rankActive,
                       },
                     });
@@ -3407,6 +3696,17 @@ export default function AdminPage() {
                         <option value="INACTIVE">Tạm ẩn</option>
                       </select>
                     </label>
+                    <label className="field">
+                      <span>Thưởng lần đầu đạt cấp</span>
+                      <input
+                        min="0"
+                        onChange={(event) => setRankRewardPoint(event.target.value)}
+                        step="0.01"
+                        type="number"
+                        value={rankRewardPoint}
+                      />
+                      <small>Cùng cộng vào CC Point và CC Balance</small>
+                    </label>
                   </div>
                   <button className="button-primary mt-4" type="submit">
                     {editingRank ? 'Lưu cấp bậc' : 'Thêm cấp bậc'}
@@ -3418,7 +3718,10 @@ export default function AdminPage() {
                       <LevelRankIcon icon={rank.icon} name={rank.name} />
                       <div>
                         <strong style={{ color: rank.color }}>{rank.name}</strong>
-                        <p>Từ CC Level {formatNumber(rank.min_level)}</p>
+                        <p>
+                          Từ CC Level {formatNumber(rank.min_level)} · thưởng{' '}
+                          {formatNumber(rank.reward_point, 2)} CCP + CCB lần đầu
+                        </p>
                       </div>
                       <StatusPill value={rank.active ? 'ACTIVE' : 'INACTIVE'} />
                       <div className="student-actions">
@@ -3430,6 +3733,7 @@ export default function AdminPage() {
                             setRankName(rank.name);
                             setRankIcon(rank.icon);
                             setRankColor(rank.color);
+                            setRankRewardPoint(rank.reward_point ?? '0');
                             setRankActive(rank.active);
                           }}
                           type="button"

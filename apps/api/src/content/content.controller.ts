@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { CurrentUser, RequireSystemRole } from '../auth/auth.decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const quoteSchema = z.object({
   content: z.string().trim().min(5).max(1000),
@@ -54,6 +55,7 @@ const rankSchema = z.object({
   name: z.string().trim().min(1).max(100),
   icon: z.string().trim().min(1).max(500),
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
+  rewardPoint: z.coerce.number().min(0).max(1_000_000).default(0),
   active: z.boolean().default(true),
 });
 const achievementSchema = z.object({
@@ -74,7 +76,10 @@ type CellValue = string | number | boolean | Date | DateConstructor | null;
 
 @Controller()
 export class ContentController {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   @Get('content/dashboard')
   async dashboardContent() {
@@ -86,7 +91,7 @@ export class ContentController {
         ORDER BY sort_order, created_at, id
       `,
       this.database.sql`
-        SELECT id, min_level, name, icon, color
+        SELECT id, min_level, name, icon, color, reward_point
         FROM cc_level_ranks
         WHERE active = true
         ORDER BY min_level
@@ -373,6 +378,14 @@ export class ContentController {
         ON CONFLICT (user_id, achievement_id) DO NOTHING
         RETURNING *
       `;
+      if (grant) {
+        await this.notifications.createForUser(transaction, {
+          userId: input.data.userId,
+          title: 'Bạn vừa nhận được một danh hiệu',
+          body: `Danh hiệu “${String(achievement.name)}” đã được trao cho bạn. ${input.data.note}`,
+          createdBy: actor.userId,
+        });
+      }
       await this.audit(
         transaction,
         actor,
@@ -431,13 +444,15 @@ export class ContentController {
         const [rank] = id
           ? await transaction`
               UPDATE cc_level_ranks SET min_level = ${input.minLevel}, name = ${input.name},
-                icon = ${input.icon}, color = ${input.color}, active = ${input.active},
+                icon = ${input.icon}, color = ${input.color}, reward_point = ${input.rewardPoint},
+                active = ${input.active},
                 updated_at = now()
               WHERE id = ${id} RETURNING *
             `
           : await transaction`
-              INSERT INTO cc_level_ranks (min_level, name, icon, color, active)
-              VALUES (${input.minLevel}, ${input.name}, ${input.icon}, ${input.color}, ${input.active})
+              INSERT INTO cc_level_ranks (min_level, name, icon, color, reward_point, active)
+              VALUES (${input.minLevel}, ${input.name}, ${input.icon}, ${input.color},
+                ${input.rewardPoint}, ${input.active})
               RETURNING *
             `;
         if (!rank) throw new BadRequestException('Không tìm thấy cấp bậc');

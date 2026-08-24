@@ -160,7 +160,7 @@ describe('submission ingestion', () => {
     });
   });
 
-  it('replays rated first solves chronologically with scoring policy v3.0', async () => {
+  it('keeps the initial CCL at 800 until five rated first-solves exist', async () => {
     const [user] = await client.connection<{ id: string }[]>`
       INSERT INTO users (full_name, display_name) VALUES ('Student', 'Student') RETURNING id
     `;
@@ -175,12 +175,12 @@ describe('submission ingestion', () => {
     await firstSolves.recordBatch(user.id, ingested, new Date(0), false);
     const result = await level.recompute(user.id);
     expect(result.version).toBe('v3.0');
-    expect(result.level).toBe(807.9013);
+    expect(result.level).toBe(800);
     const [state] = await client.connection<{ cc_base: string; cc_level: string }[]>`
       SELECT cc_base, cc_level FROM user_skill_state WHERE user_id = ${user.id}
     `;
     expect(Number(state?.cc_base)).toBe(800);
-    expect(Number(state?.cc_level)).toBe(807.9013);
+    expect(Number(state?.cc_level)).toBe(800);
   });
 
   it('resumes a crashed backfill from its persisted cursor without creating EARN', async () => {
@@ -391,7 +391,7 @@ describe('submission ingestion', () => {
     >`
       SELECT skill.cc_level::text,
         COALESCE((SELECT sum(amount) FROM point_transactions
-          WHERE user_id = ${user.id} AND type NOT IN ('REDEEM', 'REFUND')), 0)::text AS cc_point,
+          WHERE user_id = ${user.id} AND affects_point), 0)::text AS cc_point,
         wallets.balance::text AS cc_balance
       FROM user_skill_state AS skill
       JOIN user_wallets AS wallets ON wallets.user_id = skill.user_id

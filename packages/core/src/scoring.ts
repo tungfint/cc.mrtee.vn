@@ -19,6 +19,68 @@ export interface CcLevelResult {
   level: number;
 }
 
+export interface CcLevelReferenceResult {
+  eligible: boolean;
+  solveCount: number;
+  ratings: number[];
+  percentile70: number | null;
+  referenceLevel: number;
+}
+
+/**
+ * Initial/admin calibration policy: use P70 of up to 10 most recent unique rated first-solves.
+ * Fewer than 5 valid solves keeps the default level at 800.
+ */
+export function calculateCcLevelReference(
+  solves: RatedSolve[],
+  options: { initialLevel?: number; minimumSolves?: number; maximumSolves?: number } = {},
+): CcLevelReferenceResult {
+  const initialLevel = options.initialLevel ?? 800;
+  const minimumSolves = options.minimumSolves ?? 5;
+  const maximumSolves = options.maximumSolves ?? 10;
+  const unique = new Map<string, RatedSolve & { inputIndex: number }>();
+  solves.forEach((solve, inputIndex) => {
+    if (solve.rating === null || !Number.isFinite(Number(solve.rating))) return;
+    const existing = unique.get(solve.problemKey);
+    if (!existing || solveTime(solve.solvedAt) > solveTime(existing.solvedAt)) {
+      unique.set(solve.problemKey, { ...solve, inputIndex });
+    }
+  });
+  const recent = [...unique.values()]
+    .sort((left, right) => {
+      const timeOrder = solveTime(right.solvedAt) - solveTime(left.solvedAt);
+      if (timeOrder !== 0) return timeOrder;
+      return (
+        compareSubmissionIds(right.submissionId, left.submissionId) ||
+        right.inputIndex - left.inputIndex
+      );
+    })
+    .slice(0, maximumSolves);
+  const ratings = recent.map((solve) => Number(solve.rating)).sort((a, b) => a - b);
+  if (ratings.length < minimumSolves) {
+    return {
+      eligible: false,
+      solveCount: ratings.length,
+      ratings,
+      percentile70: null,
+      referenceLevel: initialLevel,
+    };
+  }
+  const position = 0.7 * (ratings.length - 1);
+  const lowerIndex = Math.floor(position);
+  const fraction = position - lowerIndex;
+  const lower = ratings[lowerIndex]!;
+  const upper = ratings[Math.min(lowerIndex + 1, ratings.length - 1)]!;
+  const percentile70 = lower + fraction * (upper - lower);
+  return {
+    eligible: true,
+    solveCount: ratings.length,
+    ratings,
+    percentile70: round4(percentile70),
+    referenceLevel: Math.max(initialLevel, Math.round(percentile70 / 10) * 10),
+  };
+}
+
 /** Scoring policy v3.0: every unique rated first solve adds a positive gain. */
 export function calculateCcLevelGain(
   problemRating: number,

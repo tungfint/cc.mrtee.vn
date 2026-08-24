@@ -2,8 +2,10 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import type { AuthUser } from '../auth/auth.types';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { DatabaseService } from '../database/database.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export type ManualPointType = 'BONUS' | 'PENALTY' | 'ADJUSTMENT';
+export type ManualPointTarget = 'CC_POINT' | 'CC_BALANCE' | 'BOTH';
 
 export interface PointTransactionRecord {
   id: string;
@@ -17,6 +19,7 @@ export class ScoringAdjustmentsService {
   constructor(
     private readonly database: DatabaseService,
     private readonly authorization: AuthorizationService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async apply(input: {
@@ -24,6 +27,7 @@ export class ScoringAdjustmentsService {
     targetUserId: string;
     type: ManualPointType;
     amount: number;
+    target?: ManualPointTarget;
     affectsSeason: boolean;
     reason: string;
     idempotencyKey: string;
@@ -62,7 +66,10 @@ export class ScoringAdjustmentsService {
     if (input.amount === 0) throw new BadRequestException('Số điểm thay đổi phải khác 0');
 
     const organizationScope = organizationId ?? 'GLOBAL';
-    const affectsOrganizationSeason = input.affectsSeason && Boolean(membership);
+    const targetMetric = input.target ?? 'BOTH';
+    const affectsPoint = targetMetric !== 'CC_BALANCE';
+    const affectsWallet = targetMetric !== 'CC_POINT';
+    const affectsOrganizationSeason = input.affectsSeason && affectsPoint && Boolean(membership);
     const key = `manual:${organizationScope}:${input.targetUserId}:${input.idempotencyKey}`;
     return this.database.sql.begin(async (transaction) => {
       await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
@@ -75,37 +82,41 @@ export class ScoringAdjustmentsService {
         }
         return { transaction: existing, replayed: true };
       }
-      const seasonRows = affectsOrganizationSeason && organizationId
-        ? await transaction<{ id: string }[]>`
+      const seasonRows =
+        affectsOrganizationSeason && organizationId
+          ? await transaction<{ id: string }[]>`
             SELECT id FROM seasons
             WHERE organization_id = ${organizationId}
               AND status IN ('ACTIVE', 'CLOSING')
               AND start_at <= now() AND end_at > now()
             ORDER BY start_at DESC LIMIT 1
           `
-        : [];
+          : [];
       const season = seasonRows[0];
       const [pointTransaction] = await transaction<PointTransactionRecord[]>`
         INSERT INTO point_transactions (
           user_id, type, amount, season_id, idempotency_key, affects_wallet,
-          affects_season, description, metadata, event_at
+          affects_point, affects_season, description, metadata, event_at
         ) VALUES (
           ${input.targetUserId}, ${input.type}, ${input.amount}, ${season?.id ?? null},
-          ${key}, true, ${Boolean(season)}, ${input.reason},
+          ${key}, ${affectsWallet}, ${affectsPoint}, ${Boolean(season)}, ${input.reason},
           jsonb_strip_nulls(jsonb_build_object(
             'organizationId', ${organizationId ?? null}::text,
             'actorUserId', ${input.actor.userId}::text,
-            'scope', ${membership ? 'ORGANIZATION' : 'GLOBAL'}::text
+            'scope', ${membership ? 'ORGANIZATION' : 'GLOBAL'}::text,
+            'targetMetric', ${targetMetric}::text
           )),
           now()
         ) RETURNING *
       `;
-      await transaction`
-        INSERT INTO user_wallets (user_id, balance)
-        VALUES (${input.targetUserId}, ${input.amount})
-        ON CONFLICT (user_id) DO UPDATE SET
-          balance = user_wallets.balance + EXCLUDED.balance, updated_at = now()
-      `;
+      if (affectsWallet) {
+        await transaction`
+          INSERT INTO user_wallets (user_id, balance)
+          VALUES (${input.targetUserId}, ${input.amount})
+          ON CONFLICT (user_id) DO UPDATE SET
+            balance = user_wallets.balance + EXCLUDED.balance, updated_at = now()
+        `;
+      }
       if (season) {
         const bonus = input.type === 'BONUS' ? input.amount : 0;
         const penalty = input.type === 'PENALTY' ? input.amount : 0;
@@ -129,6 +140,18 @@ export class ScoringAdjustmentsService {
           ${String(pointTransaction?.id)}, ${JSON.stringify(pointTransaction)}::jsonb, ${input.reason}
         )
       `;
+      const metricLabel =
+        targetMetric === 'CC_POINT'
+          ? 'CC Point'
+          : targetMetric === 'CC_BALANCE'
+            ? 'CC Balance'
+            : 'CC Point và CC Balance';
+      await this.notifications.createForUser(transaction, {
+        userId: input.targetUserId,
+        title: `${input.amount > 0 ? 'Được cộng' : 'Bị trừ'} ${metricLabel}`,
+        body: `${input.amount > 0 ? '+' : ''}${input.amount} ${metricLabel}. Lý do: ${input.reason}`,
+        createdBy: input.actor.userId,
+      });
       return { transaction: pointTransaction, replayed: false };
     });
   }

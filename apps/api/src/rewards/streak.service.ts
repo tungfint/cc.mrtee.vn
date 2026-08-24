@@ -36,7 +36,8 @@ export class StreakService {
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
-        WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
+        WHERE COALESCE(orders.recipient_user_id, orders.user_id) = ${userId}
+          AND orders.status = 'FULFILLED'
           AND rewards.category = 'MASCOT' AND rescues.id IS NULL
         ORDER BY orders.reviewed_at, orders.created_at, orders.id
       `,
@@ -97,7 +98,8 @@ export class StreakService {
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
-        WHERE orders.user_id = ${userId} AND orders.status = 'FULFILLED'
+        WHERE COALESCE(orders.recipient_user_id, orders.user_id) = ${userId}
+          AND orders.status = 'FULFILLED'
           AND rewards.category = 'MASCOT' AND rescues.id IS NULL
           AND orders.id = ANY(${rewardOrderIds}::uuid[])
         FOR UPDATE OF orders

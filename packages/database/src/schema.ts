@@ -667,6 +667,7 @@ export const ccLevelRanks = pgTable(
     name: varchar('name', { length: 100 }).notNull(),
     icon: text('icon').notNull(),
     color: varchar('color', { length: 20 }).notNull(),
+    rewardPoint: numeric('reward_point', { precision: 12, scale: 2 }).default('0.00').notNull(),
     active: boolean('active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -675,6 +676,7 @@ export const ccLevelRanks = pgTable(
     uniqueIndex('cc_level_ranks_min_level_unique').on(table.minLevel),
     index('cc_level_ranks_active_level_idx').on(table.active, table.minLevel),
     check('cc_level_ranks_min_level_check', sql`${table.minLevel} >= 0`),
+    check('cc_level_ranks_reward_point_check', sql`${table.rewardPoint} >= 0`),
   ],
 );
 
@@ -685,6 +687,9 @@ export const rewardOrders = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
+    recipientUserId: uuid('recipient_user_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
     rewardId: uuid('reward_id')
       .notNull()
       .references(() => rewards.id, { onDelete: 'restrict' }),
@@ -695,11 +700,17 @@ export const rewardOrders = pgTable(
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
     note: text('note'),
+    giftMessage: text('gift_message'),
   },
   (table) => [
     unique('reward_orders_identity_user_unique').on(table.id, table.userId),
     uniqueIndex('reward_orders_idempotency_key_unique').on(table.idempotencyKey),
     index('reward_orders_user_created_idx').on(table.userId, table.createdAt.desc()),
+    index('reward_orders_recipient_created_idx').on(table.recipientUserId, table.createdAt.desc()),
+    check(
+      'reward_orders_recipient_check',
+      sql`${table.recipientUserId} IS NULL OR ${table.recipientUserId} <> ${table.userId}`,
+    ),
     check('reward_orders_cost_snapshot_check', sql`${table.costSnapshot} > 0`),
   ],
 );
@@ -825,6 +836,7 @@ export const pointTransactions = pgTable(
     relatedTransactionId: uuid('related_transaction_id'),
     idempotencyKey: varchar('idempotency_key', { length: 200 }),
     affectsWallet: boolean('affects_wallet').default(true).notNull(),
+    affectsPoint: boolean('affects_point').default(true).notNull(),
     affectsSeason: boolean('affects_season').default(false).notNull(),
     ccLevelBefore: numeric('cc_level_before', { precision: 12, scale: 4 }),
     problemRatingSnapshot: integer('problem_rating_snapshot'),
@@ -896,6 +908,36 @@ export const pointTransactions = pgTable(
     check(
       'point_transactions_not_self_related_check',
       sql`${table.relatedTransactionId} IS NULL OR ${table.relatedTransactionId} <> ${table.id}`,
+    ),
+  ],
+);
+
+export const userLevelRankAwards = pgTable(
+  'user_level_rank_awards',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    rankId: uuid('rank_id')
+      .notNull()
+      .references(() => ccLevelRanks.id, { onDelete: 'restrict' }),
+    pointTransactionId: uuid('point_transaction_id').references(() => pointTransactions.id, {
+      onDelete: 'restrict',
+    }),
+    achievedLevel: numeric('achieved_level', { precision: 12, scale: 4 }).notNull(),
+    source: varchar('source', { length: 30 }).notNull(),
+    awardedAt: timestamp('awarded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('user_level_rank_awards_user_rank_unique').on(table.userId, table.rankId),
+    uniqueIndex('user_level_rank_awards_transaction_unique')
+      .on(table.pointTransactionId)
+      .where(sql`${table.pointTransactionId} IS NOT NULL`),
+    index('user_level_rank_awards_user_awarded_idx').on(table.userId, table.awardedAt.desc()),
+    check(
+      'user_level_rank_awards_source_check',
+      sql`${table.source} IN ('SOLVE', 'RECALIBRATION', 'ADMIN')`,
     ),
   ],
 );

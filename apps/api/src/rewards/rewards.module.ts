@@ -4,8 +4,10 @@ import { RewardsController } from './rewards.controller';
 import { RewardsService } from './rewards.service';
 import { RewardImageService } from './reward-image.service';
 import { StreakService } from './streak.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [RewardsController, RewardsAdminController],
   providers: [RewardsService, RewardImageService, StreakService],
   exports: [RewardsService, StreakService],

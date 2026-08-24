@@ -1,3 +1,4 @@
-﻿tai_khoan,thao_tac,cc_point,ly_do,anh_huong_mua
-nguyen.an@example.com,CỘNG,25,Thưởng hoàn thành thử thách tuần,CÓ
-tran.binh@example.com,TRỪ,10,Điều chỉnh vi phạm quy định lớp,KHÔNG
+tai_khoan,thao_tac,chi_so,cc_point,ly_do,anh_huong_mua
+nguyen.an@example.com,CỘNG,CC_POINT,25,Thưởng hoàn thành thử thách tuần,CÓ
+tran.binh@example.com,TRỪ,CC_BALANCE,10,Điều chỉnh số dư đổi quà,KHÔNG
+le.chi@example.com,CỘNG,BOTH,15,Thưởng đồng thời CC Point và CC Balance,CÓ

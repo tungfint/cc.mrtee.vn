@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   calculateCcLevel,
   calculateCcLevelGain,
+  calculateCcLevelReference,
   calculateReward,
   type RatedSolve,
 } from './scoring';
@@ -60,6 +61,42 @@ describe('CC Level v3.0', () => {
 
   it('needs about 50 maintained equal-level solves for +100 CCL', () => {
     expect(100 / calculateCcLevelGain(1000, 1000, levelPolicy)).toBe(50);
+  });
+});
+
+describe('CC Level initial calibration', () => {
+  const solves = (ratings: number[]) =>
+    ratings.map((rating, index) => ({
+      problemKey: `problem-${index}`,
+      rating,
+      solvedAt: new Date(Date.UTC(2026, 0, index + 1)),
+      submissionId: index + 1,
+    }));
+
+  it('keeps 800 until there are at least five valid rated first-solves', () => {
+    expect(calculateCcLevelReference(solves([1200, 1300, 1400, 1500]))).toMatchObject({
+      eligible: false,
+      solveCount: 4,
+      referenceLevel: 800,
+    });
+  });
+
+  it('uses interpolated P70 directly without a confidence discount', () => {
+    expect(calculateCcLevelReference(solves([800, 900, 1000, 1100, 1200]))).toMatchObject({
+      eligible: true,
+      solveCount: 5,
+      percentile70: 1080,
+      referenceLevel: 1080,
+    });
+  });
+
+  it('uses only the ten most recent unique rated solves', () => {
+    const result = calculateCcLevelReference(
+      solves([3000, 3000, 900, 900, 1000, 1000, 1100, 1100, 1200, 1200, 1300, 1400]),
+    );
+    expect(result.solveCount).toBe(10);
+    expect(result.ratings).not.toContain(3000);
+    expect(result.referenceLevel).toBe(1200);
   });
 });
 

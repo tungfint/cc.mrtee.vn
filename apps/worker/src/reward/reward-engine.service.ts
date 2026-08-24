@@ -211,11 +211,87 @@ export class RewardEngineService {
           cc_level = ${nextLevel}, updated_at = now()
         WHERE user_id = ${userId}
       `;
+      await this.awardLevelRanks(transaction, userId, displayLevelBefore, nextLevel);
       if (eligibleFrom && solvedAt >= eligibleFrom) {
         await this.awardDailyStreak(transaction, userId, solvedAt, eligibleFrom);
       }
       return { firstSolveCreated: true, awarded: rewardEligible, amount };
     });
+  }
+
+  private async awardLevelRanks(
+    transaction: import('postgres').TransactionSql,
+    userId: string,
+    levelBefore: number,
+    levelAfter: number,
+  ) {
+    if (levelAfter <= levelBefore) return;
+    const ranks = await transaction<
+      { id: string; name: string; min_level: number; reward_point: string }[]
+    >`
+      SELECT id, name, min_level, reward_point::text FROM cc_level_ranks
+      WHERE active = true
+        AND min_level::numeric > ${levelBefore}::numeric
+        AND min_level::numeric <= ${levelAfter}::numeric
+      ORDER BY min_level
+    `;
+    for (const rank of ranks) {
+      const [award] = await transaction<{ id: string }[]>`
+        INSERT INTO user_level_rank_awards (user_id, rank_id, achieved_level, source)
+        VALUES (${userId}, ${rank.id}, ${levelAfter}, 'SOLVE')
+        ON CONFLICT (user_id, rank_id) DO NOTHING RETURNING id
+      `;
+      if (!award) continue;
+      const rewardPoint = Number(rank.reward_point);
+      if (rewardPoint > 0) {
+        const [pointTransaction] = await transaction<{ id: string }[]>`
+          INSERT INTO point_transactions (
+            user_id, type, amount, idempotency_key, affects_wallet, affects_point,
+            affects_season, description, metadata, event_at
+          ) VALUES (
+            ${userId}, 'BONUS', ${rewardPoint}, ${`level-rank:${userId}:${rank.id}`},
+            true, true, false, ${`Thưởng lần đầu đạt cấp bậc ${rank.name}`},
+            ${JSON.stringify({
+              source: 'CC_LEVEL_RANK',
+              rankId: rank.id,
+              rankName: rank.name,
+              minLevel: rank.min_level,
+              achievedLevel: levelAfter,
+            })}::jsonb,
+            now()
+          ) ON CONFLICT DO NOTHING RETURNING id
+        `;
+        if (pointTransaction) {
+          await transaction`
+            UPDATE user_level_rank_awards SET point_transaction_id = ${pointTransaction.id}
+            WHERE id = ${award.id}
+          `;
+          await transaction`
+            INSERT INTO user_wallets (user_id, balance) VALUES (${userId}, ${rewardPoint})
+            ON CONFLICT (user_id) DO UPDATE SET
+              balance = user_wallets.balance + EXCLUDED.balance, updated_at = now()
+          `;
+        }
+      }
+      const [notification] = await transaction<{ id: string }[]>`
+        INSERT INTO notifications (title, body, audience, target_user_id, publish_at)
+        VALUES (
+          ${`Chúc mừng đạt cấp bậc ${rank.name}`},
+          ${
+            rewardPoint > 0
+              ? `Bạn lần đầu đạt cấp bậc ${rank.name} và nhận ${rewardPoint} CC Point cùng ${rewardPoint} CC Balance.`
+              : `Bạn đã lần đầu đạt cấp bậc ${rank.name}.`
+          },
+          'USER', ${userId}, now()
+        ) RETURNING id
+      `;
+      if (notification) {
+        await transaction`
+          INSERT INTO notification_recipients (notification_id, user_id)
+          VALUES (${notification.id}, ${userId}) ON CONFLICT DO NOTHING
+        `;
+      }
+    }
   }
 
   private async awardDailyStreak(
@@ -342,6 +418,7 @@ export class RewardEngineService {
         evidence: { count: activity?.recent_count, windowHours: 2 },
       });
     }
+    const createdSignals: string[] = [];
     for (const signal of signals) {
       const [created] = await transaction<{ id: string }[]>`
         INSERT INTO activity_risk_events (
@@ -353,6 +430,7 @@ export class RewardEngineService {
         ) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id
       `;
       if (!created) continue;
+      createdSignals.push(signal.summary);
     }
     await transaction`
       WITH current_risk AS (
@@ -371,5 +449,21 @@ export class RewardEngineService {
         updated_at = now()
       FROM current_risk WHERE users.id = ${userId}
     `;
+    if (createdSignals.length) {
+      const [notification] = await transaction<{ id: string }[]>`
+        INSERT INTO notifications (title, body, audience, target_user_id, publish_at)
+        VALUES (
+          'Tài khoản có hoạt động cần kiểm tra',
+          ${`Hệ thống ghi nhận: ${createdSignals.join('; ')}. Đây là cảnh báo minh bạch, không phải kết luận gian lận và không tự động giữ điểm.`},
+          'USER', ${userId}, now()
+        ) RETURNING id
+      `;
+      if (notification) {
+        await transaction`
+          INSERT INTO notification_recipients (notification_id, user_id)
+          VALUES (${notification.id}, ${userId}) ON CONFLICT DO NOTHING
+        `;
+      }
+    }
   }
 }

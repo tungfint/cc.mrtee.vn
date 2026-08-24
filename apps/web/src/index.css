@@ -1206,10 +1206,26 @@ textarea:focus {
 }
 .reward-card-action {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-top: 17px;
+}
+.reward-card-action > strong {
+  margin-right: auto;
+}
+
+.reward-gift-panel {
+  margin-bottom: 20px;
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  background:
+    radial-gradient(
+      circle at 92% 10%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 36%
+    ),
+    var(--surface);
 }
 .reward-card-action > strong {
   color: var(--accent);
@@ -1437,6 +1453,46 @@ textarea:focus {
 
 .compact-field > span {
   font-size: 9px;
+}
+
+.cc-level-preview {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.cc-level-preview-summary,
+.cc-level-preview-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(120px, 0.7fr));
+  gap: 14px;
+  align-items: center;
+  padding: 13px 16px;
+}
+
+.cc-level-preview-summary {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-2));
+  font-size: 12px;
+}
+
+.cc-level-preview-row + .cc-level-preview-row {
+  border-top: 1px solid var(--line);
+}
+
+.cc-level-preview-row > div,
+.cc-level-preview-row > span {
+  display: grid;
+  gap: 3px;
+}
+
+.cc-level-preview-row a {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.cc-level-preview-row small {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .class-member-bulk-add {
@@ -4182,6 +4238,55 @@ textarea:focus {
   margin: 3px 0 0;
   color: var(--muted);
   font-size: 9px;
+}
+
+.student-risk-panel {
+  border-color: color-mix(in srgb, #f59e0b 32%, var(--line));
+}
+
+.student-risk-list {
+  display: grid;
+  gap: 9px;
+}
+
+.student-risk-event {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+  gap: 16px;
+  align-items: start;
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, var(--line));
+  border-radius: 14px;
+  padding: 14px;
+  background: color-mix(in srgb, #f59e0b 5%, var(--surface-2));
+}
+
+.student-risk-event.valid {
+  border-color: color-mix(in srgb, #22c55e 30%, var(--line));
+  background: color-mix(in srgb, #22c55e 5%, var(--surface-2));
+}
+
+.student-risk-event p,
+.student-risk-event small {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.student-risk-event .text-right {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 800px) {
+  .cc-level-preview-summary,
+  .cc-level-preview-row,
+  .student-risk-event {
+    grid-template-columns: 1fr;
+  }
+
+  .student-risk-event .text-right {
+    text-align: left;
+  }
 }
 
 .student-profile-grid {

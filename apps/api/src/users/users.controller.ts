@@ -212,7 +212,7 @@ export class UsersController {
       LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
       LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
       LEFT JOIN LATERAL (
-        SELECT sum(amount) FILTER (WHERE type NOT IN ('REDEEM', 'REFUND')) AS cc_point
+        SELECT sum(amount) FILTER (WHERE affects_point) AS cc_point
         FROM point_transactions WHERE user_id = users.id
       ) AS points ON true
       WHERE (${input.search} = '' OR users.display_name ILIKE ${search}

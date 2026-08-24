@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { AuthUser } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface RewardRow {
   id: string;
@@ -29,13 +30,17 @@ export interface OrderRow {
   cost_snapshot: string;
   status: 'REQUESTED' | 'APPROVED' | 'FULFILLED' | 'REJECTED' | 'CANCELLED';
   idempotency_key: string;
+  recipient_user_id: string | null;
 }
 
 type TerminalStatus = 'REJECTED' | 'CANCELLED';
 
 @Injectable()
 export class RewardsService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async catalog(userId?: string) {
     return this.database.sql<RewardRow[]>`
@@ -51,7 +56,8 @@ export class RewardsService {
         SELECT count(*)::int AS quantity
         FROM reward_orders AS orders
         LEFT JOIN streak_rescues AS rescues ON rescues.reward_order_id = orders.id
-        WHERE orders.reward_id = rewards.id AND orders.user_id = ${userId ?? null}
+        WHERE orders.reward_id = rewards.id
+          AND COALESCE(orders.recipient_user_id, orders.user_id) = ${userId ?? null}
           AND orders.status = 'FULFILLED' AND rescues.id IS NULL
       ) AS owned ON true
       WHERE rewards.active = true AND (rewards.stock IS NULL OR rewards.stock > 0)
@@ -70,10 +76,14 @@ export class RewardsService {
   async orders(userId: string) {
     const [orders, [cashSummary]] = await Promise.all([
       this.database.sql`
-        SELECT orders.*, rewards.name AS reward_name, rewards.image_url, rewards.cash_value_vnd
+        SELECT orders.*, rewards.name AS reward_name, rewards.image_url, rewards.cash_value_vnd,
+          purchasers.display_name AS purchaser_name, recipients.display_name AS recipient_name,
+          CASE WHEN orders.user_id = ${userId} THEN 'SENT' ELSE 'RECEIVED' END AS gift_direction
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
-        WHERE orders.user_id = ${userId}
+        JOIN users AS purchasers ON purchasers.id = orders.user_id
+        LEFT JOIN users AS recipients ON recipients.id = orders.recipient_user_id
+        WHERE orders.user_id = ${userId} OR orders.recipient_user_id = ${userId}
         ORDER BY orders.created_at DESC
       `,
       this.database.sql<{ fulfilled_count: number; fulfilled_vnd: string }[]>`
@@ -82,7 +92,8 @@ export class RewardsService {
             AS fulfilled_vnd
         FROM reward_orders AS orders
         JOIN rewards ON rewards.id = orders.reward_id
-        WHERE orders.user_id = ${userId} AND rewards.cash_value_vnd IS NOT NULL
+        WHERE COALESCE(orders.recipient_user_id, orders.user_id) = ${userId}
+          AND rewards.cash_value_vnd IS NOT NULL
       `,
     ]);
     return {
@@ -95,7 +106,44 @@ export class RewardsService {
   }
 
   async redeem(userId: string, rewardId: string, clientKey: string) {
-    const idempotencyKey = `redeem:${userId}:${clientKey}`;
+    return this.purchase(userId, null, rewardId, clientKey, '');
+  }
+
+  async gift(
+    purchaserUserId: string,
+    recipientUserId: string,
+    rewardId: string,
+    clientKey: string,
+    message: string,
+  ) {
+    if (purchaserUserId === recipientUserId) {
+      throw new BadRequestException('Hãy dùng nút Đổi ngay khi tự nhận phần thưởng');
+    }
+    return this.purchase(purchaserUserId, recipientUserId, rewardId, clientKey, message);
+  }
+
+  async giftRecipients(userId: string) {
+    return {
+      users: await this.database.sql`
+        SELECT users.id, users.display_name, users.avatar_url,
+          accounts.handle AS codeforces_handle, accounts.current_rating
+        FROM users
+        LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
+        WHERE users.status = 'ACTIVE' AND users.id <> ${userId}
+        ORDER BY users.display_name, users.id
+        LIMIT 1000
+      `,
+    };
+  }
+
+  private async purchase(
+    userId: string,
+    recipientUserId: string | null,
+    rewardId: string,
+    clientKey: string,
+    giftMessage: string,
+  ) {
+    const idempotencyKey = `${recipientUserId ? 'gift' : 'redeem'}:${userId}:${clientKey}`;
     return this.database.sql.begin(async (transaction) => {
       await transaction`
         SELECT pg_advisory_xact_lock(hashtextextended(${idempotencyKey}, 0))
@@ -104,7 +152,10 @@ export class RewardsService {
         SELECT * FROM reward_orders WHERE idempotency_key = ${idempotencyKey}
       `;
       if (existing) {
-        if (existing.reward_id !== rewardId) {
+        if (
+          existing.reward_id !== rewardId ||
+          (existing.recipient_user_id ?? null) !== recipientUserId
+        ) {
           throw new ConflictException('Khóa idempotency đã được dùng cho phần thưởng khác');
         }
         return { order: existing, replayed: true };
@@ -123,17 +174,29 @@ export class RewardsService {
         FROM rewards WHERE id = ${rewardId} FOR UPDATE
       `;
       if (!reward || !reward.active) throw new NotFoundException('Phần thưởng không khả dụng');
+      if (recipientUserId) {
+        if (reward.cash_value_vnd !== null) {
+          throw new BadRequestException('Không hỗ trợ tặng quy đổi tiền mặt cho tài khoản khác');
+        }
+        const [recipient] = await transaction`
+          SELECT id FROM users WHERE id = ${recipientUserId} AND status = 'ACTIVE'
+        `;
+        if (!recipient) throw new BadRequestException('Không tìm thấy người nhận đang hoạt động');
+      }
       if (reward.stock !== null && reward.stock <= 0) {
         throw new BadRequestException('Phần thưởng đã hết');
       }
       if (reward.required_cc_level > 0) {
         const [skill] = await transaction<{ cc_level: string }[]>`
-          SELECT cc_level::text FROM user_skill_state WHERE user_id = ${userId}
+          SELECT cc_level::text FROM user_skill_state
+          WHERE user_id = ${recipientUserId ?? userId}
         `;
         const currentLevel = Number(skill?.cc_level ?? 800);
         if (currentLevel < reward.required_cc_level) {
           throw new BadRequestException(
-            `Cần đạt CC Level ${reward.required_cc_level} để đổi phần thưởng này`,
+            recipientUserId
+              ? `Người nhận cần đạt CC Level ${reward.required_cc_level} để nhận phần thưởng này`
+              : `Cần đạt CC Level ${reward.required_cc_level} để nhận phần thưởng này`,
           );
         }
       }
@@ -147,11 +210,14 @@ export class RewardsService {
         : 'FULFILLED';
       const [order] = await transaction<OrderRow[]>`
         INSERT INTO reward_orders (
-          user_id, reward_id, cost_snapshot, idempotency_key, status, reviewed_at, note
+          user_id, recipient_user_id, reward_id, cost_snapshot, idempotency_key, status,
+          reviewed_at, note, gift_message
         ) VALUES (
-          ${userId}, ${reward.id}, ${reward.cost}, ${idempotencyKey}, ${initialStatus},
+          ${userId}, ${recipientUserId}, ${reward.id}, ${reward.cost}, ${idempotencyKey},
+          ${initialStatus},
           CASE WHEN ${!reward.requires_approval} THEN now() ELSE NULL END,
-          ${reward.requires_approval ? null : 'Tự động hoàn tất — phần thưởng không yêu cầu xác nhận'}
+          ${reward.requires_approval ? null : 'Tự động hoàn tất — phần thưởng không yêu cầu xác nhận'},
+          ${giftMessage || null}
         )
         RETURNING *
       `;
@@ -159,10 +225,11 @@ export class RewardsService {
       await transaction`
         INSERT INTO point_transactions (
           user_id, type, amount, source_reward_order_id, idempotency_key,
-          affects_wallet, affects_season, description, event_at
+          affects_wallet, affects_point, affects_season, description, event_at
         ) VALUES (
           ${userId}, 'REDEEM', ${-cost}, ${order.id}, ${`ledger:${idempotencyKey}`},
-          true, false, ${`Đổi thưởng: ${reward.name}`}, now()
+          true, false, false,
+          ${recipientUserId ? `Tặng quà: ${reward.name}` : `Đổi thưởng: ${reward.name}`}, now()
         )
       `;
       await transaction`
@@ -180,10 +247,21 @@ export class RewardsService {
           INSERT INTO user_achievements (
             user_id, achievement_id, source, reward_order_id, note
           ) VALUES (
-            ${userId}, ${reward.achievement_id}, 'REWARD', ${order.id},
+            ${recipientUserId ?? userId}, ${reward.achievement_id}, 'REWARD', ${order.id},
             'Tự động trao danh hiệu sau khi đổi thưởng'
           ) ON CONFLICT (user_id, achievement_id) DO NOTHING
         `;
+      }
+      if (recipientUserId) {
+        const [purchaser] = await transaction<{ display_name: string }[]>`
+          SELECT display_name FROM users WHERE id = ${userId}
+        `;
+        await this.notifications.createForUser(transaction, {
+          userId: recipientUserId,
+          title: 'Bạn vừa được tặng quà',
+          body: `${purchaser?.display_name ?? 'Một thành viên'} đã tặng bạn “${reward.name}”.${giftMessage ? ` Lời nhắn: ${giftMessage}` : ''}${reward.requires_approval ? ' Quà đang chờ xác nhận.' : ' Quà đã được ghi nhận vào hồ sơ.'}`,
+          createdBy: userId,
+        });
       }
       return { order, replayed: false };
     });
@@ -221,11 +299,13 @@ export class RewardsService {
       `;
       if (!updated) throw new ConflictException('Đơn đã thay đổi trạng thái');
       if (status === 'FULFILLED') {
+        const beneficiaryUserId = order.recipient_user_id ?? order.user_id;
         await transaction`
           INSERT INTO user_achievements (
             user_id, achievement_id, source, reward_order_id, granted_by, note
           )
-          SELECT ${order.user_id}, rewards.achievement_id, 'REWARD', ${order.id},
+          SELECT ${beneficiaryUserId}::uuid, rewards.achievement_id,
+            'REWARD', ${order.id},
             ${actor.userId}, ${note}
           FROM rewards
           WHERE rewards.id = ${order.reward_id} AND rewards.category = 'ACHIEVEMENT'
@@ -233,6 +313,12 @@ export class RewardsService {
           ON CONFLICT (user_id, achievement_id) DO NOTHING
         `;
       }
+      await this.notifications.createForUser(transaction, {
+        userId: order.recipient_user_id ?? order.user_id,
+        title: 'Trạng thái quà đã được cập nhật',
+        body: `Yêu cầu quà của bạn đã chuyển sang trạng thái ${status}. Ghi chú: ${note}`,
+        createdBy: actor.userId,
+      });
       await transaction`
         INSERT INTO audit_logs (
           actor_user_id, action, entity_type, entity_id, before, after, reason
@@ -259,10 +345,11 @@ export class RewardsService {
     const [refund] = await transaction<{ id: string }[]>`
       INSERT INTO point_transactions (
         user_id, type, amount, source_reward_order_id, related_transaction_id,
-        idempotency_key, affects_wallet, affects_season, description, event_at
+        idempotency_key, affects_wallet, affects_point, affects_season, description, event_at
       ) VALUES (
         ${order.user_id}, 'REFUND', ${amount}, ${order.id}, ${redeem.id},
-        ${`refund:${order.id}`}, true, false, ${`Hoàn điểm do đơn ${status.toLowerCase()}`}, now()
+        ${`refund:${order.id}`}, true, false, false,
+        ${`Hoàn điểm do đơn ${status.toLowerCase()}`}, now()
       ) ON CONFLICT DO NOTHING
       RETURNING id
     `;

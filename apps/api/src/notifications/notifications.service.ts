@@ -17,6 +17,26 @@ export interface NotificationInput {
 export class NotificationsService {
   constructor(private readonly database: DatabaseService) {}
 
+  async createForUser(
+    transaction: import('postgres').TransactionSql,
+    input: { userId: string; title: string; body: string; createdBy?: string | null },
+  ) {
+    const [notification] = await transaction<{ id: string }[]>`
+      INSERT INTO notifications (
+        title, body, audience, target_user_id, ticker_duration_minutes, publish_at, created_by
+      ) VALUES (
+        ${input.title}, ${input.body}, 'USER', ${input.userId}, 0, now(),
+        ${input.createdBy ?? null}
+      ) RETURNING id
+    `;
+    if (!notification) throw new BadRequestException('Không thể tạo thông báo cá nhân');
+    await transaction`
+      INSERT INTO notification_recipients (notification_id, user_id)
+      VALUES (${notification.id}, ${input.userId}) ON CONFLICT DO NOTHING
+    `;
+    return notification;
+  }
+
   async summary(userId: string) {
     const [[counts], ticker] = await Promise.all([
       this.database.sql<{ unread_count: number }[]>`

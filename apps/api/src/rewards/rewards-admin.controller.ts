@@ -96,9 +96,11 @@ export class RewardsAdminController {
     return {
       orders: await this.database.sql`
         SELECT orders.*, users.display_name, users.full_name, rewards.name AS reward_name,
-          rewards.cash_value_vnd, rewards.requires_approval
+          rewards.cash_value_vnd, rewards.requires_approval,
+          recipients.display_name AS recipient_name
         FROM reward_orders AS orders
         JOIN users ON users.id = orders.user_id
+        LEFT JOIN users AS recipients ON recipients.id = orders.recipient_user_id
         JOIN rewards ON rewards.id = orders.reward_id
         ORDER BY orders.created_at DESC LIMIT 200
       `,

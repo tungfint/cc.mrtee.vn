@@ -11,6 +11,11 @@ interface Order {
   reviewed_at: string | null;
   note: string | null;
   cash_value_vnd: number | null;
+  recipient_user_id: string | null;
+  purchaser_name: string;
+  recipient_name: string | null;
+  gift_direction: 'SENT' | 'RECEIVED';
+  gift_message: string | null;
 }
 
 interface CashSummary {
@@ -116,6 +121,14 @@ export default function OrdersPage() {
                 <p className="mb-0 mt-2 text-sm text-[var(--muted)]">
                   Tạo {formatDate(order.created_at)} {order.note ? `· ${order.note}` : ''}
                 </p>
+                {order.recipient_user_id && (
+                  <p className="mb-0 mt-2 text-sm text-[var(--muted)]">
+                    {order.gift_direction === 'RECEIVED'
+                      ? `Quà từ ${order.purchaser_name}`
+                      : `Đã tặng ${order.recipient_name ?? 'tài khoản khác'}`}
+                    {order.gift_message ? ` · “${order.gift_message}”` : ''}
+                  </p>
+                )}
                 {order.cash_value_vnd !== null && (
                   <p className="cash-order-line">
                     {order.status === 'FULFILLED' ? 'Đã nhận' : 'Quà tiền'}:{' '}
@@ -125,16 +138,17 @@ export default function OrdersPage() {
               </div>
               <div className="flex items-center gap-4">
                 <strong>{formatNumber(order.cost_snapshot, 2)} CC Balance</strong>
-                {['REQUESTED', 'APPROVED'].includes(order.status) && (
-                  <button
-                    className="button-secondary"
-                    disabled={cancel.isPending}
-                    onClick={() => cancel.mutate(order.id)}
-                    type="button"
-                  >
-                    Hủy đơn
-                  </button>
-                )}
+                {order.gift_direction !== 'RECEIVED' &&
+                  ['REQUESTED', 'APPROVED'].includes(order.status) && (
+                    <button
+                      className="button-secondary"
+                      disabled={cancel.isPending}
+                      onClick={() => cancel.mutate(order.id)}
+                      type="button"
+                    >
+                      Hủy đơn
+                    </button>
+                  )}
               </div>
             </article>
           ))}
