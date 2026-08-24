@@ -11,8 +11,10 @@ CREATE TABLE "user_level_rank_awards" (
 --> statement-breakpoint
 ALTER TABLE "cc_level_ranks" ADD COLUMN "reward_point" numeric(12, 2) DEFAULT '0.00' NOT NULL;--> statement-breakpoint
 ALTER TABLE "point_transactions" ADD COLUMN "affects_point" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "point_transactions" DISABLE TRIGGER "point_transactions_immutable_trigger";--> statement-breakpoint
 UPDATE "point_transactions" SET "affects_point" = false
 WHERE "type" IN ('REDEEM', 'REFUND');--> statement-breakpoint
+ALTER TABLE "point_transactions" ENABLE TRIGGER "point_transactions_immutable_trigger";--> statement-breakpoint
 ALTER TABLE "reward_orders" ADD COLUMN "recipient_user_id" uuid;--> statement-breakpoint
 ALTER TABLE "reward_orders" ADD COLUMN "gift_message" text;--> statement-breakpoint
 ALTER TABLE "user_level_rank_awards" ADD CONSTRAINT "user_level_rank_awards_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
