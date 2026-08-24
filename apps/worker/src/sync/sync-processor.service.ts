@@ -133,12 +133,12 @@ export class SyncProcessorService {
               SELECT max(last_seen_at) FROM auth_sessions
               WHERE user_id = codeforces_accounts.user_id
                 AND revoked_at IS NULL AND expires_at > now()
-            ) >= now() - interval '10 minutes' THEN (${onlineMinutes})::double precision
+            ) > now() - interval '60 minutes' THEN (${onlineMinutes})::double precision
             WHEN (
               SELECT max(last_seen_at) FROM auth_sessions
               WHERE user_id = codeforces_accounts.user_id
                 AND revoked_at IS NULL AND expires_at > now()
-            ) >= now() - interval '30 minutes' THEN (${recentMinutes})::double precision
+            ) >= now() - interval '120 minutes' THEN (${recentMinutes})::double precision
             ELSE (${offlineMinutes})::double precision
           END * interval '1 minute'
         ),

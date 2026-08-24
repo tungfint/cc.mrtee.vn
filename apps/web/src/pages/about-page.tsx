@@ -72,17 +72,17 @@ const syncCadence = [
   {
     time: 'Mỗi 15 phút',
     title: 'Đang Online',
-    detail: 'Áp dụng khi học sinh có hoạt động trên Cầy Cốt trong 10 phút gần nhất.',
+    detail: 'Áp dụng khi học sinh có hoạt động trên Cầy Cốt trong 60 phút gần nhất.',
   },
   {
     time: 'Mỗi 30 phút',
     title: 'Vừa hoạt động',
-    detail: 'Áp dụng khi lần hoạt động gần nhất cách đây từ 10 đến 30 phút.',
+    detail: 'Áp dụng khi lần hoạt động gần nhất cách đây từ 60 đến 120 phút.',
   },
   {
     time: 'Khoảng 24 giờ',
     title: 'Đang Offline',
-    detail: 'Áp dụng khi đã quá 30 phút chưa hoạt động trên Cầy Cốt.',
+    detail: 'Áp dụng khi đã quá 120 phút chưa hoạt động trên Cầy Cốt.',
   },
 ];
 

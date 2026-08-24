@@ -47,6 +47,7 @@ function TextStyleEditor({
   onStyleChange,
   maxLength,
   rows,
+  variant,
   required = false,
 }: {
   label: string;
@@ -56,6 +57,7 @@ function TextStyleEditor({
   onStyleChange: (style: Required<TextStyle>) => void;
   maxLength: number;
   rows: number;
+  variant: 'body' | 'ticker';
   required?: boolean;
 }) {
   const update = <Key extends keyof Required<TextStyle>>(
@@ -63,7 +65,7 @@ function TextStyleEditor({
     nextValue: Required<TextStyle>[Key],
   ) => onStyleChange({ ...style, [key]: nextValue });
   return (
-    <div className="field full notification-editor">
+    <div className={`field full notification-editor notification-editor-${variant}`}>
       <span>{label}</span>
       <span className="notification-editor-toolbar" aria-label={`Định dạng ${label}`}>
         <select
@@ -217,7 +219,7 @@ export function AdminNotificationsPanel({
       <form className="panel p-6" onSubmit={submit}>
         <p className="eyebrow">GỬI THÔNG BÁO</p>
         <h2 className="mt-2 text-xl font-black">Thông tin cần truyền đạt</h2>
-        <div className="form-grid mt-5">
+        <div className="form-grid notification-compose-grid mt-5">
           <label className="field full">
             <span>Tiêu đề</span>
             <input
@@ -227,16 +229,6 @@ export function AdminNotificationsPanel({
               value={title}
             />
           </label>
-          <TextStyleEditor
-            label="Nội dung"
-            maxLength={5000}
-            onChange={setBody}
-            onStyleChange={setBodyStyle}
-            required
-            rows={5}
-            style={bodyStyle}
-            value={body}
-          />
           <label className="field">
             <span>Người nhận</span>
             <select
@@ -293,13 +285,25 @@ export function AdminNotificationsPanel({
             />
           </label>
           <TextStyleEditor
+            label="Nội dung"
+            maxLength={5000}
+            onChange={setBody}
+            onStyleChange={setBodyStyle}
+            required
+            rows={8}
+            style={bodyStyle}
+            value={body}
+            variant="body"
+          />
+          <TextStyleEditor
             label="Dòng chạy quan trọng (không bắt buộc)"
             maxLength={300}
             onChange={setTickerText}
             onStyleChange={setTickerStyle}
-            rows={2}
+            rows={4}
             style={tickerStyle}
             value={tickerText}
+            variant="ticker"
           />
           {tickerText && (
             <label className="field">

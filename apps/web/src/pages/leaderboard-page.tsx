@@ -110,13 +110,13 @@ export default function LeaderboardPage() {
       </div>
       <div className="presence-legend" aria-label="Chú thích trạng thái hoạt động">
         <span>
-          <i className="presence-dot online" /> Online · dưới 10 phút
+          <i className="presence-dot online" /> Online · dưới 60 phút
         </span>
         <span>
-          <i className="presence-dot recent" /> Vừa hoạt động · 10–30 phút
+          <i className="presence-dot recent" /> Vừa hoạt động · 60–120 phút
         </span>
         <span>
-          <i className="presence-dot offline" /> Offline · trên 30 phút
+          <i className="presence-dot offline" /> Offline · trên 120 phút
         </span>
       </div>
 
@@ -165,10 +165,10 @@ export default function LeaderboardPage() {
                       className={`presence-dot ${entry.presenceStatus.toLowerCase()}`}
                       title={
                         entry.presenceStatus === 'ONLINE'
-                          ? 'Online · hoạt động trong 10 phút'
+                          ? 'Online · hoạt động trong 60 phút'
                           : entry.presenceStatus === 'RECENT'
-                            ? 'Vừa hoạt động · trong 10–30 phút'
-                            : 'Offline · quá 30 phút'
+                            ? 'Vừa hoạt động · trong 60–120 phút'
+                            : 'Offline · quá 120 phút'
                       }
                     />
                     <StudentName name={entry.displayName} rating={entry.currentRating} />

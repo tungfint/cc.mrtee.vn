@@ -701,20 +701,20 @@ textarea:focus {
 }
 .achievement-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
   grid-auto-flow: dense;
-  gap: 12px;
+  gap: 10px;
 }
 .achievement-card {
   display: flex;
   grid-column: span 2;
-  min-height: 92px;
+  min-height: 72px;
   align-items: center;
-  gap: 13px;
+  gap: 10px;
   border: 1px solid color-mix(in srgb, #fbbf24 24%, var(--line));
-  border-radius: 15px;
+  border-radius: 13px;
   background: linear-gradient(145deg, #fbbf240e, var(--surface-2));
-  padding: 14px;
+  padding: 10px 12px;
 }
 .title-achievement,
 .student-title-achievement {
@@ -731,14 +731,14 @@ textarea:focus {
 .recognition-mascot-item {
   position: relative;
   display: grid;
-  width: 92px;
-  min-height: 92px;
+  width: 78px;
+  min-height: 78px;
   place-items: center;
   overflow: visible;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
-  border-radius: 22px;
+  border-radius: 18px;
   background: radial-gradient(circle at 50% 38%, #ffffff, var(--surface-2) 72%);
-  padding: 9px;
+  padding: 7px;
   box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .achievement-grid > .mascot-collection-card {
@@ -751,7 +751,7 @@ textarea:focus {
 .recognition-mascot-item img {
   width: 100%;
   height: 100%;
-  min-height: 70px;
+  min-height: 58px;
   object-fit: contain;
 }
 .mascot-collection-card > span,
@@ -781,25 +781,25 @@ textarea:focus {
   box-shadow: 0 6px 14px rgba(236, 72, 153, 0.32);
 }
 .achievement-icon {
-  font-size: 30px;
+  font-size: 25px;
   filter: drop-shadow(0 7px 12px #fbbf2444);
 }
 .achievement-reward-image {
-  width: 58px;
-  height: 58px;
+  width: 44px;
+  height: 44px;
   flex: none;
   object-fit: contain;
   filter: drop-shadow(0 8px 12px color-mix(in srgb, var(--accent) 25%, transparent));
 }
 .achievement-card strong {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
 }
 .achievement-card p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 10px;
+  line-height: 1.35;
 }
 .reward-achievement {
   border-color: color-mix(in srgb, #a78bfa 24%, var(--line));
@@ -1236,6 +1236,72 @@ textarea:focus {
     ),
     var(--surface);
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.42);
+}
+.reward-confirm-panel {
+  width: min(560px, calc(100vw - 32px));
+}
+.reward-confirm-summary {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: 17px;
+}
+.reward-confirm-summary h2 {
+  margin: 5px 0 0;
+  font-size: 22px;
+}
+.reward-confirm-summary p:not(.eyebrow),
+.reward-confirm-note {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.reward-confirm-visual {
+  display: grid;
+  width: 78px;
+  height: 78px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 18px;
+  background: radial-gradient(circle, #fff, var(--surface-2));
+}
+.reward-confirm-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.reward-confirm-visual span {
+  color: var(--accent);
+  font-size: 34px;
+  font-weight: 950;
+}
+.reward-confirm-cost {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 13px 15px;
+}
+.reward-confirm-cost span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.reward-confirm-cost strong {
+  color: var(--accent);
+  font-size: 20px;
+}
+.reward-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
 }
 .modal-backdrop {
   position: fixed;
@@ -3088,7 +3154,7 @@ textarea:focus {
     grid-template-columns: repeat(2, 1fr);
   }
   .achievement-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
   }
   .dashboard-leaderboards {
     grid-template-columns: 1fr;
@@ -3170,12 +3236,14 @@ textarea:focus {
   }
   .stats-grid,
   .reward-grid,
-  .tag-grid,
-  .achievement-grid {
+  .tag-grid {
     grid-template-columns: 1fr;
   }
+  .achievement-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .achievement-card {
-    grid-column: auto;
+    grid-column: span 2;
   }
   .activity-summary,
   .activity-grid,
@@ -3456,6 +3524,10 @@ textarea:focus {
   align-items: start;
   gap: 20px;
 }
+.notification-compose-grid > .full,
+.notification-compose-grid > .notification-editor {
+  grid-column: 1 / -1;
+}
 .notification-editor {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -3512,6 +3584,12 @@ textarea:focus {
   resize: vertical;
   background: var(--surface);
   white-space: pre-wrap;
+}
+.notification-editor-body textarea {
+  min-height: 190px;
+}
+.notification-editor-ticker textarea {
+  min-height: 118px;
 }
 .notification-history-heading {
   display: flex;
@@ -3712,6 +3790,84 @@ textarea:focus {
   display: grid;
   min-width: 0;
   gap: 18px;
+}
+.reward-quick-shelf {
+  overflow: hidden;
+  padding: 0;
+}
+.reward-quick-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 15px 16px;
+}
+.reward-quick-heading h3 {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+.reward-quick-heading > span {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+  padding: 5px 8px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.reward-quick-list {
+  display: grid;
+}
+.reward-quick-list article {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 13px;
+}
+.reward-quick-list article:last-child {
+  border-bottom: 0;
+}
+.reward-quick-image {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+}
+.reward-quick-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.reward-quick-image span {
+  color: var(--accent);
+  font-size: 24px;
+}
+.reward-quick-list strong,
+.reward-quick-list small {
+  display: block;
+}
+.reward-quick-list strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reward-quick-list small {
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 850;
+}
+.reward-quick-list .button-secondary {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 10px;
 }
 .reward-balance-hero {
   display: grid;

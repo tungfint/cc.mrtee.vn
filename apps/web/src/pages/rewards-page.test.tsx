@@ -103,7 +103,7 @@ describe('RewardsPage', () => {
       await screen.findByRole('heading', { name: 'Đồng đội đáng yêu của dân Cầy Cốt' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'CC Balance thành tiền' })).toBeInTheDocument();
-    expect(screen.getByText('Mèo Mầm Code')).toBeInTheDocument();
+    expect(screen.getAllByText('Mèo Mầm Code').length).toBeGreaterThan(0);
     expect(screen.getByText('×2')).toBeInTheDocument();
     expect(
       screen.getByRole('heading', { name: 'Dấu ấn cho hành trình bền bỉ' }),
@@ -125,7 +125,7 @@ describe('RewardsPage', () => {
       </QueryClientProvider>,
     );
 
-    await screen.findByText('Mèo Mầm Code');
+    await screen.findAllByText('Mèo Mầm Code');
     fireEvent.click(screen.getAllByRole('button', { name: 'Tặng bạn bè' })[0]!);
 
     expect(await screen.findByRole('dialog')).toHaveAccessibleName(
@@ -134,5 +134,25 @@ describe('RewardsPage', () => {
     expect(screen.getByLabelText('Người nhận')).toBeInTheDocument();
     expect(screen.getByLabelText('Lời nhắn (không bắt buộc)')).toBeInTheDocument();
     expect(await screen.findByRole('option', { name: /Bạn học Demo/ })).toBeInTheDocument();
+  });
+
+  it('opens a dedicated confirmation dialog before redeeming', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <RewardsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findAllByText('Mèo Mầm Code');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Đổi ngay' })[0]!);
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Đổi “Mèo Mầm Code”?' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('CC Balance sẽ dùng')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Xác nhận đổi' })).toBeInTheDocument();
   });
 });

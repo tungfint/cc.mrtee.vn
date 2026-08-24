@@ -348,8 +348,8 @@ export class InsightsController {
         COALESCE(streak.current_streak, 0)::int AS current_streak,
         COALESCE(streak.longest_streak, 0)::int AS longest_streak,
         CASE
-          WHEN presence.last_seen_at >= now() - interval '10 minutes' THEN 'ONLINE'
-          WHEN presence.last_seen_at >= now() - interval '30 minutes' THEN 'RECENT'
+          WHEN presence.last_seen_at > now() - interval '60 minutes' THEN 'ONLINE'
+          WHEN presence.last_seen_at >= now() - interval '120 minutes' THEN 'RECENT'
           ELSE 'OFFLINE'
         END AS presence_status,
         level_rank.name AS level_rank_name, level_rank.icon AS level_rank_icon,

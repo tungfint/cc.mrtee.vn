@@ -4,10 +4,11 @@ import { cadenceMinutes, syncTier } from './sync-cadence';
 describe('adaptive sync cadence', () => {
   const now = new Date('2026-08-18T00:00:00Z');
 
-  it('classifies presence using the 10 and 30 minute boundaries', () => {
-    expect(syncTier('2026-08-17T23:51:00Z', now)).toBe('ONLINE');
-    expect(syncTier('2026-08-17T23:40:00Z', now)).toBe('RECENT');
-    expect(syncTier('2026-08-17T23:29:00Z', now)).toBe('OFFLINE');
+  it('classifies presence using the 60 and 120 minute boundaries', () => {
+    expect(syncTier('2026-08-17T23:01:00Z', now)).toBe('ONLINE');
+    expect(syncTier('2026-08-17T23:00:00Z', now)).toBe('RECENT');
+    expect(syncTier('2026-08-17T22:00:00Z', now)).toBe('RECENT');
+    expect(syncTier('2026-08-17T21:59:00Z', now)).toBe('OFFLINE');
     expect(syncTier(null, now)).toBe('OFFLINE');
   });
 

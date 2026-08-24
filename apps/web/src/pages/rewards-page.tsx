@@ -43,6 +43,7 @@ interface GiftRecipient {
 
 export default function RewardsPage() {
   const queryClient = useQueryClient();
+  const [redeemTarget, setRedeemTarget] = useState<Reward | null>(null);
   const [giftReward, setGiftReward] = useState<Reward | null>(null);
   const [giftRecipientId, setGiftRecipientId] = useState('');
   const [giftMessage, setGiftMessage] = useState('');
@@ -57,6 +58,7 @@ export default function RewardsPage() {
         body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
       }),
     onSuccess: () => {
+      setRedeemTarget(null);
       void queryClient.invalidateQueries({ queryKey: ['rewards'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -91,13 +93,15 @@ export default function RewardsPage() {
     },
   });
   useEffect(() => {
-    if (!giftReward) return;
+    if (!giftReward && !redeemTarget) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !gift.isPending) setGiftReward(null);
+      if (event.key !== 'Escape') return;
+      if (giftReward && !gift.isPending) setGiftReward(null);
+      if (redeemTarget && !redeem.isPending) setRedeemTarget(null);
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [gift.isPending, giftReward]);
+  }, [gift.isPending, giftReward, redeem.isPending, redeemTarget]);
   const cashRewards =
     rewards.data?.rewards.filter((reward) => reward.cash_value_vnd !== null) ?? [];
   const mascotRewards =
@@ -112,10 +116,13 @@ export default function RewardsPage() {
     rewards.data?.rewards.filter((reward) => reward.category === 'ACHIEVEMENT') ?? [];
   const walletBalance = rewards.data?.walletBalance ?? null;
   const walletBalanceValue = walletBalance === null ? null : Number(walletBalance);
-  const redeemReward = (reward: Reward) => {
-    if (window.confirm(`Đổi “${reward.name}” với ${formatNumber(reward.cost)} CC Balance?`)) {
-      redeem.mutate(reward.id);
-    }
+  const openRedeemDialog = (reward: Reward) => {
+    setGiftReward(null);
+    setRedeemTarget(reward);
+  };
+  const openGiftDialog = (reward: Reward) => {
+    setRedeemTarget(null);
+    setGiftReward(reward);
   };
 
   return (
@@ -143,6 +150,64 @@ export default function RewardsPage() {
       {redeem.error && <p className="notice error">{redeem.error.message}</p>}
       {gift.isSuccess && <p className="notice success">Đã gửi quà tới tài khoản được chọn.</p>}
       {gift.error && <p className="notice error">{gift.error.message}</p>}
+      {redeemTarget && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target && !redeem.isPending) setRedeemTarget(null);
+          }}
+        >
+          <section
+            aria-labelledby="redeem-dialog-title"
+            aria-modal="true"
+            className="panel reward-gift-panel reward-confirm-panel p-6"
+            role="dialog"
+          >
+            <div className="reward-confirm-summary">
+              <div className="reward-confirm-visual">
+                {redeemTarget.image_url ? (
+                  <img alt={redeemTarget.name} src={redeemTarget.image_url} />
+                ) : (
+                  <span>{redeemTarget.cash_value_vnd ? '₫' : '✦'}</span>
+                )}
+              </div>
+              <div>
+                <p className="eyebrow">XÁC NHẬN ĐỔI THƯỞNG</p>
+                <h2 id="redeem-dialog-title">Đổi “{redeemTarget.name}”?</h2>
+                <p>{redeemTarget.description}</p>
+              </div>
+            </div>
+            <div className="reward-confirm-cost">
+              <span>CC Balance sẽ dùng</span>
+              <strong>◈ {formatNumber(redeemTarget.cost)}</strong>
+            </div>
+            <p className="reward-confirm-note">
+              {redeemTarget.requires_approval
+                ? 'Yêu cầu sẽ được gửi tới giáo viên hoặc quản trị viên để xác nhận.'
+                : 'Phần thưởng sẽ được ghi nhận ngay sau khi xác nhận.'}
+            </p>
+            {redeem.error && <p className="notice error">{redeem.error.message}</p>}
+            <div className="reward-confirm-actions">
+              <button
+                className="button-secondary"
+                disabled={redeem.isPending}
+                onClick={() => setRedeemTarget(null)}
+                type="button"
+              >
+                Quay lại
+              </button>
+              <button
+                className="button-primary"
+                disabled={redeem.isPending}
+                onClick={() => redeem.mutate(redeemTarget.id)}
+                type="button"
+              >
+                {redeem.isPending ? 'Đang đổi thưởng…' : 'Xác nhận đổi'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {giftReward && (
         <div
           className="modal-backdrop"
@@ -231,8 +296,8 @@ export default function RewardsPage() {
                 eyebrow="BỘ SƯU TẬP LINH VẬT"
                 rewards={mascotRewards}
                 title="Đồng đội đáng yêu của dân Cầy Cốt"
-                onRedeem={redeemReward}
-                onGift={setGiftReward}
+                onRedeem={openRedeemDialog}
+                onGift={openGiftDialog}
                 pending={redeem.isPending}
                 walletBalance={walletBalanceValue}
               />
@@ -243,8 +308,8 @@ export default function RewardsPage() {
                 eyebrow="DANH HIỆU"
                 rewards={achievementRewards}
                 title="Dấu ấn cho hành trình bền bỉ"
-                onRedeem={redeemReward}
-                onGift={setGiftReward}
+                onRedeem={openRedeemDialog}
+                onGift={openGiftDialog}
                 pending={redeem.isPending}
                 walletBalance={walletBalanceValue}
               />
@@ -255,8 +320,8 @@ export default function RewardsPage() {
                 eyebrow="PHẦN THƯỞNG KHÁC"
                 rewards={regularRewards}
                 title="Chọn món quà phù hợp với bạn"
-                onRedeem={redeemReward}
-                onGift={setGiftReward}
+                onRedeem={openRedeemDialog}
+                onGift={openGiftDialog}
                 pending={redeem.isPending}
                 walletBalance={walletBalanceValue}
               />
@@ -290,7 +355,7 @@ export default function RewardsPage() {
                         <button
                           className="button-primary"
                           disabled={redeem.isPending || !canAfford}
-                          onClick={() => redeemReward(reward)}
+                          onClick={() => openRedeemDialog(reward)}
                           type="button"
                         >
                           {canAfford ? 'Đổi' : 'Chưa đủ'}
@@ -312,11 +377,71 @@ export default function RewardsPage() {
                   <Link to="/orders">Xem Quà của tôi →</Link>
                 </div>
               </aside>
+              <RewardQuickShelf
+                onRedeem={openRedeemDialog}
+                pending={redeem.isPending}
+                rewards={[...mascotRewards, ...regularRewards].slice(0, 3)}
+                walletBalance={walletBalanceValue}
+              />
             </div>
           )}
         </div>
       )}
     </>
+  );
+}
+
+function RewardQuickShelf({
+  rewards,
+  pending,
+  walletBalance,
+  onRedeem,
+}: {
+  rewards: Reward[];
+  pending: boolean;
+  walletBalance: number | null;
+  onRedeem: (reward: Reward) => void;
+}) {
+  if (!rewards.length) return null;
+  return (
+    <aside className="panel reward-quick-shelf">
+      <div className="reward-quick-heading">
+        <div>
+          <p className="eyebrow">KHÁM PHÁ THÊM</p>
+          <h3>Bộ sưu tập & phần thưởng</h3>
+        </div>
+        <span>Đổi nhanh</span>
+      </div>
+      <div className="reward-quick-list">
+        {rewards.map((reward) => {
+          const canAfford = walletBalance === null || walletBalance >= Number(reward.cost);
+          return (
+            <article key={reward.id}>
+              <div className="reward-quick-image">
+                {reward.image_url ? (
+                  <img alt={reward.name} src={reward.image_url} />
+                ) : (
+                  <span>✦</span>
+                )}
+              </div>
+              <div>
+                <strong>{reward.name}</strong>
+                <small>◈ {formatNumber(reward.cost)} CC Balance</small>
+              </div>
+              <button
+                aria-label={`Đổi nhanh ${reward.name}`}
+                className="button-secondary"
+                disabled={pending || !canAfford}
+                onClick={() => onRedeem(reward)}
+                type="button"
+              >
+                {canAfford ? 'Đổi' : 'Chưa đủ'}
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
