@@ -773,12 +773,20 @@ export const notifications = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     title: varchar('title', { length: 200 }).notNull(),
     body: text('body').notNull(),
+    bodyStyle: jsonb('body_style')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
     audience: notificationAudience('audience').notNull(),
     targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'restrict' }),
     targetOrganizationId: uuid('target_organization_id').references(() => organizations.id, {
       onDelete: 'restrict',
     }),
     tickerText: varchar('ticker_text', { length: 300 }),
+    tickerStyle: jsonb('ticker_style')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
     tickerDurationMinutes: integer('ticker_duration_minutes').default(0).notNull(),
     publishAt: timestamp('publish_at', { withTimezone: true }).defaultNow().notNull(),
     active: boolean('active').default(true).notNull(),

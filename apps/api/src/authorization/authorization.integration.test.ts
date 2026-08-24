@@ -795,6 +795,7 @@ describe('authorization matrix', () => {
     const leaderboard = await insights.leaderboard({ page: '1', pageSize: '2' });
     expect(leaderboard.entries).toHaveLength(1);
     expect(leaderboard.entries[0]).toHaveProperty('displayName');
+    expect(leaderboard.entries[0]).toHaveProperty('solvedCount', 0);
     expect(leaderboard.entries[0]).toMatchObject({ presenceStatus: 'ONLINE' });
     expect(leaderboard.entries[0]).not.toHaveProperty('email');
     expect(leaderboard.total).toBe(1);
@@ -804,6 +805,12 @@ describe('authorization matrix', () => {
       sort: 'CC_BALANCE',
     });
     expect(balanceLeaderboard.entries[0]).toHaveProperty('ccBalance');
+    const solvedLeaderboard = await insights.leaderboard({
+      page: '1',
+      pageSize: '2',
+      sort: 'SOLVED',
+    });
+    expect(solvedLeaderboard.entries[0]).toHaveProperty('solvedCount');
     const recognition = await insights.ownRecognition(authUser(ids.member!));
     expect(recognition.profile).toMatchObject({
       id: ids.member!,
@@ -1027,6 +1034,20 @@ describe('authorization matrix', () => {
     expect(recipientOrders.orders).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ gift_direction: 'RECEIVED', gift_message: 'Chúc bạn học tốt!' }),
+      ]),
+    );
+    const giftNotifications = await connection<{ user_id: string; title: string; body: string }[]>`
+      SELECT recipients.user_id, notifications.title, notifications.body
+      FROM notification_recipients AS recipients
+      JOIN notifications ON notifications.id = recipients.notification_id
+      WHERE recipients.user_id IN (${ids.member!}, ${ids.teacher!})
+        AND notifications.title IN ('Bạn vừa được tặng quà', 'Bạn đã tặng quà thành công')
+      ORDER BY notifications.created_at DESC
+    `;
+    expect(giftNotifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ user_id: ids.member!, title: 'Bạn đã tặng quà thành công' }),
+        expect.objectContaining({ user_id: ids.teacher!, title: 'Bạn vừa được tặng quà' }),
       ]),
     );
   });
@@ -1423,9 +1444,11 @@ describe('authorization matrix', () => {
       {
         title: 'Lịch học mới',
         body: 'Lớp chuyển sang học lúc 19:30.',
+        bodyStyle: { fontFamily: 'Georgia', fontSize: 18, color: '#123456' },
         audience: 'ORGANIZATION',
         targetOrganizationId: ids.privateOrg!,
         tickerText: 'Tối nay lớp học lúc 19:30',
+        tickerStyle: { fontWeight: 900, color: '#be185d', textAlign: 'center' },
         tickerDurationMinutes: 60,
         publishAt: new Date(Date.now() - 60_000),
       },
@@ -1435,6 +1458,9 @@ describe('authorization matrix', () => {
     const before = await notifications.summary(ids.member!);
     expect(before.unreadCount).toBe(1);
     expect(before.ticker).toHaveLength(1);
+    expect(before.ticker[0]).toMatchObject({
+      ticker_style: { fontWeight: 900, color: '#be185d', textAlign: 'center' },
+    });
     await notifications.markRead(ids.member!, created.notification.id);
     const after = await notifications.summary(ids.member!);
     expect(after.unreadCount).toBe(0);

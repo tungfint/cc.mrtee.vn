@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 import { api, formatDate } from '../lib/api';
+import { notificationTextStyle, type NotificationTextStyle } from '../lib/notification-style';
 
 interface NotificationItem {
   id: string;
   title: string;
   body: string;
+  body_style: NotificationTextStyle;
   audience: 'ALL' | 'USER' | 'ORGANIZATION';
   ticker_text: string | null;
   publish_at: string;
@@ -80,7 +82,7 @@ export default function NotificationsPage() {
                   <h2>{item.title}</h2>
                   {!item.read_at && <span className="notification-new-label">Mới</span>}
                 </div>
-                <p>{item.body}</p>
+                <p style={notificationTextStyle(item.body_style)}>{item.body}</p>
                 <small>
                   {item.created_by_name ?? 'Hệ thống'} · {formatDate(item.publish_at)}
                 </small>

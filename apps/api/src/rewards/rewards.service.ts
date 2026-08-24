@@ -256,10 +256,19 @@ export class RewardsService {
         const [purchaser] = await transaction<{ display_name: string }[]>`
           SELECT display_name FROM users WHERE id = ${userId}
         `;
+        const [recipient] = await transaction<{ display_name: string }[]>`
+          SELECT display_name FROM users WHERE id = ${recipientUserId}
+        `;
         await this.notifications.createForUser(transaction, {
           userId: recipientUserId,
           title: 'Bạn vừa được tặng quà',
           body: `${purchaser?.display_name ?? 'Một thành viên'} đã tặng bạn “${reward.name}”.${giftMessage ? ` Lời nhắn: ${giftMessage}` : ''}${reward.requires_approval ? ' Quà đang chờ xác nhận.' : ' Quà đã được ghi nhận vào hồ sơ.'}`,
+          createdBy: userId,
+        });
+        await this.notifications.createForUser(transaction, {
+          userId,
+          title: 'Bạn đã tặng quà thành công',
+          body: `Bạn đã tặng “${reward.name}” cho ${recipient?.display_name ?? 'tài khoản được chọn'}.${giftMessage ? ` Lời nhắn: ${giftMessage}` : ''}${reward.requires_approval ? ' Quà đang chờ xác nhận.' : ' Quà đã được ghi nhận vào hồ sơ người nhận.'}`,
           createdBy: userId,
         });
       }

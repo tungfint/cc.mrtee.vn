@@ -5,10 +5,12 @@ import type { AuthUser } from '../auth/auth.types';
 export interface NotificationInput {
   title: string;
   body: string;
+  bodyStyle?: Record<string, unknown> | undefined;
   audience: 'ALL' | 'USER' | 'ORGANIZATION';
   targetUserId?: string | undefined;
   targetOrganizationId?: string | undefined;
   tickerText?: string | undefined;
+  tickerStyle?: Record<string, unknown> | undefined;
   tickerDurationMinutes: number;
   publishAt: Date;
 }
@@ -47,7 +49,8 @@ export class NotificationsService {
           AND notifications.publish_at <= now()
       `,
       this.database.sql`
-        SELECT notifications.id, notifications.ticker_text, notifications.publish_at
+        SELECT notifications.id, notifications.ticker_text, notifications.ticker_style,
+          notifications.publish_at
         FROM notification_recipients AS recipients
         JOIN notifications ON notifications.id = recipients.notification_id
         WHERE recipients.user_id = ${userId} AND notifications.active = true
@@ -68,7 +71,8 @@ export class NotificationsService {
     const [notifications, [counts]] = await Promise.all([
       this.database.sql`
         SELECT notifications.id, notifications.title, notifications.body,
-          notifications.audience, notifications.ticker_text, notifications.publish_at,
+          notifications.audience, notifications.body_style, notifications.ticker_text,
+          notifications.ticker_style, notifications.publish_at,
           notifications.created_at, recipients.read_at, creators.display_name AS created_by_name
         FROM notification_recipients AS recipients
         JOIN notifications ON notifications.id = recipients.notification_id
@@ -145,11 +149,13 @@ export class NotificationsService {
       await this.assertTarget(transaction, input);
       const [notification] = await transaction<{ id: string }[]>`
         INSERT INTO notifications (
-          title, body, audience, target_user_id, target_organization_id,
-          ticker_text, ticker_duration_minutes, publish_at, created_by
+          title, body, body_style, audience, target_user_id, target_organization_id,
+          ticker_text, ticker_style, ticker_duration_minutes, publish_at, created_by
         ) VALUES (
-          ${input.title}, ${input.body}, ${input.audience}, ${input.targetUserId ?? null},
+          ${input.title}, ${input.body}, ${JSON.stringify(input.bodyStyle ?? {})}::text::jsonb,
+          ${input.audience}, ${input.targetUserId ?? null},
           ${input.targetOrganizationId ?? null}, ${input.tickerText || null},
+          ${JSON.stringify(input.tickerStyle ?? {})}::text::jsonb,
           ${input.tickerText ? input.tickerDurationMinutes : 0},
           ${input.publishAt.toISOString()}, ${actor.userId}
         ) RETURNING *

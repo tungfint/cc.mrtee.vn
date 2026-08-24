@@ -457,6 +457,9 @@ export default function AdminPage() {
   const [leaderboardOrganizationId, setLeaderboardOrganizationId] = useState('');
   const [syncScope, setSyncScope] = useState<'USER' | 'ORGANIZATION' | 'ALL'>('USER');
   const [syncUserId, setSyncUserId] = useState('');
+  const [syncSearch, setSyncSearch] = useState('');
+  const [syncStatusFilter, setSyncStatusFilter] = useState('ALL');
+  const [syncPage, setSyncPage] = useState(1);
   const [studentClassFilter, setStudentClassFilter] = useState('ALL');
   const [accountSearch, setAccountSearch] = useState('');
   const [accountRiskFilter, setAccountRiskFilter] = useState('ALL');
@@ -472,6 +475,9 @@ export default function AdminPage() {
   useEffect(() => {
     if (isSystemAdmin && tab === 'members') setTab('accounts');
   }, [isSystemAdmin, tab]);
+  useEffect(() => {
+    setSyncPage(1);
+  }, [organizationId, syncScope, syncSearch, syncStatusFilter]);
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => api<{ memberships: Membership[] }>('/me'),
@@ -878,6 +884,43 @@ export default function AdminPage() {
           })) ?? []);
   const syncEligibleMembers = syncAccounts.filter(
     (member) => member.verification_status && member.verification_status !== 'UNVERIFIED',
+  );
+  const syncStatusPriority: Record<string, number> = {
+    UNLINKED: 0,
+    UNVERIFIED: 1,
+    INITIALIZING: 2,
+    ERROR: 3,
+    QUEUED: 4,
+    SYNCING: 5,
+    READY: 6,
+    INACTIVE: 7,
+  };
+  const normalizedSyncSearch = syncSearch.trim().toLocaleLowerCase('vi');
+  const filteredSyncAccounts = [...syncAccounts]
+    .filter((member) => {
+      const status = member.sync_status ?? 'UNLINKED';
+      if (syncStatusFilter !== 'ALL' && status !== syncStatusFilter) return false;
+      if (!normalizedSyncSearch) return true;
+      return [member.display_name, member.codeforces_handle ?? '', member.class_label].some(
+        (value) => value.toLocaleLowerCase('vi').includes(normalizedSyncSearch),
+      );
+    })
+    .sort((left, right) => {
+      const leftStatus = left.sync_status ?? 'UNLINKED';
+      const rightStatus = right.sync_status ?? 'UNLINKED';
+      const byStatus =
+        (syncStatusPriority[leftStatus] ?? 99) - (syncStatusPriority[rightStatus] ?? 99);
+      if (byStatus !== 0) return byStatus;
+      if (!left.last_sync_at && right.last_sync_at) return -1;
+      if (left.last_sync_at && !right.last_sync_at) return 1;
+      return left.display_name.localeCompare(right.display_name, 'vi');
+    });
+  const syncPageSize = 5;
+  const syncPageCount = Math.max(1, Math.ceil(filteredSyncAccounts.length / syncPageSize));
+  const visibleSyncPage = Math.min(syncPage, syncPageCount);
+  const paginatedSyncAccounts = filteredSyncAccounts.slice(
+    (visibleSyncPage - 1) * syncPageSize,
+    visibleSyncPage * syncPageSize,
   );
   const pointTargets = isSuperAdmin
     ? (users.data?.users.filter((item) => item.status === 'ACTIVE') ?? [])
@@ -2687,14 +2730,46 @@ export default function AdminPage() {
               </form>
               <div className="panel overflow-hidden">
                 <div className="management-header">
-                  <strong>Trạng thái đồng bộ</strong>
-                  <span>
-                    {isSystemAdmin && syncScope !== 'ORGANIZATION'
-                      ? 'Tất cả học sinh, kể cả chưa xếp lớp'
-                      : selectedOrganization?.organization_name}
-                  </span>
+                  <div>
+                    <strong>Trạng thái đồng bộ</strong>
+                    <span>
+                      {isSystemAdmin && syncScope !== 'ORGANIZATION'
+                        ? 'Tất cả học sinh, kể cả chưa xếp lớp'
+                        : selectedOrganization?.organization_name}
+                    </span>
+                  </div>
+                  <div className="sync-account-filters">
+                    <input
+                      aria-label="Tìm tài khoản đồng bộ"
+                      onChange={(event) => setSyncSearch(event.target.value)}
+                      placeholder="Tìm tên, CF, lớp…"
+                      type="search"
+                      value={syncSearch}
+                    />
+                    <select
+                      aria-label="Lọc trạng thái đồng bộ"
+                      onChange={(event) => setSyncStatusFilter(event.target.value)}
+                      value={syncStatusFilter}
+                    >
+                      <option value="ALL">Tất cả trạng thái</option>
+                      <option value="UNLINKED">Chưa liên kết CF</option>
+                      <option value="UNVERIFIED">Chưa xác minh</option>
+                      <option value="INITIALIZING">Chưa đồng bộ lần đầu</option>
+                      <option value="ERROR">Đồng bộ lỗi</option>
+                      <option value="QUEUED">Đang chờ</option>
+                      <option value="SYNCING">Đang đồng bộ</option>
+                      <option value="READY">Đã đồng bộ</option>
+                      <option value="INACTIVE">Ngừng hoạt động</option>
+                    </select>
+                  </div>
                 </div>
-                {syncAccounts.map((member) => (
+                {!paginatedSyncAccounts.length && (
+                  <EmptyState
+                    detail="Thử thay đổi từ khóa hoặc bộ lọc trạng thái."
+                    title="Không có tài khoản phù hợp"
+                  />
+                )}
+                {paginatedSyncAccounts.map((member) => (
                   <div className="sync-account-row" key={member.user_id}>
                     <div className="member">
                       <Avatar
@@ -2719,6 +2794,30 @@ export default function AdminPage() {
                     </div>
                   </div>
                 ))}
+                {filteredSyncAccounts.length > syncPageSize && (
+                  <div className="sync-account-pagination">
+                    <button
+                      className="button-secondary"
+                      disabled={visibleSyncPage <= 1}
+                      onClick={() => setSyncPage((value) => Math.max(1, value - 1))}
+                      type="button"
+                    >
+                      ← Trước
+                    </button>
+                    <span>
+                      Trang {visibleSyncPage}/{syncPageCount} · {filteredSyncAccounts.length} học
+                      sinh
+                    </span>
+                    <button
+                      className="button-secondary"
+                      disabled={visibleSyncPage >= syncPageCount}
+                      onClick={() => setSyncPage((value) => Math.min(syncPageCount, value + 1))}
+                      type="button"
+                    >
+                      Sau →
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="panel p-6 lg:col-span-2">
                 <div className="section-heading">

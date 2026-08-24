@@ -32,6 +32,7 @@ interface LeaderboardRow {
   cc_level: string;
   cc_point: string;
   cc_balance: string;
+  solved_count: number;
   current_streak: number;
   longest_streak: number;
   activity_risk_level: string;
@@ -57,7 +58,7 @@ interface AchievementRow {
 const leaderboardQuery = z.object({
   organizationId: z.string().uuid().optional(),
   seasonId: z.string().uuid().optional(),
-  sort: z.enum(['CC_LEVEL', 'CC_POINT', 'CC_BALANCE', 'STREAK']).default('CC_LEVEL'),
+  sort: z.enum(['CC_LEVEL', 'CC_POINT', 'CC_BALANCE', 'STREAK', 'SOLVED']).default('CC_LEVEL'),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
   shareKey: z.string().trim().min(20).max(180).optional(),
@@ -343,6 +344,7 @@ export class InsightsController {
         COALESCE(skill.cc_level, 800)::text AS cc_level,
         COALESCE(points.cc_point, 0)::text AS cc_point,
         COALESCE(wallet.balance, 0)::text AS cc_balance,
+        COALESCE(solves.solved_count, 0)::int AS solved_count,
         COALESCE(streak.current_streak, 0)::int AS current_streak,
         COALESCE(streak.longest_streak, 0)::int AS longest_streak,
         CASE
@@ -357,6 +359,10 @@ export class InsightsController {
       LEFT JOIN user_skill_state AS skill ON skill.user_id = users.id
       LEFT JOIN codeforces_accounts AS accounts ON accounts.user_id = users.id
       LEFT JOIN user_wallets AS wallet ON wallet.user_id = users.id
+      LEFT JOIN LATERAL (
+        SELECT count(*)::int AS solved_count
+        FROM user_problem_solves WHERE user_id = users.id
+      ) AS solves ON true
       LEFT JOIN LATERAL (
         SELECT max(last_seen_at) AS last_seen_at FROM auth_sessions
         WHERE user_id = users.id AND revoked_at IS NULL AND expires_at > now()
@@ -410,6 +416,7 @@ export class InsightsController {
         CASE WHEN ${input.sort} = 'CC_POINT' THEN COALESCE(points.cc_point, 0) END DESC,
         CASE WHEN ${input.sort} = 'CC_BALANCE' THEN COALESCE(wallet.balance, 0) END DESC,
         CASE WHEN ${input.sort} = 'STREAK' THEN COALESCE(streak.current_streak, 0) END DESC,
+        CASE WHEN ${input.sort} = 'SOLVED' THEN COALESCE(solves.solved_count, 0) END DESC,
         COALESCE(skill.cc_level, 800) DESC, users.id
       LIMIT ${input.pageSize} OFFSET ${offset}
     `;
@@ -443,6 +450,7 @@ export class InsightsController {
         ccLevel: row.cc_level,
         ccPoint: row.cc_point,
         ccBalance: row.cc_balance,
+        solvedCount: row.solved_count,
         streak: row.current_streak,
         longestStreak: row.longest_streak,
         activityRiskLevel: row.activity_risk_level,

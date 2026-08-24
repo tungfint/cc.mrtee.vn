@@ -1,21 +1,140 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { api, formatDate } from '../lib/api';
+import {
+  notificationTextStyle,
+  type NotificationTextStyle as TextStyle,
+} from '../lib/notification-style';
 import { EmptyState, ErrorState, LoadingState } from './ui';
 
 interface NotificationAdminItem {
   id: string;
   title: string;
   body: string;
+  body_style: TextStyle;
   audience: 'ALL' | 'USER' | 'ORGANIZATION';
   target_user_name: string | null;
   target_organization_name: string | null;
   ticker_text: string | null;
+  ticker_style: TextStyle;
   ticker_duration_minutes: number;
   publish_at: string;
   active: boolean;
   recipient_count: number;
   read_count: number;
+}
+
+const defaultBodyStyle: Required<TextStyle> = {
+  fontFamily: 'Be Vietnam Pro',
+  fontSize: 14,
+  color: '#475569',
+  fontWeight: 400,
+  fontStyle: 'normal',
+  textAlign: 'left',
+};
+const defaultTickerStyle: Required<TextStyle> = {
+  ...defaultBodyStyle,
+  fontSize: 14,
+  color: '#be185d',
+  fontWeight: 800,
+};
+
+function TextStyleEditor({
+  label,
+  value,
+  onChange,
+  style,
+  onStyleChange,
+  maxLength,
+  rows,
+  required = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  style: Required<TextStyle>;
+  onStyleChange: (style: Required<TextStyle>) => void;
+  maxLength: number;
+  rows: number;
+  required?: boolean;
+}) {
+  const update = <Key extends keyof Required<TextStyle>>(
+    key: Key,
+    nextValue: Required<TextStyle>[Key],
+  ) => onStyleChange({ ...style, [key]: nextValue });
+  return (
+    <div className="field full notification-editor">
+      <span>{label}</span>
+      <span className="notification-editor-toolbar" aria-label={`Định dạng ${label}`}>
+        <select
+          aria-label="Phông chữ"
+          onChange={(event) =>
+            update('fontFamily', event.target.value as Required<TextStyle>['fontFamily'])
+          }
+          value={style.fontFamily}
+        >
+          <option value="Be Vietnam Pro">Be Vietnam Pro</option>
+          <option value="Arial">Arial</option>
+          <option value="Georgia">Georgia</option>
+          <option value="monospace">Monospace</option>
+        </select>
+        <select
+          aria-label="Cỡ chữ"
+          onChange={(event) => update('fontSize', Number(event.target.value))}
+          value={style.fontSize}
+        >
+          {[12, 14, 16, 18, 20, 24, 28, 30].map((size) => (
+            <option key={size} value={size}>
+              {size}px
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label="Màu chữ"
+          onChange={(event) => update('color', event.target.value)}
+          title="Màu chữ"
+          type="color"
+          value={style.color}
+        />
+        <button
+          className={style.fontWeight >= 800 ? 'active' : ''}
+          onClick={() => update('fontWeight', style.fontWeight >= 800 ? 400 : 800)}
+          title="Chữ đậm"
+          type="button"
+        >
+          B
+        </button>
+        <button
+          className={style.fontStyle === 'italic' ? 'active italic' : 'italic'}
+          onClick={() => update('fontStyle', style.fontStyle === 'italic' ? 'normal' : 'italic')}
+          title="Chữ nghiêng"
+          type="button"
+        >
+          I
+        </button>
+        {(['left', 'center', 'right'] as const).map((align) => (
+          <button
+            className={style.textAlign === align ? 'active' : ''}
+            key={align}
+            onClick={() => update('textAlign', align)}
+            title={align === 'left' ? 'Căn trái' : align === 'center' ? 'Căn giữa' : 'Căn phải'}
+            type="button"
+          >
+            {align === 'left' ? '≡←' : align === 'center' ? '≡' : '→≡'}
+          </button>
+        ))}
+      </span>
+      <textarea
+        aria-label={label}
+        maxLength={maxLength}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        rows={rows}
+        style={notificationTextStyle(style)}
+        value={value}
+      />
+    </div>
+  );
 }
 
 export function AdminNotificationsPanel({
@@ -28,12 +147,15 @@ export function AdminNotificationsPanel({
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [bodyStyle, setBodyStyle] = useState<Required<TextStyle>>(defaultBodyStyle);
   const [audience, setAudience] = useState<'ALL' | 'USER' | 'ORGANIZATION'>('ALL');
   const [targetUserId, setTargetUserId] = useState('');
   const [targetOrganizationId, setTargetOrganizationId] = useState('');
   const [publishAt, setPublishAt] = useState('');
   const [tickerText, setTickerText] = useState('');
+  const [tickerStyle, setTickerStyle] = useState<Required<TextStyle>>(defaultTickerStyle);
   const [tickerDuration, setTickerDuration] = useState('60');
+  const [historyFilter, setHistoryFilter] = useState('ALL');
   const notifications = useQuery({
     queryKey: ['admin-notifications'],
     queryFn: () => api<{ notifications: NotificationAdminItem[] }>('/admin/notifications'),
@@ -45,10 +167,12 @@ export function AdminNotificationsPanel({
         body: JSON.stringify({
           title,
           body,
+          bodyStyle,
           audience,
           ...(audience === 'USER' ? { targetUserId } : {}),
           ...(audience === 'ORGANIZATION' ? { targetOrganizationId } : {}),
           tickerText,
+          tickerStyle,
           tickerDurationMinutes: tickerText ? Number(tickerDuration) : 0,
           publishAt: publishAt ? new Date(publishAt).toISOString() : new Date().toISOString(),
         }),
@@ -57,6 +181,8 @@ export function AdminNotificationsPanel({
       setTitle('');
       setBody('');
       setTickerText('');
+      setBodyStyle(defaultBodyStyle);
+      setTickerStyle(defaultTickerStyle);
       setPublishAt('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-notifications'] }),
@@ -77,6 +203,14 @@ export function AdminNotificationsPanel({
     event.preventDefault();
     create.mutate();
   };
+  const visibleNotifications =
+    notifications.data?.notifications.filter((item) => {
+      if (historyFilter === 'ALL') return true;
+      if (historyFilter === 'TICKER') return Boolean(item.ticker_text);
+      if (historyFilter === 'SCHEDULED') return new Date(item.publish_at).getTime() > Date.now();
+      if (historyFilter === 'ARCHIVED') return !item.active;
+      return item.audience === (historyFilter === 'AUDIENCE_ALL' ? 'ALL' : historyFilter);
+    }) ?? [];
 
   return (
     <section className="admin-notification-layout">
@@ -93,16 +227,16 @@ export function AdminNotificationsPanel({
               value={title}
             />
           </label>
-          <label className="field full">
-            <span>Nội dung</span>
-            <textarea
-              maxLength={5000}
-              onChange={(event) => setBody(event.target.value)}
-              required
-              rows={5}
-              value={body}
-            />
-          </label>
+          <TextStyleEditor
+            label="Nội dung"
+            maxLength={5000}
+            onChange={setBody}
+            onStyleChange={setBodyStyle}
+            required
+            rows={5}
+            style={bodyStyle}
+            value={body}
+          />
           <label className="field">
             <span>Người nhận</span>
             <select
@@ -158,14 +292,15 @@ export function AdminNotificationsPanel({
               value={publishAt}
             />
           </label>
-          <label className="field full">
-            <span>Dòng chạy quan trọng (không bắt buộc)</span>
-            <input
-              maxLength={300}
-              onChange={(event) => setTickerText(event.target.value)}
-              value={tickerText}
-            />
-          </label>
+          <TextStyleEditor
+            label="Dòng chạy quan trọng (không bắt buộc)"
+            maxLength={300}
+            onChange={setTickerText}
+            onStyleChange={setTickerStyle}
+            rows={2}
+            style={tickerStyle}
+            value={tickerText}
+          />
           {tickerText && (
             <label className="field">
               <span>Thời lượng dòng chạy (phút)</span>
@@ -190,21 +325,40 @@ export function AdminNotificationsPanel({
       </form>
 
       <div className="panel p-6">
-        <p className="eyebrow">LỊCH SỬ THÔNG BÁO</p>
-        <h2 className="mt-2 text-xl font-black">Đã gửi và đang chờ</h2>
+        <div className="notification-history-heading">
+          <div>
+            <p className="eyebrow">LỊCH SỬ THÔNG BÁO</p>
+            <h2 className="mt-2 text-xl font-black">Đã gửi và đang chờ</h2>
+          </div>
+          <label className="field compact-field">
+            <span>Lọc loại tin</span>
+            <select
+              onChange={(event) => setHistoryFilter(event.target.value)}
+              value={historyFilter}
+            >
+              <option value="ALL">Tất cả</option>
+              <option value="AUDIENCE_ALL">Toàn hệ thống</option>
+              <option value="ORGANIZATION">Theo lớp</option>
+              <option value="USER">Cá nhân</option>
+              <option value="TICKER">Có dòng chạy</option>
+              <option value="SCHEDULED">Đang chờ gửi</option>
+              <option value="ARCHIVED">Đã dừng</option>
+            </select>
+          </label>
+        </div>
         {notifications.isPending ? (
           <LoadingState label="Đang tải thông báo…" />
         ) : notifications.error ? (
           <ErrorState error={notifications.error} retry={() => void notifications.refetch()} />
-        ) : !notifications.data?.notifications.length ? (
+        ) : !visibleNotifications.length ? (
           <EmptyState title="Chưa có thông báo" detail="Thông báo được tạo sẽ xuất hiện tại đây." />
         ) : (
           <div className="admin-notification-list mt-5">
-            {notifications.data.notifications.map((item) => (
+            {visibleNotifications.map((item) => (
               <article className={item.active ? '' : 'archived'} key={item.id}>
                 <div>
                   <strong>{item.title}</strong>
-                  <p>{item.body}</p>
+                  <p style={notificationTextStyle(item.body_style)}>{item.body}</p>
                   <small>
                     {item.audience === 'ALL'
                       ? 'Tất cả'
@@ -213,7 +367,10 @@ export function AdminNotificationsPanel({
                     {formatDate(item.publish_at)} · đã đọc {item.read_count}/{item.recipient_count}
                   </small>
                   {item.ticker_text && (
-                    <span className="notification-ticker-preview">
+                    <span
+                      className="notification-ticker-preview"
+                      style={notificationTextStyle(item.ticker_style)}
+                    >
                       📣 {item.ticker_text} · {item.ticker_duration_minutes} phút
                     </span>
                   )}

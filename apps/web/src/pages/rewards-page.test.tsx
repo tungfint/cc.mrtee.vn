@@ -1,5 +1,5 @@
 ﻿import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../lib/api';
@@ -12,7 +12,7 @@ vi.mock('../lib/api', async (importOriginal) => {
 
 describe('RewardsPage', () => {
   beforeEach(() => {
-    vi.mocked(api).mockResolvedValue({
+    const catalog = {
       walletBalance: '600.00',
       rewards: [
         {
@@ -70,6 +70,22 @@ describe('RewardsPage', () => {
           requires_approval: false,
         },
       ],
+    };
+    vi.mocked(api).mockImplementation((path) => {
+      if (path === '/rewards/gift-recipients') {
+        return Promise.resolve({
+          users: [
+            {
+              id: '11111111-1111-4111-8111-111111111112',
+              display_name: 'Bạn học Demo',
+              avatar_url: null,
+              codeforces_handle: 'demo_friend',
+              current_rating: 1200,
+            },
+          ],
+        });
+      }
+      return Promise.resolve(catalog);
     });
   });
 
@@ -97,5 +113,26 @@ describe('RewardsPage', () => {
     expect(screen.getByText(/10\.000/)).toBeInTheDocument();
     expect(screen.getAllByText(/600 CC Balance/)).toHaveLength(1);
     expect(screen.getByText(/không cần chờ Admin duyệt/i)).toBeInTheDocument();
+  });
+
+  it('opens a gift dialog with recipient and message fields', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <RewardsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText('Mèo Mầm Code');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Tặng bạn bè' })[0]!);
+
+    expect(await screen.findByRole('dialog')).toHaveAccessibleName(
+      'Tặng “Mèo Mầm Code” cho bạn bè',
+    );
+    expect(screen.getByLabelText('Người nhận')).toBeInTheDocument();
+    expect(screen.getByLabelText('Lời nhắn (không bắt buộc)')).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /Bạn học Demo/ })).toBeInTheDocument();
   });
 });

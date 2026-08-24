@@ -17,14 +17,31 @@ const listSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().min(5).max(50).default(20),
 });
+const textStyleSchema = z.object({
+  fontFamily: z.enum(['Be Vietnam Pro', 'Arial', 'Georgia', 'monospace']).default('Be Vietnam Pro'),
+  fontSize: z.coerce.number().int().min(12).max(30).default(14),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default('#475569'),
+  fontWeight: z.coerce
+    .number()
+    .int()
+    .refine((value) => [400, 600, 800, 900].includes(value))
+    .default(400),
+  fontStyle: z.enum(['normal', 'italic']).default('normal'),
+  textAlign: z.enum(['left', 'center', 'right']).default('left'),
+});
 const createSchema = z
   .object({
     title: z.string().trim().min(3).max(200),
     body: z.string().trim().min(1).max(5000),
+    bodyStyle: textStyleSchema.optional(),
     audience: z.enum(['ALL', 'USER', 'ORGANIZATION']),
     targetUserId: z.string().uuid().optional(),
     targetOrganizationId: z.string().uuid().optional(),
     tickerText: z.string().trim().max(300).optional().default(''),
+    tickerStyle: textStyleSchema.optional(),
     tickerDurationMinutes: z.coerce.number().int().min(0).max(10080).default(0),
     publishAt: z.coerce.date().default(() => new Date()),
   })

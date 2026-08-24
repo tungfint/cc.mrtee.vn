@@ -383,22 +383,22 @@ export class RewardEngineService {
     const [activity] = await transaction<{ high_delta_count: number; recent_count: number }[]>`
       SELECT
         count(*) FILTER (
-          WHERE problem_rating_snapshot - cc_level_before >= 300
+          WHERE problem_rating_snapshot - cc_level_before > 500
             AND event_at >= ${solvedAt.toISOString()}::timestamptz - interval '24 hours'
         )::int AS high_delta_count,
         count(*) FILTER (
-          WHERE event_at >= ${solvedAt.toISOString()}::timestamptz - interval '2 hours'
+          WHERE event_at >= ${solvedAt.toISOString()}::timestamptz - interval '30 minutes'
         )::int AS recent_count
       FROM point_transactions
       WHERE user_id = ${userId} AND type = 'EARN'
         AND event_at <= ${solvedAt.toISOString()}
     `;
     const signals: Array<{ code: string; score: number; summary: string; evidence: object }> = [];
-    if (delta >= 300) {
+    if (delta > 500) {
       signals.push({
         code: 'HIGH_DIFFICULTY_DELTA',
         score: 2,
-        summary: 'Có bài giải cao hơn CC Level từ 300 điểm trở lên',
+        summary: 'Có bài giải cao hơn CC Level trên 500 điểm',
         evidence: { delta: round2(delta), problemRating, levelBefore },
       });
     }
@@ -406,16 +406,16 @@ export class RewardEngineService {
       signals.push({
         code: 'HIGH_DELTA_BURST_24H',
         score: 3,
-        summary: 'Có nhiều bài vượt trình trong vòng 24 giờ',
+        summary: 'Có nhiều bài cao hơn CC Level trên 500 điểm trong vòng 24 giờ',
         evidence: { count: activity?.high_delta_count, windowHours: 24 },
       });
     }
-    if ((activity?.recent_count ?? 0) >= 12) {
+    if ((activity?.recent_count ?? 0) >= 5) {
       signals.push({
-        code: 'SOLVE_BURST_2H',
+        code: 'SOLVE_BURST_30M',
         score: 3,
-        summary: 'Có nhiều bài được ghi nhận trong thời gian ngắn',
-        evidence: { count: activity?.recent_count, windowHours: 2 },
+        summary: 'Có từ 5 bài Accepted liên tục trong vòng 30 phút',
+        evidence: { count: activity?.recent_count, windowMinutes: 30 },
       });
     }
     const createdSignals: string[] = [];

@@ -1,6 +1,6 @@
 ﻿import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { EmptyState, ErrorState, LoadingState, PageTitle } from '../components/ui';
 import { api, formatNumber, formatVnd } from '../lib/api';
 
@@ -90,6 +90,14 @@ export default function RewardsPage() {
       ]);
     },
   });
+  useEffect(() => {
+    if (!giftReward) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !gift.isPending) setGiftReward(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [gift.isPending, giftReward]);
   const cashRewards =
     rewards.data?.rewards.filter((reward) => reward.cash_value_vnd !== null) ?? [];
   const mascotRewards =
@@ -136,59 +144,77 @@ export default function RewardsPage() {
       {gift.isSuccess && <p className="notice success">Đã gửi quà tới tài khoản được chọn.</p>}
       {gift.error && <p className="notice error">{gift.error.message}</p>}
       {giftReward && (
-        <section className="panel reward-gift-panel p-6">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">TẶNG QUÀ</p>
-              <h2>Tặng “{giftReward.name}” cho tài khoản khác</h2>
-              <p>
-                Bạn thanh toán {formatNumber(giftReward.cost)} CC Balance; quà sẽ thuộc sở hữu của
-                người nhận.
-              </p>
-            </div>
-            <button className="button-secondary" onClick={() => setGiftReward(null)} type="button">
-              Đóng
-            </button>
-          </div>
-          <div className="form-grid mt-4">
-            <label className="field">
-              <span>Người nhận</span>
-              <select
-                onChange={(event) => setGiftRecipientId(event.target.value)}
-                required
-                value={giftRecipientId}
-              >
-                <option value="">Chọn tài khoản</option>
-                {giftRecipients.data?.users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.display_name}
-                    {user.codeforces_handle ? ` · @${user.codeforces_handle}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span>Lời nhắn (không bắt buộc)</span>
-              <input
-                maxLength={500}
-                onChange={(event) => setGiftMessage(event.target.value)}
-                value={giftMessage}
-              />
-            </label>
-          </div>
-          <button
-            className="button-primary mt-4"
-            disabled={!giftRecipientId || gift.isPending}
-            onClick={() => {
-              if (!window.confirm(`Xác nhận tặng “${giftReward.name}” cho tài khoản đã chọn?`))
-                return;
-              gift.mutate();
-            }}
-            type="button"
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target && !gift.isPending) setGiftReward(null);
+          }}
+        >
+          <section
+            aria-labelledby="gift-dialog-title"
+            aria-modal="true"
+            className="panel reward-gift-panel p-6"
+            role="dialog"
           >
-            {gift.isPending ? 'Đang gửi quà…' : 'Xác nhận tặng quà'}
-          </button>
-        </section>
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">TẶNG QUÀ</p>
+                <h2 id="gift-dialog-title">Tặng “{giftReward.name}” cho bạn bè</h2>
+                <p>
+                  Bạn thanh toán {formatNumber(giftReward.cost)} CC Balance; quà sẽ thuộc sở hữu của
+                  người nhận.
+                </p>
+              </div>
+              <button
+                aria-label="Đóng"
+                className="button-secondary"
+                disabled={gift.isPending}
+                onClick={() => setGiftReward(null)}
+                type="button"
+              >
+                Đóng
+              </button>
+            </div>
+            <div className="form-grid mt-4">
+              <label className="field">
+                <span>Người nhận</span>
+                <select
+                  onChange={(event) => setGiftRecipientId(event.target.value)}
+                  required
+                  value={giftRecipientId}
+                >
+                  <option value="">Chọn tài khoản</option>
+                  {giftRecipients.data?.users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.display_name}
+                      {user.codeforces_handle ? ` · @${user.codeforces_handle}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Lời nhắn (không bắt buộc)</span>
+                <input
+                  maxLength={500}
+                  onChange={(event) => setGiftMessage(event.target.value)}
+                  value={giftMessage}
+                />
+              </label>
+            </div>
+            <button
+              className="button-primary mt-4"
+              disabled={!giftRecipientId || gift.isPending}
+              onClick={() => {
+                if (!window.confirm(`Xác nhận tặng “${giftReward.name}” cho tài khoản đã chọn?`))
+                  return;
+                gift.mutate();
+              }}
+              type="button"
+            >
+              {gift.isPending ? 'Đang gửi quà…' : 'Xác nhận tặng quà'}
+            </button>
+          </section>
+        </div>
       )}
       {rewards.isPending ? (
         <LoadingState label="Đang tải quà…" />

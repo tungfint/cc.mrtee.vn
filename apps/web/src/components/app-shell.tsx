@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { api, type SessionUser } from '../lib/api';
 import { Avatar } from './ui';
+import { notificationTextStyle, type NotificationTextStyle } from '../lib/notification-style';
 
 const links = [
   { to: '/', label: 'Tổng quan', icon: '◫', end: true },
@@ -34,7 +35,12 @@ export function AppShell({ user }: { user: SessionUser }) {
     queryFn: () =>
       api<{
         unreadCount: number;
-        ticker: { id: string; ticker_text: string; publish_at: string }[];
+        ticker: {
+          id: string;
+          ticker_text: string;
+          ticker_style: NotificationTextStyle;
+          publish_at: string;
+        }[];
       }>('/notifications/summary'),
     refetchInterval: 60_000,
   });
@@ -176,7 +182,12 @@ export function AppShell({ user }: { user: SessionUser }) {
             <span aria-hidden>📣</span>
             <span className="notification-ticker-window">
               <span className="notification-ticker-track">
-                {notificationSummary.data.ticker.map((item) => item.ticker_text).join('  ◆  ')}
+                {notificationSummary.data.ticker.map((item, index) => (
+                  <span key={item.id} style={notificationTextStyle(item.ticker_style)}>
+                    {index > 0 ? '  ◆  ' : ''}
+                    {item.ticker_text}
+                  </span>
+                ))}
               </span>
             </span>
             <strong>Xem</strong>

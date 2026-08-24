@@ -1,0 +1,2 @@
+ALTER TABLE "notifications" ADD COLUMN "body_style" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "notifications" ADD COLUMN "ticker_style" jsonb DEFAULT '{}'::jsonb NOT NULL;

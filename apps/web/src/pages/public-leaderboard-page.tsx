@@ -11,7 +11,7 @@ import {
 } from '../components/ui';
 import { api, formatNumber } from '../lib/api';
 
-type RankingMetric = 'CC_LEVEL' | 'CC_POINT' | 'CC_BALANCE' | 'STREAK';
+type RankingMetric = 'CC_LEVEL' | 'CC_POINT' | 'CC_BALANCE' | 'STREAK' | 'SOLVED';
 interface SharedBoard {
   entries: {
     rank: number;
@@ -23,6 +23,7 @@ interface SharedBoard {
     ccLevel: string;
     ccPoint: string;
     ccBalance: string;
+    solvedCount: number;
     streak: number;
     activityRiskLevel: 'NORMAL' | 'REVIEW' | 'PRIORITY';
     activityRiskScore: number;
@@ -37,6 +38,7 @@ const metrics: { id: RankingMetric; label: string; icon: string }[] = [
   { id: 'CC_POINT', label: 'CC Point', icon: '◆' },
   { id: 'CC_BALANCE', label: 'CC Balance', icon: '◈' },
   { id: 'STREAK', label: 'Streak', icon: '🔥' },
+  { id: 'SOLVED', label: 'Số bài', icon: '✓' },
 ];
 
 export default function PublicLeaderboardPage() {
@@ -111,6 +113,7 @@ export default function PublicLeaderboardPage() {
               <span>CC Point</span>
               <span>CC Balance</span>
               <span>Streak</span>
+              <span>Số bài</span>
             </div>
             {board.data?.entries.map((entry) => (
               <div
@@ -169,6 +172,7 @@ export default function PublicLeaderboardPage() {
                 <strong data-label="CC Point">◆ {formatNumber(entry.ccPoint, 2)}</strong>
                 <strong data-label="CC Balance">◈ {formatNumber(entry.ccBalance, 2)}</strong>
                 <span data-label="Streak">🔥 {entry.streak} ngày</span>
+                <strong data-label="Số bài">✓ {entry.solvedCount}</strong>
               </div>
             ))}
           </div>
